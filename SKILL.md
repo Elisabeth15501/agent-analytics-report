@@ -286,7 +286,7 @@ python scripts/generate_report.py --period week --output report.md
 |------|------|
 | 活跃天数 | 7 天 |
 | 会话总数 | 18 个 |
-| 总 Token 消耗 | 26.98M |
+| 总 Token 消耗 | 14.91M |
 
 ## 二、Token 消耗可视化
 

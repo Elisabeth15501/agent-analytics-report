@@ -26,8 +26,8 @@ python scripts/generate_report.py data.json --output 使用情况报告.md
 |------|------|
 | 活跃天数 | 7 天 |
 | 会话总数 | 18 个 |
-| 总 Token 消耗 | 26.98M |
-| 实际花费 | ¥44.73 |
+| 总 Token 消耗 | 14.91M |
+| 实际花费 | ¥10.26 |
 ```
 
 ## 示例 2：指定月份出月报
