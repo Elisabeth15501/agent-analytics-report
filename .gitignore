@@ -1,0 +1,87 @@
+# ============================================================
+# agent-analytics-report — .gitignore
+# 说明：本技能发布到 SkillHub 时，平台会自动排除 __pycache__/.pyc/.git。
+# 本文件面向 Git（GitHub 等），用于避免把本地数据/评测占位/临时产物误提交。
+#
+# 【必须提交的交付物】（请勿忽略）：
+#   SKILL.md  metadata.json  LICENSE  scripts/  references/  examples/
+# ============================================================
+
+# ---- 用户本地自定义模型覆盖（P0：严禁发布！）----
+# pricing.local.json 是用户本机由 Agent 写入的自定义模型单价覆盖文件，
+# 不进发布包、skillhub upgrade 升级时也不会被覆盖。开发者发布前务必确认本机无此文件，
+# 否则会把你的自定义模型（或测试占位）一并发布出去。
+pricing.local.json
+
+# ---- 本地评测占位（goodskills / TRACE 评测器读取，非发布物）----
+# 内容为 metadata.json 的副本，仅本地评测用，平台打包时会排除，勿提交。
+_meta.json
+
+# ---- 私人 / 采集输出数据（含用量与成本，严禁上传）----
+data.json
+data_*.json
+*.analysis.json
+
+# ---- 生成的报告产物（含个人使用记录，严禁上传）----
+report.md
+report.html
+report.json
+report_realtime.md
+token_report.md
+usage_report*.md
+usage_report*.html
+*使用情况报告*.md
+*使用情况报告*.html
+使用状况报告_*.md
+使用状况报告_*.html
+*使用状况报告*.md
+*使用状况报告*.html
+验证报告*.md
+验证报告*.html
+
+# ---- 中文测试报告产物（含个人使用记录，严禁上传）----
+测试报告*.md
+测试报告*.html
+测试报告*.json
+
+# ---- 测试数据 ----
+test_data.json
+*.test.json
+
+# ---- 临时 / 一次性脚本（开发过程残留）----
+html_fixed.py
+*.tmp.py
+scratch*.py
+
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+.Python
+venv/
+env/
+.venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+.ruff_cache/
+
+# ---- Node.js（备用，当前未使用）----
+node_modules/
+dist/
+build/
+
+# ---- 日志 ----
+*.log
+
+# ---- IDE / 编辑器 ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ---- 系统文件 ----
+.DS_Store
+Thumbs.db
+Desktop.ini

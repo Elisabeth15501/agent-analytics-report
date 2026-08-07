@@ -1,0 +1,93 @@
+{
+  "name": "Agent 用量分析报告",
+  "name_en": "Agent Usage Analytics Report",
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "description": "生成 Agent 用量与成本分析报告（日/周/月/年），覆盖 Token 消耗、任务类型、技能使用与自动化运行；首发支持 WorkBuddy，规划兼容更多 Agent。",
+  "core_capabilities": [
+    "Token 消耗与成本分析报告",
+    "任务类型统计",
+    "技能使用统计",
+    "自动化任务运行情况",
+    "异常检测（成本 + Token 双口径）",
+    "可扩展定价库（pricing.json + 缺失模型清单 + 可选联网检索兜底）"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "period": {
+        "type": "string",
+        "enum": ["day", "week", "month", "year"],
+        "description": "预设报告周期"
+      },
+      "days": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "自定义滚动天数（覆盖 period）"
+      },
+      "start": {
+        "type": "string",
+        "format": "date",
+        "description": "绝对日期范围起始（最高优先级）"
+      },
+      "end": {
+        "type": "string",
+        "format": "date",
+        "description": "绝对日期范围结束"
+      },
+      "output": {
+        "type": "string",
+        "description": "输出文件路径"
+      },
+      "format": {
+        "type": "string",
+        "enum": ["markdown", "html", "json"],
+        "description": "输出格式"
+      },
+      "lookup_pricing": {
+        "type": "string",
+        "enum": ["offline", "online"],
+        "default": "offline",
+        "description": "是否联网检索缺失单价模型；online 时仅生成搜索链接，可选 --pricing-api 指向自有定价镜像"
+      },
+      "pricing_api": {
+        "type": "string",
+        "format": "uri",
+        "description": "自有定价 JSON 端点（仅 --lookup-pricing online 时生效），返回 {models: {<model>: {input, output}}}；拉到的价仅作参考，不计入成本总额"
+      }
+    },
+    "priority": "start/end > days > period"
+  },
+  "output_schema": {
+    "formats": ["markdown", "html", "json"],
+    "report_title": "Workbuddy使用情况报告",
+    "sections": [
+      "概览统计",
+      "Token 消耗可视化",
+      "模型使用与成本对比",
+      "成本深度分析（含异常检测）",
+      "任务类型统计",
+      "技能使用统计",
+      "自动化任务运行情况",
+      "核心洞察与建议"
+    ],
+    "key_fields": {
+      "traces": ["session_id", "raw_model", "exec_model", "total_tokens", "effective_tokens", "cached_tokens", "effective_cost", "status"],
+      "sessions": ["id", "title", "task_type", "model", "deleted_at"],
+      "automation_runs": ["automation_id", "status", "result_success", "source_cwd"]
+    }
+  },
+  "error_handling": {
+    "policy": "采集与生成脚本对各数据源分别 try/except 兜底，单源失败不阻塞整体报告生成；无法解析的数据以警告卡/提示呈现，不静默丢弃",
+    "warnings": [
+      "幽灵/未解析调用警告卡",
+      "免费期免责声明",
+      "数据缺失提示",
+      "§3.3 缺失单价模型清单（含可复制补写片段，可选联网估算/搜索链接）"
+    ]
+  },
+  "retry_policy": "无自动重试；数据源读取失败即跳过并在报告中告警，避免无限重试拖慢报告生成",
+  "data_sources": ["traces", "workbuddy.db", "usage-log.json", "sessions", "pricing.json"],
+  "privacy": "全部本地处理，不联网、不上传云端",
+  "license": "MIT"
+}

@@ -1,0 +1,71 @@
+{
+  "_comment": "本文件为「模型单价配置」,随 skill 发布、可被用户直接编辑,无需改 Python 代码。采集器启动时会读取此文件并覆盖 scripts/collect_usage_data.py 里的内置默认值。结构:models=各模型每百万 token 单价(元,输入/输出分别计价);timed_free=限时免费模型及其免费截止日(含当天);custom_local=自建接口单价覆盖(键为去掉 custom-local: 前缀的底层模型名);default_model=WorkBuddy 默认模型(兜底 'default' 占位符实际执行的付费模型)。遇到报告里标「未配置」的模型,把它的单价加进 models(或用户本机 pricing.local.json)即可。发布版仅含 WorkBuddy 官方内置模型 + auto；`delisted` 段存放**曾由 WorkBuddy 官方提供、现已下架**的模型（历史调用仍需计价/标注，仍属官方模型，可随发布版走，不算用户第三方模型）；其余仍可用的第三方/自建模型请用户写入本机 pricing.local.json。",
+  "_definitions": {
+    "delisted": "曾在 WorkBuddy 官方提供、现已下架的模型（历史调用仍需计价/标注，仍属官方模型，随发布版走，不算用户第三方模型）。判定依据：底层模型名命中官方下架名单且走官方通道（gateway / openrouter-free），不含 custom-local。",
+    "custom_local": "用户后来通过外部 API 接口自建 / 接入的自定义模型（如本机自建端点、自己的 OpenRouter / bigmodel 账号等），表现为 model_key 带 `custom-local:` 前缀或走 openrouter-free 免费档。判定依据（满足任一即恒属自定义，绝不归类为 delisted）：① 通道是 custom-local；② 模型名带 custom-local: 前缀；③ 运行时采集器读取本机 `~/.workbuddy/models.json`，凡被配成自定义/外部端点（vendor=custom 或 url 含 openrouter）或本地 Ollama（vendor=ollama / localhost:11434）的模型，无论 trace 通道是否记成官方 gateway，一律优先判为自定义（🔧 外部 / 🏠 本地），优先级高于 delisted 判定。",
+    "boundary_rule": "delisted 与 custom_local 必须严格分开。判定顺序：① 前缀信号 ② custom-local 通道 ③ openrouter-free 通道 ④ 名称命中「自定义集」（运行时从 models.json 自动发现 ∪ user_custom_models 人工兜底，专治撞名官方模型走 gateway 的误识别，如 GLM-4.7-Flash 被配成自定义端点即标 🔧）。任意一项命中即判为自定义，且优先级高于 delisted。即使某个 custom-local 模型底层跑的恰好是某已下架官方模型（如 custom-local:GLM-4.5-air 跑 glm-4.5-air），它也只算「用户自定义」，不会被误标为「官方已下架」。报告内 🗄️=官方已下架，🔧=用户自定义（外部 API），🏠=本地推理（Ollama），三者视觉区分、分别计算。"
+  },
+  "_pricing_rules": {
+    "unit": "元 / 百万 tokens(CNY per 1M tokens),输入按「缓存未命中」价,不计缓存命中折扣",
+    "tier_rule": "厂商按输入长度分档计价的官方内置模型(如 glm-5.1),一律取「长上下文档」(输入 > 32k)单价 —— Agent 会话上下文普遍超过 32k,取长档更贴近真实账单。",
+    "auto_is_null": "auto 为 WorkBuddy 智能路由入口,无单一单价,故恒为 null;采集器对其走 router_avg(本期付费模型均价)计价,不会被判为「未配置」。",
+    "updated": "2026-08-07"
+  },
+  "_sources": {
+    "official_builtin": "https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model (WorkBuddy 官方内置模型列表,2026-08)",
+    "zhipu_cny": "https://open.bigmodel.cn/pricing (智谱开放平台人民币刊例价) — glm-5.2 / glm-5.1",
+    "zhipu_overview": "https://docs.bigmodel.cn/cn/guide/start/model-overview (智谱模型总览) — GLM-4.7-Flash 标注「免费模型」，GLM-4.5-Air 为「高性价比轻量模型」(付费)；GLM-4.6 仅文本、无 GLM-4.6V",
+    "zhipu_release": "https://docs.z.ai/release-notes/new-released (智谱发布记录) — GLM-5.2(2026-06)/GLM-5.1(2026-04)/GLM-5(2026-02)/GLM-4.7-Flash(2026-01) 等发布时间线",
+    "zhipu_vision_cny": "https://ai.360.com/open/zh/models/z-ai/glm-5v-turbo (360 智脑 API 转售页,人民币刊例 ¥5/¥22,与智谱 GLM-5-Turbo 短档同价) — glm-5v-turbo",
+    "moonshot_cny": "https://platform.moonshot.cn (Kimi 开放平台首页人民币价) — kimi-k2.7-code ¥6.5/¥27、kimi-k2.6 ¥6.5/¥27",
+    "kimi_models": "https://platform.kimi.ai/docs/models (Kimi 模型列表) — kimi-k2.5 于 2026-08-31 全平台 sunset；kimi-k2 系列 2026-05-25 停用",
+    "kimi_k3_cny": "https://new.qq.com/rain/a/20260803A0AZVK00 (2026-08-03 报道引月之暗面官网数据:Kimi K3 输入 20 元 / 输出 100 元) — kimi-k3,非一手官网页面,如有出入请以官网为准",
+    "minimax_cny": "https://platform.minimaxi.com/docs/guides/pricing-paygo (MiniMax 开放平台人民币按量计费) — minimax-m2.7 2.1/8.4",
+    "minimax_release": "https://intl.minimaxi.com/docs/release-notes/models (MiniMax 发布记录) — M3(2026-06)/M2.7(2026-03)/M2.5(2026-02) 发布时间线",
+    "deepseek_cny": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing (DeepSeek 官方人民币定价) — deepseek-v4-flash 1/2、deepseek-v4-pro 3/6",
+    "deepseek_release": "https://api-docs.deepseek.com/updates (DeepSeek 更新日志) — V4(2026-04-24) 发布；V3.2(2025-12-01) 为上一代旗舰",
+    "hunyuan_doc": "https://www.cloud.tencent.com/document/product/302/104753 (腾讯混元文档) — HY 2.0 Think(hunyuan-2.0-thinking-20251109) 将于 2026.6.10 下线",
+    "hunyuan_site": "https://hunyuan.tencent.com/ (腾讯混元官网) — Hy3 为 2026 年新发布旗舰，与 HY 2.0 Think 非同一模型",
+    "tokenhub_models": "https://www.cloud.tencent.com/document/product/1300/78934 (TokenHub 模型列表,2026-07-20) — 仍含 deepseek-v3.2 / glm-5 / glm-5-turbo / kimi-k2.5 / minimax-m2.5 等",
+    "workbuddy_history": "https://cloud.tencent.cn/developer/article/2706786 等 (WorkBuddy 历史内置模型清单) — 曾内置 GLM-5.0/GLM-5.0-Turbo/GLM-4.7/MiniMax-M2.5/Kimi-K2.5/DeepSeek-V3.2/Hunyuan-2.0-Thinking，佐证这些确为 WorkBuddy 官方曾配置模型",
+    "workbuddy_13models": "https://cloud.tencent.com/developer/article/2706774 (WorkBuddy 桌面端内置 13 模型快照: Auto / Hy3 preview / GLM-5.0 / GLM-5.0-Turbo / GLM-5v-Turbo / GLM-4.7 / MiniMax-M2.7 / MiniMax-M2.5 / Kimi-K2.5 / DeepSeek-V3.2 / Hunyuan-2.0-Thinking / GLM-5.1 / Kimi-K2.6) — 佐证 hy3-preview、glm-4.7 曾为官方内置、现已下架",
+    "hy3_preview": "https://www.cnr.cn/tech/techph/20260706/t20260706_527693785.shtml (2026-07-06 混元 Hy3 正式发布；4-23 发布 Hy3 preview，7-6 被正式版取代)",
+    "zhipu_glm47": "https://docs.bigmodel.cn/cn/guide/start/model-overview (智谱模型总览: GLM-4.7 与 GLM-4.7-Flash 为并列不同模型；GLM-4.7 付费、GLM-4.7-Flash 免费)",
+    "glm47_compare": "https://llm-stats.com/models/compare/glm-4.7-vs-glm-4.7-flash (GLM-4.7 付费 ~$0.60/$2.20 每百万 tokens；GLM-4.7-Flash 免费 ~$0.07/$0.40)",
+    "glm46v_cny": "https://finance.eastmoney.com/a/202512083585666118.html (智谱官方报道: GLM-4.6V 多模态 106B-A12B 开源, 官方刊例价 输入1元/输出3元 每百万 tokens, GLM-4.6V-Flash 免费) — 证实 glm-4.6v 真实存在"
+  },
+  "default_model": "glm-5.2",
+  "models": {
+    "auto": null,
+    "hy3": {"input": 1.0, "output": 4.0},
+    "glm-5.2": {"input": 8.0, "output": 28.0},
+    "glm-5.2-x": {"input": 5.06, "output": 17.7, "note": "实为智谱 GLM-5.2，Trace里面这个标注含 Workbuddy 的 glm-5.2 夜猫子折扣（2026-07-16开始）；单价：输入或输出每百万 tokens * 0.5 / 0.79"},
+    "glm-5.1": {"input": 8.0, "output": 28.0},
+    "glm-5v-turbo": {"input": 5.0, "output": 22.0},
+    "minimax-m3": {"input": 1.0, "output": 4.0},
+    "minimax-m2.7": {"input": 2.1, "output": 8.4},
+    "kimi-k3": {"input": 20.0, "output": 100.0},
+    "kimi-k2.7-code": {"input": 6.5, "output": 27.0},
+    "kimi-k2.6": {"input": 6.5, "output": 27.0},
+    "deepseek-v4-flash": {"input": 1.0, "output": 2.0},
+    "deepseek-v4-pro": {"input": 3.0, "output": 6.0}
+  },
+  "delisted": {
+    "glm-5.0-turbo": {"input": 7.0, "output": 26.0, "note": "智谱 GLM-5-Turbo（WorkBuddy 文档记作 GLM-5.0-Turbo），已被 5.1/5.2 取代；取长上下文档(>32k)刊例价 ¥7/¥26 每百万 tokens（bigmodel.cn）"},
+    "glm-5": {"input": 6.0, "output": 22.0, "note": "智谱 GLM-5（WorkBuddy 文档亦记作 GLM-5.0），已被 5.1/5.2 取代；取长上下文档(>32k)刊例价 ¥6/¥22 每百万 tokens（bigmodel.cn）"},
+    "glm-5.0": {"input": 6.0, "output": 22.0, "note": "同 glm-5（WorkBuddy 文档记作 GLM-5.0 的别名写法），已被 5.1/5.2 取代；刊例价同 glm-5 ¥6/¥22"},
+    "glm-4.6v": {"input": 1.0, "output": 3.0, "note": "智谱 GLM-4.6V 多模态模型（106B-A12B，2025-12-08 开源），真实存在；官方刊例价 ¥1/¥3 每百万 tokens（GLM-4.6V-Flash 免费）；WorkBuddy 曾内置、现不在列表"},
+    "glm-4.5-air": {"input": 1.2, "output": 8.0, "note": "智谱 GLM-4.5-Air 高性价比轻量模型（付费）；取长上下文档(>32k)刊例价 ¥1.2/¥8 每百万 tokens（bigmodel.cn）"},
+    "glm-4.7-flash": {"input": 0.0, "output": 0.0, "note": "智谱 GLM-4.7-Flash 免费模型（官网标注「免费模型，提供普惠体验」）；历史调用按免费计价"},
+    "minimax-m2.5": {"input": 2.1, "output": 8.4, "note": "MiniMax-M2.5（2026-02 发布），已被 m2.7 取代；历史模型刊例价 ¥2.1/¥8.4 每百万 tokens（platform.minimaxi.com 历史模型）"},
+    "kimi-k2.5": {"input": 4.0, "output": 21.0, "note": "Kimi-K2.5，Kimi 官方已于 2026-08-31 全平台 sunset；WorkBuddy 当前内置已无此模型；刊例价 ¥4/¥21 每百万 tokens（platform.moonshot.cn）"},
+    "deepseek-v3.2": {"input": 2.0, "output": 3.0, "note": "DeepSeek-V3.2（上一代旗舰，deepseek-chat/reasoner 对应版本）；缓存未命中刊例价 ¥2/¥3 每百万 tokens（api-docs.deepseek.com）"},
+    "hunyuan-2.0-thinking": {"input": 5.3, "output": 21.2, "note": "腾讯混元 HY 2.0 Think（hunyuan-2.0-thinking-20251109），独立下架模型，并非 Hy3 的前身/旧版本，与 Hy3 无继承关系；已于 2026-06-10 下线；取长上下文档(>32k)刊例价 ¥5.3/¥21.2 每百万 tokens（腾讯云混元计费概述）"},
+    "hy3-preview": {"input": 1.0, "output": 4.0, "note": "混元 Hy3 preview（hunyuan 重建后首个版本，2026-04-23 发布，295B/21B MoE），2026-07-06 被正式版 Hy3 取代；与 Hy3 同架构，历史成本暂按 Hy3 计价估算（preview 期或有限免/折扣，实际以账单为准）"},
+    "glm-4.7": {"input": 4.0, "output": 16.0, "note": "智谱 GLM-4.7 付费版（358B，2025-12-22 发布），与免费版 GLM-4.7-Flash 为不同模型；取长上下文档(>32k)刊例价 ¥4/¥16 每百万 tokens（bigmodel.cn）"}
+  },
+  "timed_free": {
+    "hy3": "2026-08-31"
+  },
+  "custom_local": {}
+}
