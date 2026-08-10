@@ -81,4 +81,4 @@ python scripts/generate_report.py data.json --output report.html --format html
 
 ## License
 
-MIT © elisa 2026
+MIT © Elisabeth15501 2026
