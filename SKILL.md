@@ -1,14 +1,14 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.0.0
+version: 1.1.1
 metadata: metadata.json
 displayName: Agent 用量分析报告
-summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。首发支持 WorkBuddy，规划兼容更多 Agent。
+summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。首发支持 WorkBuddy，规划兼容更多 Agent。
 description: |
   Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。首发支持 WorkBuddy，规划兼容更多 Agent。
 
-  触发方式：直接说「生成使用周报 / 本月使用报告 / 看下这周 token 花了多少」即可，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
+  触发方式：当用户说「生成周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等时触发，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
   报告包含：
   - Token 消耗与成本：按实际计费模型对账，跟后台账单一致；每日趋势、缓存占比、成本货币化

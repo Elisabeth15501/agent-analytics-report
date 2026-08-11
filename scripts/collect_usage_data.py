@@ -488,13 +488,22 @@ PERIOD_NEXT = {
 }
 
 
+def _to_num(v, default=0):
+    """安全地把值转成 float；无法转换（脏数据/字符串/None）时回退默认值，避免整段采集崩溃。"""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
 def resolve_date_range(period=None, days=None, start=None, end=None):
     """解析时间窗口，返回 (start_date, end_date, period_key, period_label)。
 
     优先级：绝对日期(start+end) > 自定义天数(days) > 预设周期(period)。
     - 绝对日期：直接使用给定起止（含两端）。
     - 自定义天数：最近 N 天（滚动窗口，含今天）。
-    - 预设周期：day=今天 / week=最近 7 天 / month=最近 30 天 / year=最近 365 天（滚动）。
+    - 预设周期（日历对齐，与生成时刻无关）：
+      day=今天 / week=当前日历周(周一~周日) / month=当前自然月(1日~月底) / year=当前自然年(1/1~12/31)。
     """
     if start and end:
         # 若起止恰好对应标准周期长度，识别为对应报告类型（而非「自定义报告」），
@@ -503,24 +512,27 @@ def resolve_date_range(period=None, days=None, start=None, end=None):
         try:
             sd = datetime.strptime(start, "%Y-%m-%d")
             ed = datetime.strptime(end, "%Y-%m-%d")
-            span = (ed - sd).days + 1
-            today = datetime.now(TZ).date()
-            if span == 1:
-                return start, end, "day", PERIOD_LABELS["day"]
-            # 完整自然年（1/1~12/31）或 年初至今（1/1~今年内且至今日）→ 年报
-            if sd.month == 1 and sd.day == 1 and ed.year == sd.year:
-                if (ed.month == 12 and ed.day == 31) or ed.date() >= today:
-                    return start, end, "year", PERIOD_LABELS["year"]
-            # 完整自然月 → 月报
-            if sd.day == 1 and ed.year == sd.year and ed.month == sd.month:
-                last_day = calendar.monthrange(sd.year, sd.month)[1]
-                if ed.day == last_day:
-                    return start, end, "month", PERIOD_LABELS["month"]
-            # 完整 7 天 → 周报
-            if span == 7:
-                return start, end, "week", PERIOD_LABELS["week"]
-        except Exception:
-            pass
+        except ValueError:
+            raise ValueError(
+                f"无效的 --start/--end 日期：需要 YYYY-MM-DD 格式，"
+                f"收到 start={start!r} end={end!r}"
+            )
+        span = (ed - sd).days + 1
+        today = datetime.now(TZ).date()
+        if span == 1:
+            return start, end, "day", PERIOD_LABELS["day"]
+        # 完整自然年（1/1~12/31）或 年初至今（1/1~今年内且至今日）→ 年报
+        if sd.month == 1 and sd.day == 1 and ed.year == sd.year:
+            if (ed.month == 12 and ed.day == 31) or ed.date() >= today:
+                return start, end, "year", PERIOD_LABELS["year"]
+        # 完整自然月 → 月报
+        if sd.day == 1 and ed.year == sd.year and ed.month == sd.month:
+            last_day = calendar.monthrange(sd.year, sd.month)[1]
+            if ed.day == last_day:
+                return start, end, "month", PERIOD_LABELS["month"]
+        # 完整 7 天 → 周报
+        if span == 7:
+            return start, end, "week", PERIOD_LABELS["week"]
         return start, end, "custom", PERIOD_LABELS["custom"]
     if days is not None:
         e = datetime.now(TZ)
@@ -528,9 +540,27 @@ def resolve_date_range(period=None, days=None, start=None, end=None):
         return (s.strftime("%Y-%m-%d"), e.strftime("%Y-%m-%d"),
                 "custom", f"自定义（最近 {days} 天）")
     pk = period or "week"
+    today = datetime.now(TZ).date()
     if pk == "day":
-        today = datetime.now(TZ).strftime("%Y-%m-%d")
-        return today, today, "day", PERIOD_LABELS["day"]
+        d = today.strftime("%Y-%m-%d")
+        return d, d, "day", PERIOD_LABELS["day"]
+    if pk == "week":
+        # 当前日历周（周一 ~ 周日，ISO 周），不论生成日在周中还是周末
+        monday = today - timedelta(days=today.weekday())
+        sunday = monday + timedelta(days=6)
+        return (monday.strftime("%Y-%m-%d"), sunday.strftime("%Y-%m-%d"),
+                "week", PERIOD_LABELS["week"])
+    if pk == "month":
+        # 当前自然月（1 日 ~ 月底），不论生成日在月内哪一天
+        first = today.replace(day=1)
+        last = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+        return (first.strftime("%Y-%m-%d"), last.strftime("%Y-%m-%d"),
+                "month", PERIOD_LABELS["month"])
+    if pk == "year":
+        # 当前自然年（1/1 ~ 12/31）
+        y = today.year
+        return f"{y}-01-01", f"{y}-12-31", "year", PERIOD_LABELS["year"]
+    # 兜底（choices 已约束，正常不会到这）：保留滚动窗口行为
     n = PERIOD_DAYS.get(pk, 7)
     e = datetime.now(TZ)
     s = e - timedelta(days=n)
@@ -579,26 +609,31 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
                 # 但若 trace 实际执行模型带 SiliconFlow 等第三方 vendor 前缀（如 zai-org/GLM-5.2），
                 # 说明 sessions.model 只是选了同名官方模型做入口，真实调用走的是外部 API；
                 # 此时以 trace 实际模型为准，强制判为 custom-local，避免混入官方 gateway。
+                # ⚠️ 仅当会话配置「未显式声明」custom-local: 时才触发该覆盖——否则会丢失用户
+                # 显式选定的自建接口前缀，导致 custom-local:zai-org/glm-5.2 与裸 zai-org/glm-5.2
+                # 在 §3.1 被误并为同一行（即「同一模型的不同接口」无法区分）。
                 sid = trace.get("sessionId", "")
                 raw_model = sid_map.get(sid, bare_model)
-                if any(bare_model.lower().startswith(p) for p in SILICONFLOW_VENDOR_PREFIXES):
+                raw_is_custom = raw_model.lower().startswith("custom-local:")
+                if (not raw_is_custom) and \
+                   any(bare_model.lower().startswith(p) for p in SILICONFLOW_VENDOR_PREFIXES):
                     raw_model = bare_model
                 channel, base_model = parse_channel(raw_model)
 
                 parsed.append({
                     "trace_id": trace.get("traceId", ""),
-                    "pid": int(pid_dir.name),
+                    "pid": int(_to_num(pid_dir.name, 0)),
                     "date": trace_date,
                     "started_at": trace.get("startedAt", ""),
                     "ended_at": trace.get("endedAt", ""),
-                    "duration_ms": trace.get("duration", 0),
+                    "duration_ms": _to_num(trace.get("duration", 0)),
                     "status": trace.get("status", "unknown"),
                     "session_id": sid,
-                    "total_tokens": trace.get("totalTokens", 0),
-                    "input_tokens": model_info.get("totalInputTokens", 0),
-                    "output_tokens": model_info.get("totalOutputTokens", 0),
-                    "cached_tokens": model_info.get("totalCachedTokens", 0),
-                    "call_count": model_info.get("callCount", 0),
+                    "total_tokens": _to_num(trace.get("totalTokens", 0)),
+                    "input_tokens": _to_num(model_info.get("totalInputTokens", 0)),
+                    "output_tokens": _to_num(model_info.get("totalOutputTokens", 0)),
+                    "cached_tokens": _to_num(model_info.get("totalCachedTokens", 0)),
+                    "call_count": _to_num(model_info.get("callCount", 0)),
                     "models": models,
                     "model_name": base_model,   # 裸底层模型名（来自 session 配置去前缀）
                     "exec_model": bare_model,   # 裸底层模型名（来自 trace 的 modelInfo.models[0]，即 API 实际执行的真实模型）
@@ -1664,9 +1699,13 @@ def main():
             if args.period != "week" and not (args.days or args.start):
                 explicit_params.append(f"--period {args.period}")
         
-        start_date, end_date, period_key, period_label = resolve_date_range(
-            period=args.period, days=args.days, start=args.start, end=args.end)
-        
+        try:
+            start_date, end_date, period_key, period_label = resolve_date_range(
+                period=args.period, days=args.days, start=args.start, end=args.end)
+        except ValueError as e:
+            print(f"[ERROR] {e}", file=sys.stderr)
+            sys.exit(2)
+
         # 详细提示：显式指定参数 vs 默认值
         if explicit_params:
             print(f"[INFO] 采集范围[{period_label}]：{start_date} ~ {end_date}（生效参数：{', '.join(explicit_params)}）", file=sys.stderr)
@@ -1701,6 +1740,13 @@ def main():
             cdb.close()
     except Exception as e:
         print(f"[WARN] supplementary sessions query: {e}", file=sys.stderr)
+
+    # 修复：补全会话后，把跨窗口长会话并入 sid_to_rawmodel 并重采 trace——
+    # 否则这些会话的 sid 在映射里缺失，raw_model 会退化成 trace 执行模型名，
+    # 导致通道误判（如 hy3 网关会话里的 deepseek-v4-pro 被错归、或反之）。
+    for s in db_data["sessions"]:
+        sid_to_rawmodel.setdefault(s["id"], s.get("model") or "default")
+    traces = collect_traces(start_date, end_date, sid_to_rawmodel)
 
     skill_usage = collect_skill_usage(start_date, end_date)
     outputs, memory_logs = collect_session_outputs(start_date, end_date)

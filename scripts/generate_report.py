@@ -20,6 +20,7 @@ generate_report.py — Agent 使用情况周报生成器
 """
 
 import argparse
+import html
 import json
 import math
 import re
@@ -30,6 +31,27 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 TZ = timezone(timedelta(hours=8))
+
+
+def _esc(value):
+    """HTML 转义：防止会话标题 / 模型名 / 自动化名等用户派生文本注入 HTML（XSS）。"""
+    return html.escape(str(value), quote=True)
+
+
+def _fmt_generated_at(dt=None):
+    """生成时间展示格式：YYYY/MM/DD HH:MM:SS (UTC+08:00)，便于人类阅读。
+
+    旧版曾用 ISO 8601 全精度（含微秒与 +08:00 后缀），对用户不友好；此处改回
+    紧凑可读格式，时区以 UTC 偏移呈现（如 UTC+08:00）。
+    """
+    dt = dt or datetime.now(TZ)
+    off = dt.utcoffset() or timedelta(0)
+    total = int(off.total_seconds())
+    sign = "+" if total >= 0 else "-"
+    total = abs(total)
+    hh, mm = divmod(total // 60, 60)
+    tz = f"UTC{sign}{hh:02d}:{mm:02d}"
+    return f"{dt.strftime('%Y/%m/%d %H:%M:%S')} ({tz})"
 
 # 时间窗口标签（与 collect_usage_data.PERIOD_* 保持一致）
 _PERIOD_LABEL = {"day": "日报", "week": "周报", "month": "月报", "year": "年报", "custom": "自定义报告"}
@@ -46,14 +68,13 @@ def _period_labels(meta):
 
 
 def _calendar_period(meta):
-    """将报告周期识别为「日历日期（calendar date）」。
+    """将报告周期识别为 ISO 8601 日历日期标签。
 
-    让日报 / 周报 / 月报 / 年报以日历日期呈现，而非单纯的滚动窗口天数：
       - 日报 · 2026-08-01
-      - 周报 · 2026 年第31周（07-27 至 08-02）
-      - 月报 · 2026年8月
-      - 年报 · 2026年
-      - 自定义报告 · 2026-07-26 至 2026-08-01
+      - 周报 · 2026-W31（2026-07-27/2026-08-02）
+      - 月报 · 2026-08
+      - 年报 · 2026
+      - 自定义报告 · 2026-07-26/2026-08-01
     """
     meta = meta or {}
     pk = meta.get("period", "week")
@@ -65,16 +86,16 @@ def _calendar_period(meta):
         if pk == "week":
             d = datetime.strptime(end, "%Y-%m-%d")
             iso_year, iso_week, _ = d.isocalendar()
-            return f"周报 · {iso_year} 年第{iso_week}周（{start} 至 {end}）"
+            return f"周报 · {iso_year}-W{iso_week:02d}（{start}/{end}）"
         if pk == "month":
             d = datetime.strptime(end, "%Y-%m-%d")
-            return f"月报 · {d.year}年{d.month}月"
+            return f"月报 · {d.year}-{d.month:02d}"
         if pk == "year":
             d = datetime.strptime(end, "%Y-%m-%d")
-            return f"年报 · {d.year}年"
+            return f"年报 · {d.year}"
     except Exception:
         pass
-    return f"自定义报告 · {start} 至 {end}" if (start or end) else "自定义报告"
+    return f"自定义报告 · {start}/{end}" if (start or end) else "自定义报告"
 
 
 def format_number(n):
@@ -157,7 +178,7 @@ def build_donut_chart(stats, title="实际消耗 Token 占比（按任务类型�
         legend.append(
             f'            <div class="legend-item">'
             f'<span class="swatch" style="background:{color}"></span>'
-            f'{s["task_type"]}：{pct:.1f}%'
+            f'{_esc(s["task_type"])}：{pct:.1f}%'
             f'<span class="pct">（{format_number(s.get(value_key, 0))}{unit}）</span></div>'
         )
         cum += seg_len
@@ -586,16 +607,16 @@ def _build_unconfigured_models_section_html(meta):
         est = network_estimates.get(m)
         link = search_links.get(m)
         if est:
-            src = f'<a href="{link}" target="_blank">🌐 网络估算价（点击验证）</a>' if link else "🌐 网络估算价"
+            src = f'<a href="{_esc(link)}" target="_blank">🌐 网络估算价（点击验证）</a>' if link else "🌐 网络估算价"
             ip, op = f"{est['input']:.2f}", f"{est['output']:.2f}"
         elif link:
-            src = f'<a href="{link}" target="_blank">搜索定价</a>'
+            src = f'<a href="{_esc(link)}" target="_blank">搜索定价</a>'
             ip, op = "—", "—"
         else:
             src = "未配置"
             ip, op = "—", "—"
         block.append(
-            f"            <tr><td><code>{m}</code></td><td>{ip}</td><td>{op}</td><td>{src}</td></tr>"
+            f"            <tr><td><code>{_esc(m)}</code></td><td>{ip}</td><td>{op}</td><td>{src}</td></tr>"
         )
     block.append("        </table>")
 
@@ -680,12 +701,12 @@ def _build_model_block_html(model_stats, is_exec=False, timed_free_map=None, com
         share_txt = f"{share:.1f}%" if eff > 0 else "—"
         if compact:
             block.append(
-                f"            <tr><td>{mname}</td><td>{m['calls']}</td>"
+                f"            <tr><td>{_esc(mname)}</td><td>{m['calls']}</td>"
                 f"<td>{format_number(m.get('effective_tokens', 0))}</td></tr>"
             )
         else:
             block.append(
-                f"            <tr><td>{mname}</td><td>{m['calls']}</td>"
+                f"            <tr><td>{_esc(mname)}</td><td>{m['calls']}</td>"
                 f"<td>{format_number(m.get('effective_tokens', 0))}</td><td>{ip}</td><td>{op}</td>"
                 f"<td>{cost}</td><td>{share_txt}</td></tr>"
             )
@@ -715,14 +736,14 @@ def _build_model_block_html(model_stats, is_exec=False, timed_free_map=None, com
             top_cost = max(concrete or priced, key=lambda x: x.get("effective_cost", 0))
             share = top_cost.get("effective_cost", 0) / total_billable * 100 if total_billable else 0
             block.append(
-                f'        <p>🏆 <strong>最常使用模型</strong>：<code>{top_calls["model"]}</code>'
+                f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
                 f'（调用 {top_calls["calls"]} 次）；'
-                f'💸 <strong>最贵模型</strong>（按花费，不含路由别名）：<code>{top_cost["model"]}</code>'
+                f'💸 <strong>最贵模型</strong>（按花费，不含路由别名）：<code>{_esc(top_cost["model"])}</code>'
                 f'（估算 ¥{top_cost.get("effective_cost", 0):.2f}，占 {share:.1f}%）。</p>'
             )
         else:
             block.append(
-                f'        <p>🏆 <strong>最常使用模型</strong>：<code>{top_calls["model"]}</code>'
+                f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
                 f'（调用 {top_calls["calls"]} 次）。当前已配置单价的模型均为免费模型，'
                 f'填入付费模型单价后显示最贵模型对比。</p>'
             )
@@ -744,7 +765,7 @@ def build_model_section_html(data):
                  "本章节提供<b>两个维度</b>：<b>3.1 按实际计费模型</b>（账单口径，与概览总额一致）与 <b>3.2 按入口 / 配置模型</b>（使用分布）。"
                  "未配置单价的模型以「未配置」标注——在 <code>scripts/pricing.local.json</code> 的 <code>models</code> 里补上单价即可（无需改 Python 代码；该本地文件升级 Skill 时不会被覆盖）。</p>")
     if tf_map:
-        _tf_txt = "、".join(f"<code>{k}</code>（至 <b>{v}</b>）" for k, v in sorted(tf_map.items()))
+        _tf_txt = "、".join(f"<code>{_esc(k)}</code>（至 <b>{_esc(v)}</b>）" for k, v in sorted(tf_map.items()))
         lines.append(f'        <p class="disclaimer">🎁 <b>限时免费</b>：{_tf_txt} 在限免活动期间免费，'
                      '相关调用花费记为 ¥0.00，以区别于永久免费模型（<code>:free</code> 后缀）。'
                      '若该模型有公开刊例价，表中仍显示原单价，方便对比「原价 vs 实付」。</p>')
@@ -906,7 +927,7 @@ def generate_markdown_report(data):
     lines.append("")
     lines.append(f"> **报告类型**：{_calendar_period(meta)}")
     lines.append(f"> **报告周期**：{meta.get('start_date', '')} 至 {meta.get('end_date', '')}")
-    lines.append(f"> **生成时间**：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}")
+    lines.append(f"> **生成时间**：{_fmt_generated_at()}")
     lines.append(f"> **数据来源**：WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置")
     lines.append("")
 
@@ -1365,7 +1386,7 @@ def _render_failed_automation_html(items):
         else:
             avg_disp = f"¥{r['avg_cost']:.2f}"
             waste_disp = f"¥{r['waste']:.2f}"
-        L.append(f"            <tr><td>{r['name']}{warn}</td><td>{r['state']}</td>"
+        L.append(f"            <tr><td>{_esc(r['name'])}{warn}</td><td>{r['state']}</td>"
                  f"<td>{r['total_runs']}</td><td>{r['fail']}</td>"
                  f"<td>{r['fail_rate']:.0f}%</td><td>{avg_disp}</td>"
                  f"<td>{waste_disp}</td></tr>")
@@ -1559,7 +1580,7 @@ def _render_cache_untitled_html(payload):
         L.append('            <tr><th>任务名称</th><th>任务类型</th><th>缓存率</th>'
                  '<th>调用</th><th>当前成本</th><th>估算可省</th></tr>')
         for r in ch["items"]:
-            L.append(f"            <tr><td>{r['title']}</td><td>{r['task_type']}</td>"
+            L.append(f"            <tr><td>{_esc(r['title'])}</td><td>{_esc(r['task_type'])}</td>"
                      f"<td>{r['cache_rate']:.0f}%</td><td>{r['calls']}</td>"
                      f"<td>¥{r['cost']:.2f}</td><td>¥{r['potential_saving']:.2f}</td></tr>")
         L.append('        </table>')
@@ -1580,7 +1601,7 @@ def _render_cache_untitled_html(payload):
         L.append('            <tr><th>标题</th><th>任务类型</th><th>实际成本</th>'
                  '<th>调用</th><th>日期</th></tr>')
         for r in payload["untitled"]:
-            L.append(f"            <tr><td>⚠️ {r['title']}</td><td>{r['task_type']}</td>"
+            L.append(f"            <tr><td>⚠️ {_esc(r['title'])}</td><td>{_esc(r['task_type'])}</td>"
                      f"<td>¥{r['cost']:.2f}</td><td>{r['calls']}</td>"
                      f"<td>{r['first_date']}</td></tr>")
         L.append('        </table>')
@@ -1763,9 +1784,9 @@ def _render_anomaly_block_html(title, block, kind):
         for a in sess:
             models = "、".join(a.get("models", [])[:3]) or "—"
             if kind == "cost":
-                L.append(f"            <li>💰 <b>{a['title']}</b>：¥{a['value']:.2f}（主要模型：{models}）</li>")
+                L.append(f"            <li>💰 <b>{_esc(a['title'])}</b>：¥{a['value']:.2f}（主要模型：{models}）</li>")
             else:
-                L.append(f"            <li>💰 <b>{a['title']}</b>：实际消耗 {a['value']:,.0f} token、"
+                L.append(f"            <li>💰 <b>{_esc(a['title'])}</b>：实际消耗 {a['value']:,.0f} token、"
                          f"调用 {a.get('calls', 0)} 次（主要模型：{models}）</li>")
         L.append("        </ul>")
     return L
@@ -1914,7 +1935,7 @@ def build_cost_analysis_section_html(data):
     _warn = _unresolved_warning_md(_unresolved_call_stats(data))
     if _warn:
         _warn_html = _warn.replace("\n", " ").replace("⚠️", "").strip()
-        L.append(f'        <div class="warn-box"><b>⚠️ 未解析 / 幽灵调用提示</b>：{_warn_html}</div>')
+        L.append(f'        <div class="warn-box"><b>⚠️ 未解析 / 幽灵调用提示</b>：{_esc(_warn_html)}</div>')
 
     # 免费 / 限时免费主导期免责声明（P1）
     L.extend(_free_period_disclaimer_html(data))
@@ -1926,7 +1947,7 @@ def build_cost_analysis_section_html(data):
              '<th>实际消耗</th><th>调用</th><th>主要模型</th></tr>')
     for i, r in enumerate(rows[:10], 1):
         models = "、".join(r.get("models", [])[:3]) or "—"
-        L.append(f"            <tr><td>{i}</td><td>{r['title']}</td><td>{r['task_type']}</td>"
+        L.append(f"            <tr><td>{i}</td><td>{_esc(r['title'])}</td><td>{_esc(r['task_type'])}</td>"
                  f"<td>¥{r['effective_cost']:.2f}</td><td>{format_number(r['effective_tokens'])}</td>"
                  f"<td>{r['calls']}</td><td>{models}</td></tr>")
     L.append('        </table>')
@@ -1968,7 +1989,7 @@ def build_cost_analysis_section_html(data):
         L.append('        <table>')
         L.append('            <tr><th>任务名称</th><th>任务类型</th><th>调用</th><th>实际成本</th></tr>')
         for r in size_anom["items"]:
-            L.append(f"            <tr><td>{r['title'][:30]}</td><td>{r['task_type']}</td>"
+            L.append(f"            <tr><td>{_esc(r['title'][:30])}</td><td>{_esc(r['task_type'])}</td>"
                      f"<td>{r['calls']}</td><td>¥{r['effective_cost']:.2f}</td></tr>")
         L.append('        </table>')
 
@@ -2107,7 +2128,7 @@ def generate_html_report(data):
     lines.append("        <h1>Workbuddy使用情况报告</h1>")
     lines.append(f"        <p><strong>报告类型</strong>：{_calendar_period(meta)}</p>")
     lines.append(f"        <p><strong>报告周期</strong>：{meta.get('start_date', '')} 至 {meta.get('end_date', '')}</p>")
-    lines.append(f"        <p><strong>生成时间</strong>：{datetime.now(TZ).strftime('%Y-%m-%d %H:%M')}</p>")
+    lines.append(f"        <p><strong>生成时间</strong>：{_fmt_generated_at()}</p>")
     lines.append("        <p><strong>数据来源</strong>：WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置</p>")
     lines.append('        <div class="theme-toggle" role="group" aria-label="主题切换">')
     lines.append('            <button type="button" data-set-theme="light">☀ 浅色</button>')
@@ -2199,7 +2220,7 @@ def generate_html_report(data):
         total_tasks = sum(task_dist.values())
         for task_type, count in sorted(task_dist.items(), key=lambda x: x[1], reverse=True):
             pct = count / total_tasks * 100 if total_tasks else 0
-            lines.append(f"            <tr><td>{task_type}</td><td>{count}</td><td>{pct:.1f}%</td></tr>")
+            lines.append(f"            <tr><td>{_esc(task_type)}</td><td>{count}</td><td>{pct:.1f}%</td></tr>")
     else:
         lines.append("            <tr><td colspan='3'>暂无任务数据</td></tr>")
     lines.append("        </table>")
@@ -2225,7 +2246,7 @@ def generate_html_report(data):
             pct = (eff / total_eff * 100) if total_eff else 0
             c_ratio = (s["cached_tokens"] / s["input_tokens"] * 100) if s.get("input_tokens") else 0
             lines.append(
-                f"            <tr><td>{s['task_type']}</td><td>{s['session_count']}</td>"
+                f"            <tr><td>{_esc(s['task_type'])}</td><td>{s['session_count']}</td>"
                 f"<td>{format_number(eff)}</td><td>{format_number(s['total_tokens'])}</td>"
                 f"<td>{format_number(s['input_tokens'])}</td><td>{format_number(s['output_tokens'])}</td>"
                 f"<td>{c_ratio:.0f}%</td><td>¥{s.get('effective_cost', 0):.2f}</td><td>{pct:.1f}%</td></tr>"
@@ -2255,8 +2276,8 @@ def generate_html_report(data):
             for i, tk in enumerate(top_tasks, 1):
                 c_ratio = (tk.get("cached_tokens", 0) / tk["input_tokens"] * 100) if tk.get("input_tokens") else 0
                 lines.append(
-                    f"            <tr><td>{i}</td><td>{tk.get('title', '-')}</td>"
-                    f"<td>{tk.get('task_type', '-')}</td>"
+                    f"            <tr><td>{i}</td><td>{_esc(tk.get('title', '-'))}</td>"
+                    f"<td>{_esc(tk.get('task_type', '-'))}</td>"
                     f"<td>{format_number(tk.get('effective_tokens', 0))}</td>"
                     f"<td>{format_number(tk.get('total_tokens', 0))}</td>"
                     f"<td>{c_ratio:.0f}%</td><td>¥{tk.get('effective_cost', 0):.2f}</td></tr>"
@@ -2273,7 +2294,7 @@ def generate_html_report(data):
     lines.append("            <tr><th>技能名称</th><th>使用次数</th><th>最近使用</th></tr>")
     if skills:
         for sid, sdata in sorted(skills.items(), key=lambda x: x[1].get("usage_count_in_range", 0), reverse=True):
-            lines.append(f"            <tr><td>{sid}</td><td>{sdata.get('usage_count_in_range', 0)}</td><td>{sdata.get('last_used', '-')}</td></tr>")
+            lines.append(f"            <tr><td>{_esc(sid)}</td><td>{sdata.get('usage_count_in_range', 0)}</td><td>{sdata.get('last_used', '-')}</td></tr>")
     else:
         lines.append(f"            <tr><td colspan='3'>{_short}未使用技能</td></tr>")
     lines.append("        </table>")
@@ -2299,7 +2320,7 @@ def generate_html_report(data):
             auto_state = _auto_state_label(runs[0].get("auto_status"))
             dates = [r.get("created_date", "") for r in runs if r.get("created_date")]
             last_run_date = max(dates) if dates else "-"
-            lines.append(f"            <tr><td>{label}</td><td>{auto_state}</td><td>{len(runs)}</td><td>{success}</td><td>{fail}</td><td>{latest_result}</td><td>{last_run_date}</td></tr>")
+            lines.append(f"            <tr><td>{_esc(label)}</td><td>{auto_state}</td><td>{len(runs)}</td><td>{success}</td><td>{fail}</td><td>{latest_result}</td><td>{last_run_date}</td></tr>")
     else:
         lines.append(f"            <tr><td colspan='7'>{_short}无自动化任务运行记录</td></tr>")
     lines.append("        </table>")
@@ -2315,7 +2336,7 @@ def generate_html_report(data):
             ext = out.get("extension", "").lstrip(".")
             size = format_file_size(out.get("size_bytes", 0))
             fname = out.get("file_name", "-")
-            lines.append(f"            <tr><td>{fname}</td><td>{ext or '-'}</td><td>{out.get('date', '-')}</td><td>{size}</td></tr>")
+            lines.append(f"            <tr><td>{_esc(fname)}</td><td>{_esc(ext or '-')}</td><td>{out.get('date', '-')}</td><td>{size}</td></tr>")
     else:
         lines.append(f"            <tr><td colspan='4'>{_short}无产出文件</td></tr>")
     lines.append("        </table>")
@@ -2365,7 +2386,7 @@ def generate_html_report(data):
         else:
             shape = "分布较均衡，未见单一类型主导"
         lines.append("        <h3>📊 任务类型洞察</h3>")
-        lines.append(f"        <p><strong>主要任务类型</strong>：{top_task}（{top_n} 次，{top_pct:.1f}%）——{shape}。</p>")
+        lines.append(f"        <p><strong>主要任务类型</strong>：{_esc(top_task)}（{top_n} 次，{top_pct:.1f}%）——{shape}。</p>")
 
     # ✅ 省钱成就
     if cache_rate > 0:
@@ -2382,8 +2403,9 @@ def generate_html_report(data):
     lines.append("        <ul>")
     for item in build_next_week_outlook(summary, daily_tokens, automation_runs,
                                         data.get("session_credits", []), period_key=_key):
-        text = item[2:].strip() if item.startswith("- ") else item
-        text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", text)
+        raw = item[2:].strip() if item.startswith("- ") else item
+        escaped = _esc(raw)
+        text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
         lines.append(f"            <li>{text}</li>")
     lines.append("        </ul>")
     lines.append("    </div>")
@@ -2450,7 +2472,7 @@ def generate_json_report(data):
             "report_title": "Workbuddy使用情况报告",
             "start_date": meta.get("start_date", ""),
             "end_date": meta.get("end_date", ""),
-            "generated_at": datetime.now(TZ).isoformat(),
+            "generated_at": _fmt_generated_at(),
             "data_sources": ["WorkBuddy 会话历史", "Traces", "workbuddy.db", "技能使用记录", "自动化配置"],
         },
         "summary": {
@@ -2528,7 +2550,9 @@ def main():
     parser = argparse.ArgumentParser(description="Agent 使用情况报告生成器")
     parser.add_argument("data_file", nargs="?", help="数据 JSON 文件路径（未提供则实时采集）")
     parser.add_argument("--period", choices=["day", "week", "month", "year"], default="week",
-                        help="时间窗口预设：day=今天 / week=最近7天 / month=最近30天 / year=最近365天（实时采集时使用，默认 week）")
+                        help="时间窗口预设（实时采集时使用，默认 week）："
+                             "day=今天 / week=当前日历周(YYYY年第WW周，周一至周日，不论生成日在周中或周末) / "
+                             "month=当前自然月(MM月，1日至月底) / year=当前自然年(YYYY年全年)")
     parser.add_argument("--days", type=int, help="自定义滚动天数，覆盖 --period（实时采集时使用）")
     parser.add_argument("--start", type=str, help="绝对起始日期 YYYY-MM-DD（实时采集时使用）")
     parser.add_argument("--end", type=str, help="绝对结束日期 YYYY-MM-DD（实时采集时使用）")

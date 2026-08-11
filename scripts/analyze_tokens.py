@@ -17,8 +17,22 @@ import argparse
 import json
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+TZ = timezone(timedelta(hours=8))
+
+
+def fmt_generated_at(dt=None):
+    """生成时间展示格式：YYYY/MM/DD HH:MM:SS (UTC+08:00)，与 generate_report 保持一致。"""
+    dt = dt or datetime.now(TZ)
+    off = dt.utcoffset() or timedelta(0)
+    total = int(off.total_seconds())
+    sign = "+" if total >= 0 else "-"
+    total = abs(total)
+    hh, mm = divmod(total // 60, 60)
+    tz = f"UTC{sign}{hh:02d}:{mm:02d}"
+    return f"{dt.strftime('%Y/%m/%d %H:%M:%S')} ({tz})"
 
 
 def format_number(n):
@@ -141,7 +155,7 @@ def generate_token_report(data, output_path=None):
     lines.append("# Token 消耗分析报告")
     lines.append("")
     lines.append(f"> **分析周期**：{meta.get('start_date', '')} 至 {meta.get('end_date', '')}")
-    lines.append(f"> **生成时间**：{datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    lines.append(f"> **生成时间**：{fmt_generated_at()}")
     lines.append("")
     lines.append("> **口径说明**：「实际消耗（计费等效）」= 原始总量 − 缓存命中×0.9。缓存命中 token 按约 1/10 计价，"
                  "从总量中剔除折扣差额后即为真正消耗的 token，避免重复上下文被按全价虚高。")
