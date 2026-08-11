@@ -1,6 +1,6 @@
 {
   "name": "agent-analytics-report",
-  "version": "1.0.0",
-  "update_url": "https://skillhub.cn/skills/user_c5278a31/agent-analytics-report",
-  "note": "skillhub upgrade 读取 update_url 拉取 manifest JSON（需含 version + zip_url/zipUrl/download_url 等字段）。发布后请用 `skillhub publish` 返回的真实 manifest/下载地址替换本字段，否则升级会拉取失败（但不会静默跳过）。本地自定义模型一律写在 scripts/pricing.local.json，不进本发布包。"
+  "version": "1.1.1",
+  "update_url": "https://api.skillhub.cn/api/v1/skills/user_c5278a31/agent-analytics-report?namespace=user_c5278a31",
+  "note": "skillhub upgrade 读取 update_url 拉取 manifest JSON（需含 version + zip_url/zipUrl/download_url 等字段）。旧值 https://skillhub.cn/skills/... 是网页地址而非 manifest，会导致升级拉取失败（已修正为本 SkillHub API 的 skill 详情端点，返回结构含 skill.zip_url，与升级解析逻辑匹配）。该端点需登录态鉴权，沙箱无法匿名验证；待 `skillhub publish` 重新发布 1.1.1 后，请以平台返回的『真实 manifest/下载地址』最终复核/回填本字段。本地自定义模型一律写在 scripts/pricing.local.json，不进本发布包。"
 }
