@@ -53,6 +53,29 @@ python scripts/generate_report.py data.json --output report.html --format html
 
 ---
 
+## 测试（pytest + Allure）
+
+核心逻辑（通道归因、周期对齐、生成时间格式等）带回归测试，覆盖「同一模型经不同接口（gateway / custom-local）」的识别、跨窗口会话补全等场景：
+
+```bash
+cd agent-analytics-report
+
+# 1. 安装测试依赖（建议在隔离 venv 中）
+python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-tests.txt
+
+# 2. 运行测试并生成 Allure 原始数据
+.venv/Scripts/python.exe -m pytest tests/test_channel_attribution.py -v --alluredir=allure-results
+
+# 3. 渲染自包含可视化报告（无需 Java）
+.venv/Scripts/python.exe tools/render_allure_html.py --results-dir allure-results --output allure-report.html
+```
+
+- 用例按 `tests/conftest.py` 的 marker 体系标注（`smoke` / `integration` / `regression` / `golden` / `metadata` …），可用 `-m` 过滤，例如 `pytest -m regression`；
+- 报告含用例步骤树、参数、归因明细附件；本机若装有 Java，也可直接 `allure serve allure-results` 消费同一份数据；
+- 测试仅依赖标准库 + `pytest` + `allure-pytest`，**不引用任何第三方商业 API**；`allure-results/` 与 `allure-report*` 已被 `.gitignore` 排除，不进发布包。
+
+---
+
 ## 自定义模型（BYOM）
 
 发布版只内置 **WorkBuddy 官方在用模型 + 官方已下架历史模型**，`custom_local` 段为空 `{}`。

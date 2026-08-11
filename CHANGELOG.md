@@ -2,6 +2,14 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [Unreleased]
+
+### 🧪 测试 / 工程化
+- **通道归因测试接入 pytest + Allure**：`tests/test_channel_attribution.py` 按 `conftest.py` 的 marker 体系（`smoke` / `integration` / `regression` / `golden` / `metadata` 等）标注，并叠加 Allure 注解（`feature` / `story` / `title` / `severity`），步骤与归因明细作为附件内联。
+- **新增 Allure 自包含可视化报告**：`tools/render_allure_html.py` 零依赖将 `allure-results/` 渲染为离线 HTML（无需 Java）；官方 `allure serve` 亦可消费同一份数据。
+- **测试配置与依赖固化**：新增 `pytest.ini`（指定 `--alluredir=allure-results`）、`requirements-tests.txt`；`.gitignore` 增补 `allure-results/`、`allure-report*`。
+- 测试仅依赖标准库 + `pytest` + `allure-pytest`，不引用任何第三方商业 API。
+
 ## [1.1.1] — 2026-08-11
 
 ### ✨ 新特性 / 改进

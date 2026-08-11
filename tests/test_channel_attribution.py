@@ -1,4 +1,5 @@
-"""通道识别（接口归因）测试 — pytest 风格，覆盖「全部模型」。
+# -*- coding: utf-8 -*-
+"""通道识别（接口归因）测试 — pytest + Allure 双可视化，覆盖「全部模型」。
 
 核心目标
 --------
@@ -18,15 +19,20 @@
 统一小写去重后参数化。这样新模型加入定价表或用户自定义接口后，测试**自动覆盖**，
 无需手工维护列表 —— 即「适用于所有模型」。
 
-排除项（见 _collect_test_models）：
-  - 'auto' / 'default'：仅为智能路由别名 / 兜底占位符，不是「可经两种接口调用的具体模型」；
-  - 含 ':free' 的标识：属 OpenRouter 免费网关特例，单列场景，不进通用两接口拆分。
+与 conftest.py 的关系
+---------------------
+conftest.py 注册了本技能统一的 marker 体系
+（smoke / integration / blackbox / whitebox / metadata / contract / privacy / portability / golden / regression）。
+本文件的每个用例都按 conftest 的语义精确标注对应 marker，并叠加 Allure 的
+feature / story / title / severity / step / attach，使 CI 可按 `-m` 过滤、
+Allure 报告可按层级与严重度可视化。
 
 测试类别
 --------
 集成测试（Integration，跨 trace 解析 + 会话表查询 + sid_map 映射 + 通道分类多模块协同）
 + 回归测试（Regression，锁定跨窗口长会话误判 gateway 的 bug）
-+ 行为/功能测试（黑盒验证采集器对外表现：按接口维度 §3.1 拆分）。
++ 行为/功能测试（黑盒验证采集器对外表现：按接口维度 §3.1 拆分）
++ Golden（两接口正确拆分的黄金路径）。
 """
 
 import importlib.util
@@ -38,6 +44,29 @@ import tempfile
 import pytest
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+# ── Allure 接入（无 allure 环境时优雅降级为 no-op，保证脚本仍可被纯 pytest 运行）──
+try:
+    import allure
+except ImportError:  # pragma: no cover - 仅用于未安装 allure-pytest 的兜底
+    import types
+    allure = types.SimpleNamespace()
+
+    def _noop(*_a, **_k):
+        def deco(func):
+            return func
+        return deco
+    allure.step = _noop
+    allure.feature = _noop
+    allure.story = _noop
+    allure.title = _noop
+    allure.severity = _noop
+    allure.attach = lambda *_a, **_k: None
+    allure.severity_level = types.SimpleNamespace(
+        TRIVIAL="trivial", MINOR="minor", NORMAL="normal",
+        CRITICAL="critical", BLOCKER="blocker")
+    allure.attachment_type = types.SimpleNamespace(
+        TEXT="text/plain", JSON="application/json", HTML="text/html", CSV="text/csv")
 
 TZ = timezone(timedelta(hours=8))
 
@@ -127,10 +156,7 @@ def env():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
-def _epoch_ms(y, mo, d, h=10, mi=0, s=0):
-    return int(datetime(y, mo, d, h, mi, s, tzinfo=TZ).timestamp() * 1000)
-
-
+@allure.step("插入会话 sid={sid} model={model}")
 def _insert_session(db_path, sid, model, created):
     con = sqlite3.connect(str(db_path))
     con.execute(
@@ -144,6 +170,7 @@ def _insert_session(db_path, sid, model, created):
     con.close()
 
 
+@allure.step("写 trace idx={idx} session={session_id} key={key_id}")
 def _write_trace(traces_dir, idx, session_id, started_at,
                  models=("deepseek-v4-flash",), inp=100, out=50, key_id=None):
     """写一条 trace。key_id 仅作为「本次调用使用的 API Key 标识」场景上下文，采集层不消费。"""
@@ -171,6 +198,7 @@ def _write_trace(traces_dir, idx, session_id, started_at,
         json.dumps({"trace": trace}, ensure_ascii=False), encoding="utf-8")
 
 
+@allure.step("运行采集核心（含跨窗口补全会话）")
 def _run_collection(mod, db_path, traces_dir, start, end):
     """复刻 main() 的采集核心流程（含跨窗口补全会话修复），返回 trace 列表。"""
     mod.DB_PATH = db_path
@@ -199,31 +227,56 @@ def _run_collection(mod, db_path, traces_dir, start, end):
             })
         cdb.close()
 
-    for s in db_data["sessions"]:
-        sid_to_rawmodel.setdefault(s["id"], s.get("model") or "default")
-    traces = mod.collect_traces(start, end, sid_to_rawmodel)
+        for s in db_data["sessions"]:
+            sid_to_rawmodel.setdefault(s["id"], s.get("model") or "default")
+        traces = mod.collect_traces(start, end, sid_to_rawmodel)
     return traces
 
 
+@allure.step("推导期望通道: {raw}")
 def _expect_channel(mod, raw):
     """给定会话配置标识符，采集层理应归因的通道（由真实 parse_channel 推导，避免硬编码）。"""
     return mod.parse_channel(raw)[0]
 
 
+def _attach_attribution(detail: dict, name: str = "归因明细"):
+    """把关键归因结果作为 Allure 附件，便于报告内直接检视。"""
+    allure.attach(
+        json.dumps(detail, ensure_ascii=False, indent=2),
+        name=name,
+        attachment_type=allure.attachment_type.JSON,
+    )
+
+
 # ── 模型集自检（非参数化）────────────────────────────────────────────────────
 
 @skip_no_db
+@pytest.mark.smoke
+@pytest.mark.metadata
+@allure.feature("通道识别 / 接口归因（Channel Attribution）")
+@allure.story("模型集自检")
+@allure.title("动态模型发现必须非空且覆盖自建模型")
+@allure.severity(allure.severity_level.NORMAL)
 def test_model_set_nonempty(mod):
     """防御性：动态模型发现必须产出非空集合，否则「适用于所有模型」形同虚设。"""
     models = _collect_test_models(mod)
     assert models, "未能从采集层发现任何测试模型（pricing / 自定义模型配置异常？）"
     # 必须覆盖到用户实际自建模型（如 DeepSeek 平台 Key 接入的模型）
     assert any("deepseek" in m for m in models), "模型集应至少含 deepseek 系列"
+    _attach_attribution({"discovered_models": models, "count": len(models)},
+                        name="已发现模型全集")
 
 
 # ── 核心：同一模型的不同接口被正确拆分 ─────────────────────────────────────
 
 @skip_no_db
+@pytest.mark.integration
+@pytest.mark.smoke
+@pytest.mark.golden
+@allure.feature("通道识别 / 接口归因（Channel Attribution）")
+@allure.story("同一模型不同接口拆分")
+@allure.title("模型 {model}: 官方接口 vs custom-local 正确拆分为两通道")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_gateway_vs_custom_local(mod, env, model):
     """官方接口(裸名→推导通道) 与 custom-local 接口应正确拆分为两通道。"""
     db_path, traces = env
@@ -252,10 +305,22 @@ def test_gateway_vs_custom_local(mod, env, model):
         assert ch == {"gateway", "custom-local"}, \
             f"[{model}] 两接口未分离：{ch}"
 
+    _attach_attribution({
+        "model": model,
+        "gateway_side": {"raw": gw_raw, "channel": by["gw"]["channel"], "model_key": by["gw"]["model_key"]},
+        "custom_local_side": {"raw": cl_raw, "channel": by["cl"]["channel"], "model_key": by["cl"]["model_key"]},
+    })
+
 
 # ── 回归：跨窗口长会话必须并入 sid_to_rawmodel，否则误判 gateway ──────────────
 
 @skip_no_db
+@pytest.mark.integration
+@pytest.mark.regression
+@allure.feature("通道识别 / 接口归因（Channel Attribution）")
+@allure.story("回归: 跨窗口长会话")
+@allure.title("模型 {model}: 跨窗口会话仍识别为 custom-local（防 gateway 误判）")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_cross_window_supplement(mod, env, model):
     """回归：跨窗口长会话（创建早于窗口）必须并入 sid_to_rawmodel，否则误判 gateway。"""
     db_path, traces = env
@@ -269,11 +334,22 @@ def test_cross_window_supplement(mod, env, model):
     assert xw["channel"] == "custom-local", \
         f"[{model}] 跨窗口 custom-local 会话应判 custom-local(修复点)，实得 {xw['channel']}"
     assert xw["model_key"] == cl_raw
+    _attach_attribution({
+        "model": model, "session": "cl_xw",
+        "channel": xw["channel"], "model_key": xw["model_key"],
+        "note": "跨窗口补全会话修复点",
+    })
 
 
 # ── 同会话两次调用使用不同 Key，仍归同一接口（不按 Key 拆分）──────────────────
 
 @skip_no_db
+@pytest.mark.integration
+@pytest.mark.regression
+@allure.feature("通道识别 / 接口归因（Channel Attribution）")
+@allure.story("同会话不同 Key")
+@allure.title("模型 {model}: 同会话两次调用不同 Key 仍归同一接口（不按 Key 拆分）")
+@allure.severity(allure.severity_level.BLOCKER)
 def test_same_session_two_calls_different_keys(mod, env, model):
     """同会话两次调用，Key 不同，应归到同一 custom-local 接口（不按 Key 拆分）。"""
     db_path, traces = env
@@ -299,11 +375,24 @@ def test_same_session_two_calls_different_keys(mod, env, model):
     row = next((r for r in agg if r["model"] == cl_raw), None)
     assert row is not None, f"[{model}] §3.1 缺少 {cl_raw} 行"
     assert row["calls"] == 2, f"[{model}] §3.1 应按接口合并 2 次调用，实得 {row['calls']}"
+    _attach_attribution({
+        "model": model, "session": sid,
+        "calls": len(sess), "channel": "custom-local", "model_key": cl_raw,
+        "keys_used": ["sk-KEY-A-xxxx", "sk-KEY-B-yyyy"],
+        "section31_calls_merged": row["calls"],
+        "note": "Key 差异不影响接口归因（回归锁）",
+    })
 
 
 # ── 端到端：§3.1 接口维度把两种接口拆成两条独立行 ───────────────────────────
 
 @skip_no_db
+@pytest.mark.integration
+@pytest.mark.golden
+@allure.feature("通道识别 / 接口归因（Channel Attribution）")
+@allure.story("§3.1 接口维度拆分")
+@allure.title("模型 {model}: §3.1 把两种接口拆成两条独立行")
+@allure.severity(allure.severity_level.CRITICAL)
 def test_section31_splits_two_interfaces(mod, env, model):
     """端到端：§3.1 接口维度把 gateway 侧与 custom-local 侧拆成两条独立行。"""
     db_path, traces = env
@@ -330,9 +419,19 @@ def test_section31_splits_two_interfaces(mod, env, model):
     expected[gw_ch] = expected.get(gw_ch, 0) + 1
     expected["custom-local"] = expected.get("custom-local", 0) + 2
     assert ch_count == expected, f"[{model}] 通道计数错误: 实得 {ch_count}，期望 {expected}"
+    _attach_attribution({
+        "model": model,
+        "section31_rows": [{"model_key": r["model"], "channel": r.get("channel"), "calls": r["calls"]}
+                           for r in agg if r["model"] in (gw_raw, cl_raw)],
+        "channel_count": ch_count,
+    })
+
+
+def _epoch_ms(y, mo, d, h=10, mi=0, s=0):
+    return int(datetime(y, mo, d, h, mi, s, tzinfo=TZ).timestamp() * 1000)
 
 
 if __name__ == "__main__":
     # 允许 `python test_channel_attribution.py` 直接跑（等价于 pytest 调用）
     import sys
-    sys.exit(pytest.main([__file__, "-v"]))
+    sys.exit(pytest.main([__file__, "-v", "--alluredir=allure-results"]))
