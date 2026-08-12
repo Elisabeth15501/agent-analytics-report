@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.1.1
+version: 1.1.2
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。首发支持 WorkBuddy，规划兼容更多 Agent。

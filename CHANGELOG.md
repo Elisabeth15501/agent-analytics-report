@@ -10,6 +10,15 @@
 - **测试配置与依赖固化**：新增 `pytest.ini`（指定 `--alluredir=allure-results`）、`requirements-tests.txt`；`.gitignore` 增补 `allure-results/`、`allure-report*`。
 - 测试仅依赖标准库 + `pytest` + `allure-pytest`，不引用任何第三方商业 API。
 
+## [1.1.2] — 2026-08-12
+
+### 🔧 发布 / 工程化
+- **SkillHub 重新发布修正**：平台禁止打包无扩展名文件（`.gitignore`、`LICENSE`），将 `LICENSE` 更名为 `LICENSE.md`（GitHub 仍识别为许可证，`license: MIT` 声明不变）；`.gitignore` 仅用于 Git，不进发布包。
+- **版本号升为 1.1.2**：覆盖平台上残留的 1.1.1 记录（首次发布因文件数超限被拒，平台仍写入了版本记录），以新版本号干净发布。
+- 发布包已剔除 `pricing.local.json` / `allure-results` / `allure-report*` / `_meta.json` / `.pytest_cache` 等隐私与测试占位文件。
+
+---
+
 ## [1.1.1] — 2026-08-11
 
 ### ✨ 新特性 / 改进
