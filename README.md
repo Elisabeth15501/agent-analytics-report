@@ -10,7 +10,7 @@
 本技能**目前仅适配 WorkBuddy**，请勿声称已兼容其他 Agent：
 
 - 数据采集自 WorkBuddy 本机数据（`~/.workbuddy/`、会话目录、`workbuddy.db`、`usage-log.json` 等）；
-- 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价）；
+- 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含最新 GLM-5.3，与 GLM-5.2 同价）；
 - 升级机制依赖 `skillhub upgrade`。
 
 架构已为「多 Agent 扩展」预留接缝（见 [ADAPTERS.md](ADAPTERS.md)），但 **Trae / 千问办公 等适配器尚未实现**。
@@ -55,22 +55,38 @@ python scripts/generate_report.py data.json --output report.html --format html
 
 ## 测试（pytest + Allure）
 
-核心逻辑（通道归因、周期对齐、生成时间格式等）带回归测试，覆盖「同一模型经不同接口（gateway / custom-local）」的识别、跨窗口会话补全等场景：
+本技能附带一套分层回归测试，覆盖从数据采集、计费等效折算、报告生成到发布一致性的全链路。**全部用例使用合成 fixture 数据，不引用任何第三方商业 API、不含真实用量/个人信息**，可安全公开（适合作为作品集在 GitHub Pages 展示）。
+
+测试分层（共 8 个测试文件、235 用例全绿）：
+
+| 层 | 文件 | 覆盖要点 |
+|----|------|----------|
+| **L0 数据采集** | `test_cost_math.py` · `test_calendar_period.py` · `test_aggregation.py` | 计价（GLM 折扣 / 缓存折算 / 限免 / blended 回退）、日历周期对齐、聚合与异常双口径检测 |
+| **L1 报告生成** | `test_report_generation.py` | GLM-5.2 家族合并、XSS 转义、图表构建、三格式（md / html / json）跑通 |
+| **L2 定价边界** | `test_pricing_boundary.py` | 通道分支、已下架模型、零/负/超大值、blended 精度 |
+| **L3 CLI 端到端** | `test_e2e_cli.py` | 黑盒 subprocess 跑通报告生成三格式、CLI 参数校验、恶意模型名 XSS 回归 |
+| **L4 发布一致性** | `test_publish_parity.py` | `config.json` / `metadata.json` 版本对齐、交付物齐全、`.gitignore` 闸门（敏感产物不进包） |
+| 既有 | `test_channel_attribution.py` | 通道归因、跨窗口会话补全（最早一批测试） |
+
+运行方式：
 
 ```bash
 cd agent-analytics-report
 
-# 1. 安装测试依赖（建议在隔离 venv 中）
+# 1. 安装测试依赖（建议隔离 venv）
 python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-tests.txt
 
-# 2. 运行测试并生成 Allure 原始数据
-.venv/Scripts/python.exe -m pytest tests/test_channel_attribution.py -v --alluredir=allure-results
+# 2. 运行全部测试并生成 Allure 原始数据
+.venv/Scripts/python.exe -m pytest tests/ -v --alluredir=allure-results
 
-# 3. 渲染自包含可视化报告（无需 Java）
+# 3a. 用本机 Java 渲染原生交互报告（可选）
+.venv/Scripts/python.exe -m allure serve allure-results
+
+# 3b. 渲染自包含 HTML 仪表盘（无需 Java，适合 GitHub Pages 静态托管）
 .venv/Scripts/python.exe tools/render_allure_html.py --results-dir allure-results --output allure-report.html
 ```
 
-- 用例按 `tests/conftest.py` 的 marker 体系标注（`smoke` / `integration` / `regression` / `golden` / `metadata` …），可用 `-m` 过滤，例如 `pytest -m regression`；
+- 用例按 `tests/conftest.py` 的 marker 体系标注（`smoke` / `unit` / `integration` / `regression` / `golden` / `metadata` / `privacy` …），可用 `-m` 过滤，例如 `pytest -m regression`；
 - 报告含用例步骤树、参数、归因明细附件；本机若装有 Java，也可直接 `allure serve allure-results` 消费同一份数据；
 - 测试仅依赖标准库 + `pytest` + `allure-pytest`，**不引用任何第三方商业 API**；`allure-results/` 与 `allure-report*` 已被 `.gitignore` 排除，不进发布包。
 
