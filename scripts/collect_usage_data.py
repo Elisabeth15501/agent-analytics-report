@@ -1230,7 +1230,7 @@ def aggregate_top_tasks(traces, sessions, top_n=10):
     return rows[:top_n]
 
 
-def aggregate_traces_by(traces, key_field):
+def aggregate_traces_by(traces, key_field, resolve_key_fn=None):
     """按 key_field 聚合模型维度。
 
     key_field 取值：
@@ -1238,6 +1238,10 @@ def aggregate_traces_by(traces, key_field):
                        "custom-local:glm-4.6v" 与裸 "glm-4.6v" 分两行，用于准确计费）
       - "model_name" → 实际执行模型维度（API 实际执行的裸模型名，如 "glm-5.2"，
                        反映你真实使用了哪些模型、各多少次）
+      - None         → 使用 resolve_key_fn 自定义键解析函数
+
+    resolve_key_fn: 可选回调，接收 trace 字典，返回聚合键。用于处理特殊修正逻辑
+    （如 hy3/hy3-x 误标修正）。
 
     返回列表（已配置单价的模型按花费降序在前）。每条：
       model / channel / calls / total_tokens / input_tokens / output_tokens / cached_tokens /
@@ -1255,7 +1259,10 @@ def aggregate_traces_by(traces, key_field):
     sum_trace_cost = (key_field == "exec_model")
     agg = {}
     for t in traces:
-        m = t.get(key_field)
+        if resolve_key_fn is not None:
+            m = resolve_key_fn(t)
+        else:
+            m = t.get(key_field)
         if not m or m == "default":
             # 接口维度允许回退到裸名；实际执行维度严格只用 model_name
             if key_field == "model_key":
@@ -1397,8 +1404,23 @@ def aggregate_traces_by(traces, key_field):
 
 
 def aggregate_by_model(traces):
-    """按「接口/通道」维度聚合（配置维度，用于准确计费）。"""
-    return aggregate_traces_by(traces, "model_key")
+    """按「接口/通道」维度聚合（配置维度，用于准确计费）。
+
+    与 aggregate_by_exec_model 的区别：此处按 trace 的 model_key（用户配置的入口标识）聚合，
+    反映你实际请求了哪些入口、各多少次。
+
+    注意：WorkBuddy 在 2026-08-21 之前存在 trace 标签误标问题 —— hy3 调用被错误标记为
+    model_key=hy3-x，但 exec_model=hy3。为消除此误标，当 model_key=hy3-x 而 exec_model=hy3 时，
+    强制将其归入 hy3 行（与账单口径一致）。
+    """
+    def _resolve_key(t):
+        mk = t.get("model_key", "")
+        em = t.get("exec_model", "")
+        # hy3-x 误标修正：model_key=hy3-x 但 exec_model=hy3 的 trace 实际是 hy3 调用
+        if mk.lower() == "hy3-x" and em.lower() == "hy3":
+            return "hy3"
+        return mk
+    return aggregate_traces_by(traces, None, resolve_key_fn=_resolve_key)
 
 
 def aggregate_by_exec_model(traces):

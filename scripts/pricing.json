@@ -39,6 +39,7 @@
   "models": {
     "auto": null,
     "hy3": {"input": 1.0, "output": 4.0},
+    "hy3-x": {"input": 1.0, "output": 4.0,"note": "hy3 收费版（每日免费额度用完后按官方价计费）；官方定价：输入1 / 输出4 每百万 tokens（缓存命中输入0.25）"},
     "glm-5.2": {"input": 8.0, "output": 28.0},
     "glm-5.3": {"input": 8.0, "output": 28.0, "note": "智谱 GLM-5.3（2026-08 发布，API 于 2026-08-19 正式开放）；官方定价与 GLM-5.2 完全一致：输入8 / 输出28 每百万 tokens（缓存命中输入 ¥2）；breaking change——thinking 思考模式强制开启（disabled 请求报错），默认 reasoning_effort=max；非高峰/周末调用享 50% 折扣（若 WorkBuddy 对 5.3 沿用 5.2 夜猫子计划，则应另加 glm-5.3-x ≈ 5.06/17.7）"},
     "glm-5.2-x": {"input": 5.06, "output": 17.7, "note": "实为智谱 GLM-5.2，Trace里面这个标注含 Workbuddy 的 glm-5.2 夜猫子折扣（2026-07-16开始）；单价：输入或输出每百万 tokens * 0.5 / 0.79"},
