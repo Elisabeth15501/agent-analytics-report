@@ -2,14 +2,6 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
-## [Unreleased]
-
-### ✨ 新特性 / 改进
-- **hy3-x 官方接口定价**：`pricing.json` 新增 `hy3-x` 模型（输入 1 / 输出 4 元/1M tokens，缓存命中输入 0.25），与 hy3 同架构同价，为每日免费额度用完后按官方价计费的正确计价依据。
-- **hy3 / hy3-x trace 误标修复**：WorkBuddy 在 2026-08-21 之前存在 trace 标签误标问题 —— hy3 调用被错误标记为 `model_key=hy3-x`，但 `exec_model=hy3`。`collect_usage_data.py` 新增 `resolve_key_fn` 回调，当 `model_key=hy3-x` 且 `exec_model=hy3` 时强制归入 hy3 行，确保账单口径与实际执行模型一致。
-
----
-
 ## [1.1.3] — 2026-08-23
 
 ### ✨ 新特性 / 改进
@@ -21,6 +13,8 @@
 - **新增 Allure 自包含可视化报告**：`tools/render_allure_html.py` 零依赖将 `allure-results/` 渲染为离线 HTML（无需 Java）；官方 `allure serve` 亦可消费同一份数据。
 - **测试配置与依赖固化**：新增 `pytest.ini`（指定 `--alluredir=allure-results`）、`requirements-tests.txt`；`.gitignore` 增补 `allure-results/`、`allure-report*`。
 - 测试仅依赖标准库 + `pytest` + `allure-pytest`，不引用任何第三方商业 API。
+
+---
 
 ## [1.1.2] — 2026-08-12
 
