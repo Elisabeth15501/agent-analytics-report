@@ -85,3 +85,9 @@ build/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# ---- Allure 测试报告产物（生成物，非发布源码）----
+allure-results/
+allure-report/
+allure-report.html
+allure-report-*.html

@@ -1,0 +1,5 @@
+# agent-analytics-report — 测试依赖
+# 安装（建议隔离 venv）：
+#   python -m venv .venv && .venv/Scripts/pip install -r requirements-tests.txt
+pytest>=8.0
+allure-pytest>=2.13

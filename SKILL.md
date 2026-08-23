@@ -1,14 +1,14 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.0.0
+version: 1.1.3
 metadata: metadata.json
 displayName: Agent 用量分析报告
-summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。首发支持 WorkBuddy，规划兼容更多 Agent。
+summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。首发支持 WorkBuddy，规划兼容更多 Agent。
 description: |
   Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。首发支持 WorkBuddy，规划兼容更多 Agent。
 
-  触发方式：直接说「生成使用周报 / 本月使用报告 / 看下这周 token 花了多少」即可，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
+  触发方式：当用户说「生成周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等时触发，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
   报告包含：
   - Token 消耗与成本：按实际计费模型对账，跟后台账单一致；每日趋势、缓存占比、成本货币化
@@ -121,7 +121,7 @@ python scripts/generate_report.py --start 2026-06-01 --end 2026-06-30 --output �
 1. **概览统计** — 活跃天数、会话总数、使用技能、自动化任务、产出文件、实际消耗 Token 与成本概览
 2. **Token 消耗可视化** — 原始总 Token 与实际消耗对比、每日趋势图、缓存占比、成本货币化分析
 3. **模型使用与成本对比** — 按模型统计 **调用次数、实际消耗 Token、单价（输入/输出分开计价，元/1M）、估算实际花费与占总花费比**；高亮 **🏆 最常使用模型** 与 **💸 最贵模型**；Markdown 用纯文本横向条形图（fenced 代码块）展示花费占比、HTML 用自包含内联横向条形图，两版数据/样式一致。未配置单价的模型显示「未配置」/「—」——**用户补单价请写入本地 `scripts/pricing.local.json` 的 `models`（或 `custom_local`）节点**（该文件不进发布包、升级不丢失；参考下方「加入你自己的自定义模型」）；官方模型若缺失可一并在此覆盖。**报告会自动在 §3.3 列出**本期所有缺失单价的模型名**与可复制的 `pricing.local.json` 补写片段，一眼可见缺了谁、怎么补。**双维度**：该章节现同时提供 **3.1 按接口/通道（计费维度）** 与 **3.2 按实际执行模型（使用维度）** 两张表——前者按你配置的 API 接口/通道聚合（费用结算依据，如 `auto` 路由、`custom-local` 自建接口各自独立成行），后者按 API 实际执行的底层模型名聚合（反映你真实使用了哪些模型、各多少次，例如走 `auto` 路由实际执行 `glm-5.2` 的调用会记到 `glm-5.2`）
-   - **定价库覆盖范围（`scripts/pricing.json`）**：① **11 个 WorkBuddy 官方内置模型**（来源：[WorkBuddy 官方模型列表](https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model)，2026-08，全部已配公开标价）：Hy3（限时免费至 2026-08-31）/ GLM-5.2 / GLM-5.1 / GLM-5v-Turbo / MiniMax-M3 / MiniMax-m2.7 / Kimi-K3 / Kimi-K2.7-Code / Kimi-K2.6 / Deepseek-V4-Flash / Deepseek-V4-Pro；外加 `auto` 智能路由别名（无单一单价，记为 `null`，报告内走 router_avg 均价估算）。② 你在 WorkBuddy 里**自行接入的第三方模型**（其它 GLM/MiniMax/Kimi/DeepSeek 变体、腾讯混元、OpenRouter 免费模型等）与 `custom-local:*` 自建接口**均不在此发布包内**——它们走 `pricing.json` 的 `custom_local` 段（**发布版为空 `{}`，需你下载后把单价写入自己的 `pricing.local.json`**，详见下方「加入你自己的自定义模型」）或回退到同名模型单价。报告会自动在 §3.3 列出所有缺失单价的模型名与可复制的补写片段。③ **已下架官方模型（`delisted` 段）**：WorkBuddy 会持续调整可选模型——历史上提供过、现已下架的官方模型（如早期免费 Flash、曾上架的社区/第三方模型）应放入 `pricing.json` 的 `delisted` 段而非删除。它们是官方模型，可随发布版走；放入后历史 trace 中这些模型的调用会被正常统计与计价（单价未知则标「已下架·未知」、不计成本），并在报告里以 🗄️ 标注，不会出现在 §3.3「缺失单价」清单。这样周报既能覆盖「当前可选模型」，也能覆盖「以前被调用过的模型」，符合「Agent 使用情况周报应包含任何曾发生过的调用」的目标。**核心原则**：发布版 `pricing.json` = 当前官方内置 `models` + 已下架官方 `delisted`；用户自己的第三方/自建模型只进 `pricing.local.json`（不进发布包）。报告模型清单由实际 trace 数据驱动，不在上述任一白名单里做硬过滤——因此即使某模型已从 WorkBuddy 下架或从未在定价库登记，只要历史 trace 里有调用，就会出现在报告里（下架官方模型标 🗄️，其它未登记模型标「未配置」并列入 §3.3）。**注意 `:free` 模型**：以 `:free` 结尾的 OpenRouter 免费模型（如 `nvidia/nemotron-3-nano-30b-a3b:free`、`poolside/laguna-xs-2.1:free`）走 `openrouter-free` 通道，自动免费（¥0），**无需在 `delisted` 登记**也会在报告里正常显示为「免费」——它们若是你自己的 OpenRouter 免费模型，本身就不在发布包里、也不影响公开版；若你确认某 `:free` 变体是 WorkBuddy 曾官方提供、现已下架的，把它的**完整模型名**（含 `:free` 后缀）写进 `delisted` 即可。
+   - **定价库覆盖范围（`scripts/pricing.json`）**：① **12 个 WorkBuddy 官方内置模型**（来源：[WorkBuddy 官方模型列表](https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model)，2026-08，全部已配公开标价）：Hy3（限时免费至 2026-08-31）/ GLM-5.3（2026-08 发布，与 GLM-5.2 同价）/ GLM-5.2 / GLM-5.1 / GLM-5v-Turbo / MiniMax-M3 / MiniMax-m2.7 / Kimi-K3 / Kimi-K2.7-Code / Kimi-K2.6 / Deepseek-V4-Flash / Deepseek-V4-Pro；外加 `auto` 智能路由别名（无单一单价，记为 `null`，报告内走 router_avg 均价估算）。② 你在 WorkBuddy 里**自行接入的第三方模型**（其它 GLM/MiniMax/Kimi/DeepSeek 变体、腾讯混元、OpenRouter 免费模型等）与 `custom-local:*` 自建接口**均不在此发布包内**——它们走 `pricing.json` 的 `custom_local` 段（**发布版为空 `{}`，需你下载后把单价写入自己的 `pricing.local.json`**，详见下方「加入你自己的自定义模型」）或回退到同名模型单价。报告会自动在 §3.3 列出所有缺失单价的模型名与可复制的补写片段。③ **已下架官方模型（`delisted` 段）**：WorkBuddy 会持续调整可选模型——历史上提供过、现已下架的官方模型（如早期免费 Flash、曾上架的社区/第三方模型）应放入 `pricing.json` 的 `delisted` 段而非删除。它们是官方模型，可随发布版走；放入后历史 trace 中这些模型的调用会被正常统计与计价（单价未知则标「已下架·未知」、不计成本），并在报告里以 🗄️ 标注，不会出现在 §3.3「缺失单价」清单。这样周报既能覆盖「当前可选模型」，也能覆盖「以前被调用过的模型」，符合「Agent 使用情况周报应包含任何曾发生过的调用」的目标。**核心原则**：发布版 `pricing.json` = 当前官方内置 `models` + 已下架官方 `delisted`；用户自己的第三方/自建模型只进 `pricing.local.json`（不进发布包）。报告模型清单由实际 trace 数据驱动，不在上述任一白名单里做硬过滤——因此即使某模型已从 WorkBuddy 下架或从未在定价库登记，只要历史 trace 里有调用，就会出现在报告里（下架官方模型标 🗄️，其它未登记模型标「未配置」并列入 §3.3）。**注意 `:free` 模型**：以 `:free` 结尾的 OpenRouter 免费模型（如 `nvidia/nemotron-3-nano-30b-a3b:free`、`poolside/laguna-xs-2.1:free`）走 `openrouter-free` 通道，自动免费（¥0），**无需在 `delisted` 登记**也会在报告里正常显示为「免费」——它们若是你自己的 OpenRouter 免费模型，本身就不在发布包里、也不影响公开版；若你确认某 `:free` 变体是 WorkBuddy 曾官方提供、现已下架的，把它的**完整模型名**（含 `:free` 后缀）写进 `delisted` 即可。
 4. **成本深度分析（每会话 / 异常 / 省钱）** — 覆盖行业调研头号诉求「每任务/每会话成本」；含 **4.1 每会话成本 Top 10**（按会话聚合 effective_cost，含任务类型、实际消耗、调用次数、主要模型）、**4.2 每会话成本分布**（按单会话成本分桶：¥0–1/¥1–5/¥5–20/¥20–50/¥50+）、**4.3 异常/飙升检测（成本 + Token 双口径）**——同时跑「💰成本口径」与「📊Token 口径」两套独立检测：成本口径仅在确有真实成本时启用；**Token 口径始终运行**，避免免费/限时免费模型拉低成本口径时漏报真实 Token 峰值（例如某日 11.43M token 环比 +315%）。免费主导期（免费 Token 占比≥80% 或总成本为 0）会在 §4 顶部插入免责声明，提示 §4.4/4.5/4.6 成本类洞察在免费期参考有限，应优先看 §4.3 Token 口径与 §4.6 缓存、**4.4 省钱杠杆自动洞察**（基于实际执行维度，对高占比付费模型给出更便宜替代与预计月省估算，如 glm-5.2→glm-4.5-air 预计月省 ¥7+）
 5. **任务类型统计** — 按任务类型分类的会话数量和占比、任务类型分布图
 6. **任务 Token 消耗统计** — 按任务类型聚合的 **实际消耗（计费等效）Token** 与估算成本（排名按实际消耗而非原始总量），定位真正吃 token 的任务类型；含**缓存占比**列解释"为什么原始数字大但实际便宜"；占比图：**Markdown 报告用纯文本横向条形图**（fenced 代码块，主题安全、窄项不糊、永不重叠），**HTML 报告仍用自包含内联 SVG 环形图**（currentColor + CSS 变量，双主题兼容）；并列出 **Top 10 实际消耗最高的任务对话框**（含自动化任务会话，按会话实际消耗排序，含任务类型、原始总量、缓存占比与估算成本）
@@ -250,6 +250,16 @@ python scripts/generate_report.py --period week --output report.md
 - `html` - HTML 格式，适合网页展示，包含样式和交互
 - `json` - JSON 格式，适合程序处理和数据分析
 
+## 测试与质量保障
+
+本技能附带一套 **pytest + Allure 分层回归测试**（L0 数据采集 / L1 报告生成 / L2 定价边界 / L3 CLI 端到端 / L4 发布一致性，共 8 个测试文件、235 用例全绿），全部使用合成 fixture 数据，**不含任何真实用量/个人信息**，可安全公开用于作品集展示。运行方式与 Allure 报告渲染见 [README.md](README.md) 的「测试」章节。
+
+几个关键的回归守护点：
+- `test_publish_parity.py` 校验 `config.json` 与 `metadata.json` 版本号一致，防止发布版本漂移；
+- `test_report_generation.py` 含 XSS 回归用例，确保恶意模型名在 HTML 报告中被强制转义；
+- `test_e2e_cli.py` 黑盒验证报告生成 CLI 端到端可用（仅喂合成数据，绝不触碰真实 `workbuddy.db`）；
+- `test_pricing_boundary.py` 守卫计价边界（通道分支、已下架模型、零/负/超大值、blended 回退精度）。
+
 ## 执行流程
 
 当用户请求周报时：
@@ -318,7 +328,7 @@ python scripts/generate_report.py --period week --output report.md
 - JSON 格式报告结构化数据，便于程序处理和集成
 - 成本货币化按**模型单价（输入/输出分别计价，元/1M）**计算，单价表见 `collect_usage_data.py` 的 `MODEL_PRICING`。键名为本机真实模型名（已联网查证 2026-07-29 填入）：
   - `hy3` 腾讯混元官方 RMB：输入 1 / 输出 4；`deepseek-v4-pro` DeepSeek 官方永久价 RMB：输入 3 / 输出 6；
-  - 智谱 GLM 系列（**bigmodel.cn 国内官方 RMB 价**，用户接口走 bigmodel.cn，非 Z.ai 美元折算）：`glm-5.2` 8/28、`glm-5` 6/22、`glm-4.6v` 2/6、`glm-4.5-air` 1.2/8、`glm-4.7-flash` 免费（0/0）、`glm-5.2-x` 暂按 glm-5.2（均为 agent 长上下文档代表值，短上下文更低）；
+  - 智谱 GLM 系列（**bigmodel.cn 国内官方 RMB 价**，用户接口走 bigmodel.cn，非 Z.ai 美元折算）：`glm-5.3` 8/28（与 glm-5.2 同价，2026-08 发布，思考模式强制开启）、`glm-5.2` 8/28、`glm-5` 6/22、`glm-4.6v` 2/6、`glm-4.5-air` 1.2/8、`glm-4.7-flash` 免费（0/0）、`glm-5.2-x` 暂按 glm-5.2（均为 agent 长上下文档代表值，短上下文更低）；
   - 免费 `:free` 模型已标 0；
   - `auto` 为**智能路由别名**（执行时自动调配最适合模型，类似 openrouter/free），无单一单价——代码自动取「所有计费模型（单价>0）的均价」做代表性估算，报告中以 ℹ️ 注明「估算值」；若想精确，可在 `MODEL_PRICING` 给 `auto` 直接填 `{"input":..,"output":..}` 覆盖。
   - 未配置 / 未知模型显示「未配置」且不计入花费占比。以上为公开标价估算，请以 WorkBuddy 实际账单为准。
