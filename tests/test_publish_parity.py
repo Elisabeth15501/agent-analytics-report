@@ -95,25 +95,26 @@ def test_required_artifacts_present():
 @allure.severity(allure.severity_level.CRITICAL)
 def test_gitignore_gates():
     try:
-        # 测试文件必须「不被忽略」
+        # 必须「不被忽略」：发布交付物与测试文件（能进 GitHub / SkillHub）
         must_not_ignore = [
             "tests/test_cost_math.py",
             "tests/test_report_generation.py",
             "tests/test_pricing_boundary.py",
             "tests/test_e2e_cli.py",
             "tests/test_publish_parity.py",
-            "TESTING.md",
         ]
         for p in must_not_ignore:
             assert not _is_gitignored(p), f"{p} 被 .gitignore 忽略，测试体系将无法进发布包"
 
-        # 敏感 / 生成产物必须「被忽略」
+        # 敏感 / 生成产物 / 开发者内部文档必须「被忽略」（不进公开仓库）
         must_ignore = [
             "data.json",
             "pricing.local.json",
             "allure-results",
             "report.md",
             "测试报告.md",
+            "TESTING.md",
+            "TECH_DEBT.md",
         ]
         for p in must_ignore:
             assert _is_gitignored(p), f"{p} 未被 .gitignore 忽略，存在误发布风险"
