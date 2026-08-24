@@ -24,7 +24,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.whitebox]
 @allure.severity(allure.severity_level.NORMAL)
 def test_resolve_day(collector_module):
     s, e, pk, label = collector_module.resolve_date_range(period="day")
-    today = date.today().strftime("%Y-%m-%d")
+    today = datetime.now(collector_module.TZ).date().strftime("%Y-%m-%d")
     assert s == e == today
     assert pk == "day" and label == "日报"
 
@@ -66,8 +66,9 @@ def test_resolve_month(collector_module):
 def test_resolve_year(collector_module):
     s, e, pk, label = collector_module.resolve_date_range(period="year")
     assert pk == "year" and label == "年报"
-    assert s == f"{date.today().year}-01-01"
-    assert e == f"{date.today().year}-12-31"
+    year = datetime.now(collector_module.TZ).year
+    assert s == f"{year}-01-01"
+    assert e == f"{year}-12-31"
 
 
 @allure.feature("时间窗口与日历对齐（Calendar Alignment）")
