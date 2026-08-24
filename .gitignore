@@ -91,3 +91,9 @@ allure-results/
 allure-report/
 allure-report.html
 allure-report-*.html
+
+# ---- 仅开发者可见文档（非发布物，不进公开仓库）----
+# TECH_DEBT.md / TESTING.md 面向开发者维护（技术债清单、测试说明），
+# 不面向最终用户，故不推送到公开的 GitHub 仓库。
+TECH_DEBT.md
+TESTING.md
