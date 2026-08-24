@@ -1,0 +1,65 @@
+name: Build & Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 允许 GITHUB_TOKEN 部署到 Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一个部署，互不取消
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-tests.txt
+          pip install markdown
+
+      - name: Run tests (产出 allure-results)
+        run: python -m pytest -q
+
+      - name: Generate self-contained HTML report
+        run: python gen_report.py
+
+      - name: Render README / SKILL to HTML
+        run: python docs_render.py
+
+      - name: Assemble Pages artifact
+        run: |
+          mkdir -p _site
+          cp index.html test-report.html README.html SKILL.html README.md SKILL.md TECH_DEBT.md LICENSE.md .nojekyll _site/ 2>/dev/null || true
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
