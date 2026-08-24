@@ -98,5 +98,13 @@ allure-report-*.html
 TECH_DEBT.md
 TESTING.md
 
+# ---- CI 生成的 GitHub Pages 产物（由 workflow 自动生成并部署，不提交）----
+# docs_render.py / gen_report.py 在 CI 里从 markdown / allure 生成，
+# 然后由 actions/deploy-pages@v4 直接部署到 gh-pages，main 分支无需保留。
+index.html
+README.html
+SKILL.html
+test-report.html
+
 # 本机真实数据（含成本、使用情况、个人信息等）不应上传到公开仓库，避免泄露隐私或敏感信息。
 week_*.json
