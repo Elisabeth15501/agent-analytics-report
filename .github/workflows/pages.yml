@@ -35,7 +35,7 @@ jobs:
           pip install markdown
 
       - name: Run tests (产出 allure-results)
-        run: python -m pytest -q
+        run: python -m pytest -q --alluredir=allure-results
 
       - name: Generate self-contained HTML report
         run: python gen_report.py
