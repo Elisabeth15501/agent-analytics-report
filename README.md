@@ -10,7 +10,7 @@
 本技能**目前仅适配 WorkBuddy**，请勿声称已兼容其他 Agent：
 
 - 数据采集自 WorkBuddy 本机数据（`~/.workbuddy/`、会话目录、`workbuddy.db`、`usage-log.json` 等）；
-- 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含最新 GLM-5.3，与 GLM-5.2 同价）；
+- 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含 GLM-5.3 / GLM-5.3-Flash / Hy4 preview 等最新模型）；
 - 升级机制依赖 `skillhub upgrade`。
 
 架构已为「多 Agent 扩展」预留接缝（见 [ADAPTERS.md](ADAPTERS.md)），但 **Trae / 千问办公 等适配器尚未实现**。
@@ -20,7 +20,8 @@
 ## 功能
 
 - **Token 分析**：消耗趋势、原始 vs 实际（含缓存抵扣）、缓存占比
-- **成本估算**：按模型公开单价计算，以实际账单为准；限免模型自动标注（如混元 Hy3 限时免费至 2026-08-31，花费记 ¥0.00）
+- **成本估算**：按模型公开单价计算，以实际账单为准；限免模型自动标注（如混元 Hy3 限时免费至 2026-09-30、Hy4 preview 至 2026-09-10，期间花费记 ¥0.00）
+- **免费额度版 / 收费版合并显示**：同一模型的两个入口（如 `hy4-preview` 与 `hy4-preview-x`、`hy3` 与 `hy3-x`）在报告中合并为一行，费用只计收费版用量——合并只改显示分组，不碰计费（`pricing.json` 的 `display_merge` 段可增删合并对）
 - **异常双口径**：成本 + Token 独立检测，免费期高流量也不漏报；脏数据显式警告
 - **自定义模型（Bring Your Own Models）**：带上你自己的模型一起计费，升级不丢
 - **报告格式**：Markdown / HTML（含交互图表、浅深色自适应）/ JSON
@@ -116,7 +117,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 |------|------|
 | `scripts/collect_usage_data.py` | 数据采集（当前为 WorkBuddy 适配器） |
 | `scripts/generate_report.py` | 报告渲染（四色标记：🔀路由 / 🏠本地 / 🔧外部自定义 / 🗄️官方已下架） |
-| `scripts/pricing.json` | 官方模型计价库（含 `delisted` 历史下架模型） |
+| `scripts/pricing.json` | 官方模型计价库（含 `delisted` 历史下架模型、`display_merge` 显示合并配置） |
 | `scripts/pricing.local.json` | 用户本地覆盖（gitignore，不发布） |
 | `references/` `examples/` | 操作手册与使用示例 |
 
