@@ -57,11 +57,11 @@ python scripts/generate_report.py data.json --output report.html --format html
 
 本技能附带一套分层回归测试，覆盖从数据采集、计费等效折算、报告生成到发布一致性的全链路。**全部用例使用合成 fixture 数据，不引用任何第三方商业 API、不含真实用量/个人信息**，可安全公开（适合作为作品集在 GitHub Pages 展示）。
 
-测试分层（共 8 个测试文件、235 用例全绿）：
+测试分层（共 9 个测试文件、284 用例全绿）：
 
 | 层 | 文件 | 覆盖要点 |
 |----|------|----------|
-| **L0 数据采集** | `test_cost_math.py` · `test_calendar_period.py` · `test_aggregation.py` | 计价（GLM 折扣 / 缓存折算 / 限免 / blended 回退）、日历周期对齐、聚合与异常双口径检测 |
+| **L0 数据采集** | `test_cost_math.py` · `test_calendar_period.py` · `test_aggregation.py` · `test_display_merge.py` | 计价（GLM 折扣 / 缓存折算 / 限免 / blended 回退）、日历周期对齐、聚合与异常双口径检测、display_merge 合并显示与计费分离 |
 | **L1 报告生成** | `test_report_generation.py` | GLM-5.2 家族合并、XSS 转义、图表构建、三格式（md / html / json）跑通 |
 | **L2 定价边界** | `test_pricing_boundary.py` | 通道分支、已下架模型、零/负/超大值、blended 精度 |
 | **L3 CLI 端到端** | `test_e2e_cli.py` | 黑盒 subprocess 跑通报告生成三格式、CLI 参数校验、恶意模型名 XSS 回归 |
