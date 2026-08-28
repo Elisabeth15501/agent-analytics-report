@@ -336,6 +336,8 @@ python scripts/generate_report.py --period week --output report.md
 
 ## 常见问题（FAQ）
 
+> 完整版（34 问，覆盖安装 / 生成 / 计价 / 自定义模型 / 标记与合并 / 数据源隐私 / 分类异常 / 故障排查）见 **[references/FAQ.md](references/FAQ.md)**，单篇自足。下方只保留最高频的几条。
+
 **Q：报告里的花费和 WorkBuddy 后台对不上？**
 A：报告按「实际计费模型」（exec_model / 接口通道）聚合，与后台口径一致；若你的模型单价未配置或走了 `custom-local` 自建接口，报告按公开标价估算，请以接口方账单为准。
 
