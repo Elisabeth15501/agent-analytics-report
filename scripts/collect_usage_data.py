@@ -63,9 +63,11 @@ MODEL_PRICING = {
     "auto": None,            # WorkBuddy 智能路由：执行时自动调配最适合模型
     # —— 腾讯混元（官方 RMB）——
     "hy3": {"input": 1.0, "output": 4.0},           # 腾讯混元官方：输入1 / 输出4（限时免费至 2026-08-31）
+    "hy4-preview": {"input": 6.0, "output": 18.0},  # 腾讯混元 Hy4 preview（2026-08-28 发布开源，WorkBuddy 首发）：输入6 / 输出18（缓存命中0.3）；WorkBuddy 2 周限免
     # —— 智谱 GLM 系列（bigmodel.cn 国内官方 RMB，非 Z.ai 美元折算）——
     "glm-5.2": {"input": 8.0, "output": 28.0},      # 智谱官方 1M 上下文：输入8 / 输出28
     "glm-5.1": {"input": 8.0, "output": 28.0},      # 智谱官方：输入8 / 输出28
+    "glm-5.3-flash": {"input": 0.8, "output": 2.8}, # 智谱 GLM-5.3-Flash（320B-A18B 开源，2026-08-26 发布）：输入0.8 / 输出2.8（缓存命中0.23），约为 GLM-5.3 的 1/10
     "glm-5v-turbo": {"input": 5.0, "output": 22.0}, # 智谱官方多模态：输入5 / 输出22
     # —— MiniMax（官方 RMB）——
     "minimax-m3": {"input": 1.0, "output": 4.0},    # 与 hy3 同网关，同价位
@@ -227,6 +229,7 @@ def _load_pricing_config():
         "default_model": DEFAULT_MODEL,
         "delisted_models": set(),
         "user_custom_models": set(),
+        "display_merge": {},
     }
     cfg_path = here / "pricing.json"
     if cfg_path.exists():
@@ -245,6 +248,12 @@ def _load_pricing_config():
                 cfg["user_custom_models"].update(normalize_model(x) for x in data["user_custom_models"])
             if isinstance(data.get("custom_local"), dict):
                 cfg["custom_local"].update(data["custom_local"])
+            if isinstance(data.get("display_merge"), dict):
+                # 显示层合并：变体名 -> 基础模型名（仅影响报告分组，不影响逐 trace 计费）
+                cfg["display_merge"].update(
+                    {normalize_model(k): str(v) for k, v in data["display_merge"].items()
+                     if not str(k).startswith("_")}
+                )
             if data.get("default_model"):
                 cfg["default_model"] = str(data["default_model"])
         except Exception as e:
@@ -266,6 +275,11 @@ def _load_pricing_config():
                 cfg["user_custom_models"].update(normalize_model(x) for x in local["user_custom_models"])
             if isinstance(local.get("timed_free"), dict):
                 cfg["timed_free"].update(local["timed_free"])
+            if isinstance(local.get("display_merge"), dict):
+                cfg["display_merge"].update(
+                    {normalize_model(k): str(v) for k, v in local["display_merge"].items()
+                     if not str(k).startswith("_")}
+                )
             if local.get("default_model"):
                 cfg["default_model"] = str(local["default_model"])
             local_loaded = True
@@ -279,6 +293,17 @@ TIMED_FREE = _PRICING["timed_free"]
 CUSTOM_LOCAL_PRICING = _PRICING["custom_local"]
 DEFAULT_MODEL = _PRICING["default_model"]
 DELISTED_MODELS = _PRICING.get("delisted_models", set())
+# 显示层合并映射：{变体名: 基础模型名}（如 hy4-preview-x -> hy4-preview）。
+# 仅用于报告分组/显示，绝不参与计价——每行费用仍按各 trace 的 exec_model 单独计算，
+# 以保证「免费额度版记 ¥0、收费版按刊例价计费」的口径不被合并破坏。
+DISPLAY_MERGE = _PRICING.get("display_merge", {})
+
+
+def merge_display_key(name):
+    """把模型名按 display_merge 映射为显示用的基础模型名；未配置则原样返回。"""
+    if not name:
+        return name
+    return DISPLAY_MERGE.get(normalize_model(name), name)
 USER_CUSTOM_MODELS = _PRICING.get("user_custom_models", set())
 
 
@@ -1230,7 +1255,7 @@ def aggregate_top_tasks(traces, sessions, top_n=10):
     return rows[:top_n]
 
 
-def aggregate_traces_by(traces, key_field, resolve_key_fn=None):
+def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_key_fn=None):
     """按 key_field 聚合模型维度。
 
     key_field 取值：
@@ -1240,8 +1265,13 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None):
                        反映你真实使用了哪些模型、各多少次）
       - None         → 使用 resolve_key_fn 自定义键解析函数
 
-    resolve_key_fn: 可选回调，接收 trace 字典，返回聚合键。用于处理特殊修正逻辑
-    （如 hy3/hy3-x 误标修正）。
+    resolve_key_fn: 可选回调，接收 trace 字典，返回**显示键**（用于分组与报告展示）。
+    用于处理特殊修正逻辑（如 hy3/hy3-x 误标修正、display_merge 显示层合并）。
+
+    resolve_billing_key_fn: 可选回调，接收 trace 字典，返回**计费键**，默认与显示键相同。
+    仅 display_merge 合并场景需要分离二者：显示键是合并后的基础模型名（报告只显示一行），
+    计费键仍是该 trace 的实际执行模型（exec_model）。否则合并行会把「收费版」的用量
+    也按「免费额度版」的限免价算成 ¥0，导致花费凭空消失。
 
     返回列表（已配置单价的模型按花费降序在前）。每条：
       model / channel / calls / total_tokens / input_tokens / output_tokens / cached_tokens /
@@ -1263,6 +1293,9 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None):
             m = resolve_key_fn(t)
         else:
             m = t.get(key_field)
+        # 计费键：默认与显示键相同；display_merge 合并场景下取该 trace 的实际执行模型，
+        # 保证「免费额度版记 ¥0 / 收费版按刊例价」的口径不被显示层合并破坏。
+        bm = resolve_billing_key_fn(t) if resolve_billing_key_fn is not None else m
         if not m or m == "default":
             # 接口维度允许回退到裸名；实际执行维度严格只用 model_name
             if key_field == "model_key":
@@ -1293,7 +1326,9 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None):
         a["effective_tokens"] += t.get("effective_tokens", 0)
         # 限免调用计数（与计价分支无关）：用于两种口径都能正确标注「限时免费」，
         # 避免账单口径下限免模型的 ¥0 被渲染器误判为「未配置单价」。
-        if is_timed_free(m, t.get("date")):
+        # ⚠️ 用计费键 bm 而非显示键 m：合并行里只有真正落在限免期内的调用才算，
+        # 否则含收费调用的合并行会被整体误标为「限时免费」。
+        if is_timed_free(bm, t.get("date")):
             a["timed_free_calls"] = a.get("timed_free_calls", 0) + 1
         if sum_trace_cost:
             # 账单口径：直接累加 trace 已算成本（含 auto router_avg / 限免 ¥0），必然与头条一致
@@ -1303,12 +1338,14 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None):
             a["effective_cost"] += t.get("effective_cost", 0.0)
         else:
             # 入口/使用视图：按本模型在本 trace 日期的真实单价重算（免费入口记 0）
-            tip, top = price_of(m, as_of_date=t.get("date"))
+            # ⚠️ 用计费键 bm：合并行内各 trace 按「自己实际执行的模型」计价，
+            # 否则 hy4-preview-x 的用量会被 hy4-preview 的限免价算成 ¥0，花费凭空消失。
+            tip, top = price_of(bm, as_of_date=t.get("date"))
             if tip is not None and top is not None:
                 inp = t.get("input_tokens", 0)
                 out = t.get("output_tokens", 0)
                 # GLM-5.2 夜猫子计划：按模型名定率（与 §3.1 同源）
-                _mult = glm52_discount_multiplier(m)
+                _mult = glm52_discount_multiplier(bm)
                 a["input_cost"] += (inp / 1_000_000) * tip * _mult
                 a["output_cost"] += (out / 1_000_000) * top * _mult
                 a["total_cost"] += ((inp / 1_000_000) * tip + (out / 1_000_000) * top) * _mult
@@ -1412,6 +1449,11 @@ def aggregate_by_model(traces):
     注意：WorkBuddy 在 2026-08-21 之前存在 trace 标签误标问题 —— hy3 调用被错误标记为
     model_key=hy3-x，但 exec_model=hy3。为消除此误标，当 model_key=hy3-x 而 exec_model=hy3 时，
     强制将其归入 hy3 行（与账单口径一致）。
+
+    display_merge（见 pricing.json）：把「收费版变体」（如 hy4-preview-x / hy3-x）在显示层
+    合并到基础模型名（hy4-preview / hy3），报告里只出现一行。合并**只改显示分组**，
+    计费键仍取各 trace 的 exec_model —— 故免费额度版用量记 ¥0、收费版用量按刊例价计费，
+    合并行的花费即「其中收费版那部分的费用」。
     """
     def _resolve_key(t):
         mk = t.get("model_key", "")
@@ -1419,8 +1461,17 @@ def aggregate_by_model(traces):
         # hy3-x 误标修正：model_key=hy3-x 但 exec_model=hy3 的 trace 实际是 hy3 调用
         if mk.lower() == "hy3-x" and em.lower() == "hy3":
             return "hy3"
+        # display_merge：收费版变体并入基础模型名显示
+        return merge_display_key(mk)
+
+    def _resolve_billing_key(t):
+        mk = t.get("model_key", "")
+        # 仅合并行需要分离：按 trace 实际执行的模型计费，避免限免价吃掉收费版的费用
+        if normalize_model(mk) in DISPLAY_MERGE:
+            return t.get("exec_model") or mk
         return mk
-    return aggregate_traces_by(traces, None, resolve_key_fn=_resolve_key)
+    return aggregate_traces_by(traces, None, resolve_key_fn=_resolve_key,
+                               resolve_billing_key_fn=_resolve_billing_key)
 
 
 def aggregate_by_exec_model(traces):
@@ -1431,8 +1482,21 @@ def aggregate_by_exec_model(traces):
     custom-local 通道的 GLM 调用，都会归到对应裸模型行，而非被 auto / custom-local:* 吸收。
     用于回答「我到底实际用了哪些模型、各多少次」。
     花费按裸名单价估算；自建接口（custom-local）实际单价未知，仅供粗略参考。
+
+    display_merge：与 aggregate_by_model 同样把收费版变体合并到基础模型名显示。
+    本口径为账单口径（sum_trace_cost），费用直接累加各 trace 已算好的成本，
+    因此合并显示不会改变任何金额——合并行的花费天然等于其中收费版部分的费用。
     """
-    return aggregate_traces_by(traces, "exec_model")
+    def _resolve_key(t):
+        return merge_display_key(t.get("exec_model", ""))
+
+    def _resolve_billing_key(t):
+        # 保持「原始 exec_model」用于限免判定：合并行里若夹着收费版调用，
+        # 绝不能被整体标成「限时免费」——否则报告会显示「限免」却挂着一笔真实花费。
+        # 本口径费用直接累加 trace 成本，故此处只影响 timed_free 标注，不影响金额。
+        return t.get("exec_model") or ""
+    return aggregate_traces_by(traces, "exec_model", resolve_key_fn=_resolve_key,
+                               resolve_billing_key_fn=_resolve_billing_key)
 
 
 def aggregate_by_session(traces, sessions):
