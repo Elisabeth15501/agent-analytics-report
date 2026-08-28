@@ -2,7 +2,7 @@
 
 这里汇总使用本技能时最容易撞上的问题。按「安装 → 生成 → 计价 → 自定义模型 → 标记与合并 → 数据源与隐私 → 分类与异常 → 排查」排列，单篇自足，不用再翻 SKILL.md 和 README。
 
-> 适用版本：**v1.1.3**（核对 `config.json` / `metadata.json`）。**目前仅适配 WorkBuddy。**
+> 适用版本：**v1.2.0**（核对 `config.json` / `metadata.json`）。**目前仅适配 WorkBuddy。**
 
 ---
 
@@ -91,6 +91,12 @@ python scripts/generate_report.py data.json --output report.json  --format json 
 | `scripts/pricing.local.json` | 本地覆盖：你自己的第三方/自建模型 | **不会** |
 
 两份都缺时，回退到 `collect_usage_data.py` 里的内置 `MODEL_PRICING` 常量。单位是**元 / 每百万 tokens，输入按缓存未命中价**。
+
+截至 v1.2.0，发布版已配价的官方模型共 17 项（完整清单以 `scripts/pricing.json` 为准）：
+
+`auto`（路由别名）· `hy3` / `hy3-x` · `hy4-preview` / `hy4-preview-x` · `glm-5.3` / `glm-5.3-flash` / `glm-5.2` / `glm-5.2-x` / `glm-5.1` / `glm-5v-turbo` · `minimax-m3` · `kimi-k3` / `kimi-k2.7-code` / `kimi-k2.6` · `deepseek-v4-flash` / `deepseek-v4-pro`
+
+其中 `hy3` 限时免费至 2026-09-30、`hy4-preview` 限时免费至 2026-09-10。已下架的历史官方模型单独放在 `delisted` 段（报告里标 🗄️），不在上面这份清单里。
 
 **Q12. 报告显示「未配置」怎么办？**
 报告 **§3.3** 会列出本期所有缺失单价的模型名，并给出可直接复制的 `pricing.local.json` 补写片段。照着贴进本地文件、重跑即可。未配置的模型不计入成本总额，也不会污染占比。
@@ -246,9 +252,12 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 .venv/Scripts/python.exe tools/render_allure_html.py --results-dir allure-results --output allure-report.html
 ```
 
-当前 **9 个测试文件、284 用例**（README 里写的 235 是旧数字）。全部使用合成 fixture 数据，不含任何真实用量或个人资料，可安全公开。用例按 marker 分层（`smoke` / `unit` / `integration` / `regression` / `golden` / `metadata` / `privacy`），可用 `pytest -m regression` 过滤。
+当前 **9 个测试文件、284 用例**。全部使用合成 fixture 数据，不含任何真实用量或个人资料，可安全公开。用例按 marker 分层（`smoke` / `unit` / `integration` / `regression` / `golden` / `metadata` / `privacy`），可用 `pytest -m regression` 过滤。
 
 注意：`pytest.ini` 的 `addopts` 里带 `--alluredir`，若环境没装 `allure-pytest` 插件，跑测试要加 `-o addopts=""` 绕过。
 
 **Q34. `tests/test_channel_attribution.py` 单独跑会崩？**
 这个文件有近 190 个参数化集成用例，每个参数都要建临时 SQLite 和 traces 目录，本机资源不够时进程会被系统杀掉（表现为无任何输出、退出码 1）。**不是用例失败**。建议用 `-k` 分批跑，例如 `pytest tests/test_channel_attribution.py -k "hy3 or hy4"`。CI 上资源充足时可以全量跑。
+
+**Q35. 我在用另一个类似 WorkBuddy 的工具，想用这个Skill，但目前只支持 WorkBuddy，可以怎样做？**
+请参考 [ADAPTERS.md](ADAPTERS.md) 中的适配器说明。
