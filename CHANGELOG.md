@@ -2,6 +2,30 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.2.0] — 2026-08-29
+
+### ✨ 新特性 / 改进
+- **`display_merge`：免费额度版 / 收费版合并显示**。WorkBuddy 对同一模型会提供两个入口——免费额度版（trace 记 `hy4-preview`）与免费额度用尽后的收费版（trace 记 `hy4-preview-x`）。过去它们在报告里被拆成两行、读起来像两个模型；现在按 `pricing.json` 新增的 `display_merge` 段合并为一行。
+  - **合并只改分组，不碰钱**：引入「显示键 / 计费键分离」——显示键取合并后的基础模型名，计费键仍是每条 trace 实际执行的模型（`exec_model`）。因此免费额度版用量记 ¥0、收费版按刊例价计费，合并行的花费即等于其中**收费版那部分**的费用。
+  - 实现要点：`aggregate_traces_by()` 新增 `resolve_billing_key_fn` 参数；`aggregate_by_model` 的合并行按 `exec_model` 计费；`timed_free_calls` 改用计费键统计，避免含收费调用的合并行被整体误标「限时免费」。
+  - 可配置：增删合并对只改 `pricing.json`（或本地 `pricing.local.json`）的 `display_merge` 段，无需改动 Python 代码。默认已配 `hy4-preview-x → hy4-preview`、`hy3-x → hy3`。
+  - 已验证：开关 `display_merge` 对照，§3.1（账单口径）与 §3.2（入口视图）两个维度的总金额均完全不变。
+
+### 💰 定价库更新
+- **新增 GLM-5.3-Flash**：输入 0.8 / 输出 2.8 元每百万 tokens（缓存命中 0.23，约为 GLM-5.3 的 1/10；国际版 z.ai / OpenRouter 为 $0.15 / $0.50）。
+- **新增 Hy4 preview 与 hy4-preview-x**：输入 6 / 输出 18 元每百万 tokens（缓存命中 0.3）。`hy4-preview` 为免费额度版，`hy4-preview-x` 为额度用尽后的收费版。
+- `hy4-preview` 限时免费至 **2026-09-10**（`timed_free`）。
+
+### 📚 文档
+- **新增 `references/FAQ.md`（34 问）**：按安装 / 生成 / 计价 / 自定义模型 / 标记与合并 / 数据源隐私 / 分类异常 / 故障排查分节，单篇自足，不用再翻 SKILL.md 与 README。含 `display_merge` 专项（为什么合并、费用怎么算、怎么改配置）。
+- README.md 新增「常见问题」章节、SKILL.md 的 FAQ 章节顶部均指向完整版。
+- 修正测试规模描述：**9 个测试文件、284 用例**（原写 8 文件 / 235 用例，已过时）。
+
+### 🧪 测试
+- **新增 `tests/test_display_merge.py`（13 用例）**：配置加载、两个维度均合并为一行、费用只计收费版（核心回归：若误用显示键计价，费用会被限免价吃成 ¥0）、合并前后金额守恒、限免标注正确、hy3 系列、未配置合并的模型不受影响。
+
+---
+
 ## [1.1.3] — 2026-08-23
 
 ### ✨ 新特性 / 改进
