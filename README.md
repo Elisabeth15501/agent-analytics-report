@@ -104,6 +104,12 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 
 ---
 
+## 常见问题
+
+花费对不上、模型显示「未配置」、想加自己的模型、想知道那些小图标什么意思——集中解答见 [references/FAQ.md](references/FAQ.md)（34 问，单篇自足）。
+
+---
+
 ## 架构与扩展
 
 | 文件 | 职责 |
