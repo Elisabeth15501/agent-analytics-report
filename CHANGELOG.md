@@ -2,6 +2,15 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.2.1] — 2026-08-29
+
+### 🐛 修复 / 数据完整性
+- **修复「幽灵调用」占比虚高（trace 采集 schema 盲区）**。WorkBuddy 除扁平 LLM 调用 trace 外，还会写入 `Agent workflow` 类 trace：顶层 `modelInfo` 为空、`totalTokens=0`、`sessionId` 缺失，但模型与 Token 真实藏在内部 `generation` span 的 `toolOutput` 里。旧采集器只扫顶层字段，把这类真实工作流整批误判为「默认 glm-5.2」，导致幽灵率虚高约 42%、真实用量被低估约 15%。
+- **新增 `_recover_model_info_from_spans()`**：顶层缺 `modelInfo` 时遍历 span 还原 `model` / `usage` 并回填 `collect_traces`。实测窗口内幽灵率 42.0% → 4.7%，回收约 16.7M Token（模型分布从 5 种扩到 10 种）。
+- **已知限制**：`Agent workflow` 类 trace 的 `sessionId` 完全缺失（0 处），「按会话维度」归属仍不可恢复；残余约 4% 为控制流 span（`toolOutput` 无可解析 model），属真·不可归属。
+
+---
+
 ## [1.2.0] — 2026-08-29
 
 ### ✨ 新特性 / 改进
