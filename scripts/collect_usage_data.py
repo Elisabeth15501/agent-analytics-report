@@ -593,6 +593,58 @@ def resolve_date_range(period=None, days=None, start=None, end=None):
 
 
 # ── 1. 采集 Trace 数据（token 消耗） ─────────────────────
+def _recover_model_info_from_spans(trace_file_dict):
+    """兜底：当 trace 顶层缺 modelInfo 时，从内部 generation span 的 toolOutput 还原模型与 Token。
+
+    WorkBuddy 会发出两种 trace schema：
+      1) 扁平 LLM 调用 trace：顶层带 modelInfo / sessionId / totalTokens（采集器主路径）。
+      2) 'Agent workflow' trace：顶层只有 spanCount / metadata，模型与 Token 数据藏在
+         每个 generation span 的 toolOutput（chat.completion JSON 字符串）里，顶层
+         modelInfo 为空、totalTokens=0、sessionId 缺失。
+    本函数解析后者，使这些真实工作流不被误判为「幽灵调用」而整批漏采。
+    返回 None 表示无可用还原数据（仍走原 default 兜底）。
+    """
+    spans = (trace_file_dict or {}).get("spans", []) or []
+    if not spans:
+        return None
+    models: list = []
+    tot_in = tot_out = tot_cached = tot_calls = 0
+    for s in spans:
+        if s.get("name") != "generation":
+            continue
+        to = s.get("toolOutput")
+        if not to:
+            continue
+        try:
+            arr = json.loads(to) if isinstance(to, str) else to
+        except Exception:
+            continue
+        if isinstance(arr, list):
+            arr = arr[0] if arr else {}
+        if not isinstance(arr, dict):
+            continue
+        m = arr.get("model")
+        if m and m not in models:
+            models.append(m)
+        u = arr.get("usage")
+        if isinstance(u, dict):
+            tot_in += (u.get("prompt_tokens") or u.get("input_tokens") or 0)
+            tot_out += (u.get("completion_tokens") or u.get("output_tokens") or 0)
+            tot_calls += 1
+            cd = (u.get("prompt_tokens_details") or {}).get("cached_tokens") or u.get("cached_tokens") or 0
+            tot_cached += cd
+    if not models:
+        return None
+    return {
+        "models": models,
+        "input": tot_in,
+        "output": tot_out,
+        "cached": tot_cached,
+        "calls": max(tot_calls, 1),
+        "total": tot_in + tot_out,
+    }
+
+
 def collect_traces(start_date, end_date, sid_to_rawmodel=None):
     """扫描 traces 目录，提取 token 消耗数据（含成本）。
 
@@ -627,8 +679,22 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
                 if not trace_date or trace_date < start_date or trace_date > end_date:
                     continue
 
-                model_info = trace.get("modelInfo", {})
-                models = model_info.get("models", [])
+                model_info = trace.get("modelInfo", {}) or {}
+                models = model_info.get("models", []) or []
+                # 兜底：扁平 trace 缺 modelInfo 时，尝试从 generation span 的 toolOutput 还原
+                # （'Agent workflow' 类 trace 的真实模型/Token 在 span 内，顶层为空）。
+                _recovered = None
+                if not models:
+                    _recovered = _recover_model_info_from_spans(data)
+                    if _recovered:
+                        models = _recovered["models"]
+                        model_info = {
+                            "models": models,
+                            "totalInputTokens": _recovered["input"],
+                            "totalOutputTokens": _recovered["output"],
+                            "totalCachedTokens": _recovered["cached"],
+                            "callCount": _recovered["calls"],
+                        }
                 bare_model = models[0] if models else "default"
                 # 通道感知：优先用 sessions.model 的原始（带前缀）标识符，否则退回 trace 裸名。
                 # 但若 trace 实际执行模型带 SiliconFlow 等第三方 vendor 前缀（如 zai-org/GLM-5.2），
@@ -654,7 +720,7 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
                     "duration_ms": _to_num(trace.get("duration", 0)),
                     "status": trace.get("status", "unknown"),
                     "session_id": sid,
-                    "total_tokens": _to_num(trace.get("totalTokens", 0)),
+                    "total_tokens": _to_num(trace.get("totalTokens", 0)) or (_recovered["total"] if _recovered else 0),
                     "input_tokens": _to_num(model_info.get("totalInputTokens", 0)),
                     "output_tokens": _to_num(model_info.get("totalOutputTokens", 0)),
                     "cached_tokens": _to_num(model_info.get("totalCachedTokens", 0)),
