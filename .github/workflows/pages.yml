@@ -45,8 +45,9 @@ jobs:
 
       - name: Assemble Pages artifact
         run: |
-          mkdir -p _site
+          mkdir -p _site/examples
           cp index.html test-report.html README.html SKILL.html README.md SKILL.md TECH_DEBT.md LICENSE.md .nojekyll _site/ 2>/dev/null || true
+          cp examples/sample-report.html _site/examples/ 2>/dev/null || true
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
