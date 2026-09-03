@@ -32,10 +32,80 @@ from pathlib import Path
 
 TZ = timezone(timedelta(hours=8))
 
+# 会话标题语义（须与 collect_usage_data.UNNAMED_LABEL / ORPHAN_LABEL 保持一致）：
+#   UNNAMED_LABEL = 本地库有该会话但无标题（真·无标题）
+#   ORPHAN_LABEL  = trace 的 session_id 在本地库查不到（孤儿 trace）
+UNNAMED_LABEL = "未命名会话"
+ORPHAN_LABEL = "未关联会话"
+
 
 def _esc(value):
     """HTML 转义：防止会话标题 / 模型名 / 自动化名等用户派生文本注入 HTML（XSS）。"""
     return html.escape(str(value), quote=True)
+
+
+# ── 共享渲染层（D7 去重：MD / HTML 共用同一套数据计算，仅渲染层不同）─────────────
+# 中性内联标记：**粗体** / `代码`；md 原样保留，html 转为 <b>/<code> 并对纯文本段转义。
+def _fmt_inline(text, fmt):
+    """把中性内联标记（**粗体** / `代码`）渲染为 md 或 html；html 下对纯文本段做 HTML 转义。
+    md 下原样保留标记（与历史输出一致）。"""
+    if fmt == "md":
+        return text
+    out, buf = [], []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i:i + 2] == "**":
+            if buf:
+                out.append(_esc("".join(buf))); buf = []
+            j = text.find("**", i + 2)
+            if j == -1:
+                out.append(_esc(text[i:])); break
+            out.append("<b>" + _esc(text[i + 2:j]) + "</b>")
+            i = j + 2
+        elif text[i] == "`":
+            if buf:
+                out.append(_esc("".join(buf))); buf = []
+            j = text.find("`", i + 1)
+            if j == -1:
+                out.append(_esc(text[i:])); break
+            out.append("<code>" + _esc(text[i + 1:j]) + "</code>")
+            i = j + 1
+        else:
+            buf.append(text[i]); i += 1
+    if buf:
+        out.append(_esc("".join(buf)))
+    return "".join(out)
+
+
+def _emit_table(rows, columns, fmt, md_sep=None):
+    """渲染表格。rows: list[list[str]]；columns: list[str] 表头。
+    md_sep: MD 分隔行原样字符串（保留历史手调分隔线，避免 golden diff 回归）。"""
+    if fmt == "html":
+        out = ["        <table>"]
+        out.append("            <tr>" + "".join(f"<th>{_esc(c)}</th>" for c in columns) + "</tr>")
+        for r in rows:
+            out.append("            <tr>" + "".join(f"<td>{_esc(c)}</td>" for c in r) + "</tr>")
+        out.append("        </table>")
+        return out
+    out = ["| " + " | ".join(columns) + " |"]
+    out.append(md_sep if md_sep else "|" + "|".join("------" for _ in columns) + "|")
+    for r in rows:
+        out.append("| " + " | ".join(r) + " |")
+    return out
+
+
+def _emit_heading(level, text, fmt):
+    if fmt == "html":
+        return [f"        <h{level}>{_esc(text)}</h{level}>"]
+    return ["#" * level + " " + text]
+
+
+def _emit_note(text, fmt, cls=None):
+    """渲染备注块：md 用 `> ` 引用；html 用 <p>（可选 class）。text 用中性内联标记。"""
+    if fmt == "html":
+        attr = f' class="{cls}"' if cls else ""
+        return [f"        <p{attr}>{_fmt_inline(text, 'html')}</p>"]
+    return ["> " + text]
 
 
 def _fmt_generated_at(dt=None):
@@ -353,27 +423,25 @@ def merge_glm52_family(model_stats):
     return model_stats
 
 
-def _build_model_block_md(model_stats, dim_label, is_exec=False, timed_free_map=None, compact=False):
-    """生成单一维度的模型表格 + 洞察 Markdown 行（不含小节标题）。
+def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_free_map=None, compact=False):
+    """单一维度模型表格 + 洞察（MD / HTML 共用同一套数据计算，仅渲染层不同）。
 
     compact=True 时仅渲染「模型 / 调用次数 / 实际消耗Token」三列（用于本地模型使用统计，
     因本地推理零成本，单价/花费/占比列无意义）。
     GLM-5.2 家族合并已在调用方通过 merge_glm52_family() 完成。
     """
-    lines = []
     configured = [m for m in model_stats if m.get("configured")]
     # 实际产生计费的行（含未配置单价的 auto 路由，其成本来自 trace 级汇总）——用于占比分母与图表
     priced = [m for m in model_stats if (m.get("effective_cost", 0) or 0) > 0]
     total_billable = sum(m.get("effective_cost", 0) for m in priced) or 1
     cost_header = "估算花费＊" if is_exec else "估算实际花费"
-    lines.append(f"**{dim_label}**")
-    lines.append("")
     if compact:
-        lines.append("| 模型 | 调用次数 | 实际消耗Token |")
-        lines.append("|------|---------|-------------|")
+        columns = ["模型", "调用次数", "实际消耗Token"]
+        md_sep = "|------|---------|-------------|"
     else:
-        lines.append(f"| 模型 | 调用次数 | 实际消耗Token | 输入单价(元/1M) | 输出单价(元/1M) | {cost_header} | 占总花费比 |")
-        lines.append("|------|---------|-------------|--------------|--------------|------------|-----------|")
+        columns = ["模型", "调用次数", "实际消耗Token", "输入单价(元/1M)", "输出单价(元/1M)", cost_header, "占总花费比"]
+        md_sep = "|------|---------|-------------|--------------|--------------|------------|-----------|"
+    rows = []
     for m in model_stats:
         cfg = m.get("configured")
         mname = m["model"]
@@ -392,20 +460,16 @@ def _build_model_block_md(model_stats, dim_label, is_exec=False, timed_free_map=
         eff = m.get("effective_cost", 0) or 0.0
         is_free = cfg and m.get("unit_price_input") == 0 and m.get("unit_price_output") == 0
         if m.get("timed_free"):
-            # 限免期内实付 ¥0。若仍保留刊例单价（账单口径），一并显示以便看清「原价 vs 实付」。
             ip = f"{m['unit_price_input']:.2f}" if cfg and m.get("unit_price_input") else "限时免费"
             op = f"{m['unit_price_output']:.2f}" if cfg and m.get("unit_price_output") else "限时免费"
             cost = "¥0.00"
         elif is_free:
             ip, op, cost = "免费", "免费", "¥0.00"
         elif eff > 0:
-            # 真实产生计费（含未配置单价的 auto 路由，成本来自 trace 级汇总）——如实显示金额
             ip = f"{m['unit_price_input']:.2f}" if cfg else "—"
             op = f"{m['unit_price_output']:.2f}" if cfg else "—"
             cost = f"¥{eff:.2f}"
         elif m.get("is_delisted") and cfg:
-            # 下架但已知单价：trace 级未计成本时（如历史数据重算前），用单价×token 补算估算花费，
-            # 保证「已知单价≠未知」，避免有价的下架模型被误标为「已下架·未知」。
             ep = m.get("unit_price_input") or 0.0
             eo = m.get("unit_price_output") or 0.0
             est = (m.get("input_tokens", 0) / 1_000_000) * ep + (m.get("output_tokens", 0) / 1_000_000) * eo
@@ -420,43 +484,75 @@ def _build_model_block_md(model_stats, dim_label, is_exec=False, timed_free_map=
         share = (eff / total_billable * 100) if eff > 0 else 0.0
         share_txt = f"{share:.1f}%" if eff > 0 else "—"
         if compact:
-            lines.append(
-                f"| {mname} | {m['calls']} | {format_number(m.get('effective_tokens', 0))} |"
-            )
+            rows.append([mname, str(m['calls']), format_number(m.get('effective_tokens', 0))])
         else:
-            lines.append(
-                f"| {mname} | {m['calls']} | {format_number(m.get('effective_tokens', 0))} "
-                f"| {ip} | {op} | {cost} | {share_txt} |"
-            )
-    lines.append("")
+            rows.append([mname, str(m['calls']), format_number(m.get('effective_tokens', 0)), ip, op, cost, share_txt])
+    out = []
+    if fmt == "md":
+        if dim_label:
+            out.append(f"**{dim_label}**")
+            out.append("")
+        out.extend(_emit_table(rows, columns, "md", md_sep=md_sep))
+        out.append("")
+    else:
+        out.extend(_emit_table(rows, columns, "html"))
+    # 备注 / 免责声明（MD 用引用块，HTML 用 <p>）
     if is_exec:
-        lines.append("> ＊本表为**使用量分布估算（非计费口径）**：已解析具体模型的调用按其真实单价估算；"
-                     "未能解析具体模型的调用（路由别名 `auto`）按本周期计费模型均价估算。"
-                     "**本表总额不代表真实账单，且不可与 3.1 相加**。")
+        _ie = ("＊本表为**使用量分布估算（非计费口径）**：已解析具体模型的调用按其真实单价估算；"
+               "未能解析具体模型的调用（路由别名 `auto`）按本周期计费模型均价估算。"
+               "**本表总额不代表真实账单，且不可与 3.1 相加**。")
+        out.extend(_emit_note(_ie, fmt, cls="disclaimer" if fmt == "html" else None))
     if any(m.get("is_router") for m in model_stats):
-        lines.append("> ℹ️ `auto` 为智能路由别名（执行时自动调配最适合模型，类似 openrouter/free），无单一单价；"
-                     "其「单价 / 花费」为所有计费模型（单价>0）的**均价估算值**，仅供横向对比参考。")
+        out.extend(_emit_note("ℹ️ `auto` 为智能路由别名（执行时自动调配最适合模型，类似 openrouter/free），无单一单价；"
+                               "其「单价 / 花费」为所有计费模型（单价>0）的**均价估算值**，仅供横向对比参考。", fmt))
     if any(m.get("is_delisted") for m in model_stats):
-        lines.append("> 🗄️ = 曾在 WorkBuddy 提供、现已下架的官方模型；历史调用仍正常统计与计价，单价未知者不计入成本。")
+        out.extend(_emit_note("🗄️ = 曾在 WorkBuddy 提供、现已下架的官方模型；历史调用仍正常统计与计价，单价未知者不计入成本。", fmt))
     if any(m.get("is_local") for m in model_stats):
-        lines.append("> 🔧🏠 = 你通过 Ollama 本地推理运行的模型（零 API 成本），**不计入账单总额**；其「花费」恒为 ¥0.00，仅作本地使用量统计。")
+        out.extend(_emit_note("🔧🏠 = 你通过 Ollama 本地推理运行的模型（零 API 成本），**不计入账单总额**；"
+                               "其「花费」恒为 ¥0.00，仅作本地使用量统计。", fmt))
     if any(m.get("is_custom") and not m.get("is_local") for m in model_stats):
-        lines.append("> 🔧 = 你通过外部 API 接口自建 / 接入的自定义模型（非 WorkBuddy 官方模型），与 🗄️ 官方已下架模型**分开统计**；单价仅作粗略参考，实际账单请往对应接口查看。")
+        out.extend(_emit_note("🔧 = 你通过外部 API 接口自建 / 接入的自定义模型（非 WorkBuddy 官方模型），与 🗄️ 官方已下架模型**分开统计**；"
+                               "单价仅作粗略参考，实际账单请往对应接口查看。", fmt))
     if any(m.get("is_router_api") for m in model_stats):
-        lines.append("> 🔀 = 智能路由 / 聚合网关（外部 API，如 OpenRouter 免费档、Groq 等）：一次调用可能落到不同底层模型或上游 host，单价 / 花费为粗略参考，实际账单请往对应接口查看。")
-    if model_stats:
-        top_calls = max(model_stats, key=lambda x: x["calls"])
-        lines.append(f"> 🏆 **最常使用模型**：`{top_calls['model']}` —— 调用 {top_calls['calls']} 次。")
-    if priced:
-        concrete = [m for m in priced if not m.get("is_router")]
-        top_cost = max(concrete or priced, key=lambda x: x.get("effective_cost", 0))
-        share = top_cost.get("effective_cost", 0) / total_billable * 100 if total_billable else 0
-        lines.append(f"> 💸 **最贵模型**（按花费，不含路由别名）：`{top_cost['model']}` —— 估算花费 ¥{top_cost.get('effective_cost', 0):.2f}，"
-                     f"占总花费 {share:.1f}%。")
-    elif configured:
-        lines.append("> 💸 当前已配置单价的模型均为免费模型（花费 ¥0.00）；填入付费模型单价后此处显示最贵模型。")
-    lines.append("")
-    return lines
+        out.extend(_emit_note("🔀 = 智能路由 / 聚合网关（外部 API，如 OpenRouter 免费档、Groq 等）：一次调用可能落到不同底层模型或上游 host，"
+                               "单价 / 花费为粗略参考，实际账单请往对应接口查看。", fmt))
+    # 洞察（🏆 最常使用 / 💸 最贵）——MD 与 HTML 结构不同
+    if fmt == "md":
+        if model_stats:
+            top_calls = max(model_stats, key=lambda x: x["calls"])
+            out.append(f"> 🏆 **最常使用模型**：`{top_calls['model']}` —— 调用 {top_calls['calls']} 次。")
+        if priced:
+            concrete = [m for m in priced if not m.get("is_router")]
+            top_cost = max(concrete or priced, key=lambda x: x.get("effective_cost", 0))
+            share = top_cost.get("effective_cost", 0) / total_billable * 100 if total_billable else 0
+            out.append(f"> 💸 **最贵模型**（按花费，不含路由别名）：`{top_cost['model']}` —— 估算花费 ¥{top_cost.get('effective_cost', 0):.2f}，"
+                       f"占总花费 {share:.1f}%。")
+        elif configured:
+            out.append("> 💸 当前已配置单价的模型均为免费模型（花费 ¥0.00）；填入付费模型单价后此处显示最贵模型。")
+        out.append("")
+    else:
+        if configured:
+            chart = build_model_cost_chart(configured)
+            if chart:
+                out.append(chart)
+            top_calls = max(model_stats, key=lambda x: x["calls"])
+            if priced:
+                concrete = [m for m in priced if not m.get("is_router")]
+                top_cost = max(concrete or priced, key=lambda x: x.get("effective_cost", 0))
+                share = top_cost.get("effective_cost", 0) / total_billable * 100 if total_billable else 0
+                out.append(
+                    f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
+                    f'（调用 {top_calls["calls"]} 次）；'
+                    f'💸 <strong>最贵模型</strong>（按花费，不含路由别名）：<code>{_esc(top_cost["model"])}</code>'
+                    f'（估算 ¥{top_cost.get("effective_cost", 0):.2f}，占 {share:.1f}%）。</p>'
+                )
+            else:
+                out.append(
+                    f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
+                    f'（调用 {top_calls["calls"]} 次）。当前已配置单价的模型均为免费模型，'
+                    f'填入付费模型单价后显示最贵模型对比。</p>'
+                )
+    return out
 
 
 def build_model_section_md(data):
@@ -490,7 +586,7 @@ def build_model_section_md(data):
     lines.append("> 备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 `glm-5.2` 的花费中。")
     lines.append("")
     model_stats = merge_glm52_family(model_stats)
-    lines += _build_model_block_md(model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map)
+    lines += _build_model_block("md", model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map)
     chart = build_model_cost_chart_md([m for m in model_stats if m.get("configured")])
     if chart:
         lines.append(chart)
@@ -510,7 +606,7 @@ def build_model_section_md(data):
         if official_exec:
             lines.append("#### 3.2.1 官方 / 网关入口模型")
             lines.append("")
-            lines += _build_model_block_md(official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map)
+            lines += _build_model_block("md", official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map)
             chart2 = build_model_cost_chart_md([m for m in official_exec if m.get("configured")])
             if chart2:
                 lines.append(chart2)
@@ -518,7 +614,7 @@ def build_model_section_md(data):
         if local_exec:
             lines.append("#### 3.2.2 本地模型（Ollama 本地推理）🔧🏠")
             lines.append("")
-            lines += _build_model_block_md(local_exec, "本地模型维度明细", is_exec=True, timed_free_map=tf_map, compact=True)
+            lines += _build_model_block("md", local_exec, "本地模型维度明细", is_exec=True, timed_free_map=tf_map, compact=True)
             chart3 = build_model_cost_chart_md([m for m in local_exec if m.get("configured")])
             if chart3:
                 lines.append(chart3)
@@ -526,7 +622,7 @@ def build_model_section_md(data):
         if external_exec:
             lines.append("#### 3.2.3 外部 API 接口接入模型 🔧")
             lines.append("")
-            lines += _build_model_block_md(external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map)
+            lines += _build_model_block("md", external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map)
             chart4 = build_model_cost_chart_md([m for m in external_exec if m.get("configured")])
             if chart4:
                 lines.append(chart4)
@@ -535,61 +631,12 @@ def build_model_section_md(data):
         lines.append("（本期无模型调用数据）")
         lines.append("")
     # 3.3 缺失单价模型（数据驱动，仅当存在时显示）
-    lines += _build_unconfigured_models_section_md(meta)
+    lines += _build_unconfigured_models_section("md", meta)
     return lines
 
 
-def _build_unconfigured_models_section_md(meta):
-    """Markdown 渲染「缺失单价模型」提示块：列出未配置单价的模型 + 可复制的 pricing.json 补写片段 + 可选网络估算/搜索链接。"""
-    lines = []
-    unconfigured = meta.get("unconfigured_models") or []
-    if not unconfigured:
-        return lines
-    pricing_lookup = meta.get("pricing_lookup") or {}
-    network_estimates = pricing_lookup.get("network_estimates") or {}
-    search_links = pricing_lookup.get("search_links") or {}
-    mode = pricing_lookup.get("mode", "offline")
-
-    lines.append("> ⚠️ **本期有未配置单价的模型**（未计入账单总额，但调用仍发生）：")
-    lines.append("")
-    lines.append("| 模型 | 建议输入单价(元/1M) | 建议输出单价(元/1M) | 来源 |")
-    lines.append("|------|---------------------|---------------------|------|")
-    for m in unconfigured:
-        est = network_estimates.get(m)
-        link = search_links.get(m)
-        if est:
-            src = f"🌐 网络估算价，[搜索验证]({link})" if link else "🌐 网络估算价"
-            ip, op = f"{est['input']:.2f}", f"{est['output']:.2f}"
-        elif link:
-            src = f"[搜索定价]({link})"
-            ip, op = "—", "—"
-        else:
-            src = "未配置"
-            ip, op = "—", "—"
-        lines.append(f"| `{m}` | {ip} | {op} | {src} |")
-    lines.append("")
-
-    # 可复制的 pricing.local.json 补写片段（按模型生成 4 空格缩进示例）
-    lines.append("<details>")
-    lines.append("<summary>📝 复制下面片段到 <code>scripts/pricing.local.json</code> 的 <code>models</code> 节点补全单价（本地覆盖文件，<code>skillhub upgrade</code> 升级时不会被覆盖；仅供参考，请按实际账单核对）</summary>")
-    lines.append("")
-    lines.append("```json")
-    for m in unconfigured:
-        lines.append(f'    "{m}": {{')
-        lines.append(f'        "input": 0,   // 填入实际输入单价（元/1M tokens）')
-        lines.append(f'        "output": 0   // 填入实际输出单价（元/1M tokens）')
-        lines.append(f'    }},')
-    lines.append("```")
-    lines.append("</details>")
-    lines.append("")
-    if mode == "online":
-        lines.append("> ℹ️ 已联网检索（`--lookup-pricing online`），上表「网络估算价」仅作参考，**不计入**报告任何成本总额，请以你实际账单为准。")
-        lines.append("")
-    return lines
-
-
-def _build_unconfigured_models_section_html(meta):
-    """HTML 版：列出未配置单价模型 + 可复制补写片段 + 可选网络估算。"""
+def _build_unconfigured_models_section(fmt, meta):
+    """渲染「缺失单价模型」提示块（MD / HTML 共用数据计算，仅渲染层不同）。"""
     unconfigured = meta.get("unconfigured_models") or []
     if not unconfigured:
         return []
@@ -597,157 +644,175 @@ def _build_unconfigured_models_section_html(meta):
     network_estimates = pricing_lookup.get("network_estimates") or {}
     search_links = pricing_lookup.get("search_links") or {}
     mode = pricing_lookup.get("mode", "offline")
-
-    block = []
-    block.append('        <h3>3.3 缺失单价模型（未计入账单总额）</h3>')
-    block.append('        <p class="disclaimer">⚠️ 以下模型本期被调用，但未在 <code>pricing.json</code>（或本地覆盖 <code>pricing.local.json</code>）中找到单价，因此未计入成本总额。请把单价补进 <code>scripts/pricing.local.json</code> 的 <code>models</code> 节点后重跑采集（该文件升级 Skill 时不会被覆盖）。</p>')
-    block.append("        <table>")
-    block.append("            <tr><th>模型</th><th>建议输入单价(元/1M)</th><th>建议输出单价(元/1M)</th><th>来源</th></tr>")
+    rows = []
     for m in unconfigured:
         est = network_estimates.get(m)
         link = search_links.get(m)
         if est:
-            src = f'<a href="{_esc(link)}" target="_blank">🌐 网络估算价（点击验证）</a>' if link else "🌐 网络估算价"
             ip, op = f"{est['input']:.2f}", f"{est['output']:.2f}"
+        else:
+            ip, op = "—", "—"
+        rows.append((m, ip, op, est, link))
+    json_lines = []
+    for m in unconfigured:
+        json_lines.append(f'    "{m}": {{')
+        json_lines.append(f'        "input": 0,   // 填入实际输入单价（元/1M tokens）')
+        json_lines.append(f'        "output": 0   // 填入实际输出单价（元/1M tokens）')
+        json_lines.append(f'    }},')
+    if fmt == "md":
+        out = ["> ⚠️ **本期有未配置单价的模型**（未计入账单总额，但调用仍发生）：", "",
+               "| 模型 | 建议输入单价(元/1M) | 建议输出单价(元/1M) | 来源 |",
+               "|------|---------------------|---------------------|------|"]
+        for m, ip, op, est, link in rows:
+            if est:
+                src = f"🌐 网络估算价，[搜索验证]({link})" if link else "🌐 网络估算价"
+            elif link:
+                src = f"[搜索定价]({link})"
+            else:
+                src = "未配置"
+            out.append(f"| `{m}` | {ip} | {op} | {src} |")
+        out.append("")
+        out.append("<details>")
+        out.append("<summary>📝 复制下面片段到 <code>scripts/pricing.local.json</code> 的 <code>models</code> 节点补全单价（本地覆盖文件，<code>skillhub upgrade</code> 升级时不会被覆盖；仅供参考，请按实际账单核对）</summary>")
+        out.append("")
+        out.append("```json")
+        out.extend(json_lines)
+        out.append("```")
+        out.append("</details>")
+        out.append("")
+        if mode == "online":
+            out.append("> ℹ️ 已联网检索（`--lookup-pricing online`），上表「网络估算价」仅作参考，**不计入**报告任何成本总额，请以你实际账单为准。")
+            out.append("")
+        return out
+    out = ['        <h3>3.3 缺失单价模型（未计入账单总额）</h3>',
+           '        <p class="disclaimer">⚠️ 以下模型本期被调用，但未在 <code>pricing.json</code>（或本地覆盖 <code>pricing.local.json</code>）中找到单价，因此未计入成本总额。请把单价补进 <code>scripts/pricing.local.json</code> 的 <code>models</code> 节点后重跑采集（该文件升级 Skill 时不会被覆盖）。</p>',
+           "        <table>",
+           "            <tr><th>模型</th><th>建议输入单价(元/1M)</th><th>建议输出单价(元/1M)</th><th>来源</th></tr>"]
+    for m, ip, op, est, link in rows:
+        if est:
+            src = f'<a href="{_esc(link)}" target="_blank">🌐 网络估算价（点击验证）</a>' if link else "🌐 网络估算价"
         elif link:
             src = f'<a href="{_esc(link)}" target="_blank">搜索定价</a>'
-            ip, op = "—", "—"
         else:
             src = "未配置"
-            ip, op = "—", "—"
-        block.append(
-            f"            <tr><td><code>{_esc(m)}</code></td><td>{ip}</td><td>{op}</td><td>{src}</td></tr>"
-        )
-    block.append("        </table>")
-
-    # 可复制补写片段
-    block.append("        <details>")
-    block.append("            <summary>📝 点击展开：复制以下片段到 <code>scripts/pricing.local.json</code> 的 <code>models</code> 节点补全单价（本地覆盖，升级 Skill 时不丢失）</summary>")
-    block.append('            <pre><code class="language-json">')
-    for m in unconfigured:
-        block.append(f'    "{m}": {{')
-        block.append(f'        "input": 0,   // 填入实际输入单价（元/1M tokens）')
-        block.append(f'        "output": 0   // 填入实际输出单价（元/1M tokens）')
-        block.append(f'    }},')
-    block.append("</code></pre>")
-    block.append("        </details>")
+        out.append(f"            <tr><td><code>{_esc(m)}</code></td><td>{ip}</td><td>{op}</td><td>{src}</td></tr>")
+    out.append("        </table>")
+    out.append("        <details>")
+    out.append("            <summary>📝 点击展开：复制以下片段到 <code>scripts/pricing.local.json</code> 的 <code>models</code> 节点补全单价（本地覆盖，升级 Skill 时不丢失）</summary>")
+    out.append('            <pre><code class="language-json">')
+    out.extend(json_lines)
+    out.append("</code></pre>")
+    out.append("        </details>")
     if mode == "online":
-        block.append('        <p class="disclaimer">ℹ️ 已联网检索（<code>--lookup-pricing online</code>），上表「网络估算价」仅作参考，<b>不计入</b>报告任何成本总额，请以你实际账单为准。</p>')
-    return block
+        out.append('        <p class="disclaimer">ℹ️ 已联网检索（<code>--lookup-pricing online</code>），上表「网络估算价」仅作参考，<b>不计入</b>报告任何成本总额，请以你实际账单为准。</p>')
+    return out
+
+
+def _build_unconfigured_models_section_html(meta):
+    """MD / HTML 合并实现见 _build_unconfigured_models_section(fmt, ...)；本函数仅作 HTML 入口薄封装。"""
+    return _build_unconfigured_models_section("html", meta)
+
+
+def _tier_rates_snippet(meta):
+    """生成 mode_rates 的 JSON 片段（供可配置折叠块展示），逐行字符串列表。"""
+    rates = meta.get("mode_rates") or {}
+    lines = ['  "mode_rates": {', '    "auto_estimate": true,']
+    for tier_name, t in rates.items():
+        if not isinstance(t, dict):
+            continue
+        lines.append(
+            f'    "{tier_name}": {{ "alias": "{t.get("alias")}", "label": "{t.get("label")}", '
+            f'"multiplier": {t.get("multiplier")}, "input": {t.get("input")}, "output": {t.get("output")} }},'
+        )
+    lines.append('  }')
+    return lines
+
+
+def build_tier_section_html(data):
+    """MD / HTML 合并实现见 build_tier_section(fmt, ...)；本函数仅作 HTML 入口薄封装。"""
+    return build_tier_section("html", data)
+
+
+def build_tier_section_md(data):
+    """MD / HTML 合并实现见 build_tier_section(fmt, ...)；本函数仅作 Markdown 入口薄封装。"""
+    return build_tier_section("md", data)
+
+
+# 档位规范 id → 中文档位名（与 collect_usage_data.TIER_LABELS 同源，报告层展示用）
+TIER_LABELS = {"fast-model": "快速", "balanced-model": "均衡",
+               "deep-model": "极致", "extreme-model": "极致"}
+
+
+def build_tier_section(fmt, data):
+    """HTML 章节 §3.4 / Markdown §3.4：档位维度（快速 / 均衡 / 极致）。存在档位调用时才渲染。
+    MD / HTML 共用数据计算，仅渲染层不同。
+
+    v1.3.0 新增分析维度。档位真实底层模型从不落盘，只能纯档位聚合；
+    其单价为按积分倍率锚定的**估算值**（已在 meta 标注），不计入账单总额。
+    """
+    meta = data.get("meta", {})
+    tier_stats = data.get("tier_stats") or []
+    if not tier_stats:
+        return []
+    cache_loaded = meta.get("mode_config_cache_loaded", False)
+    total_tier_cost = sum(m.get("effective_cost", 0) or 0 for m in tier_stats) or 1
+    columns = ["档位", "调用次数", "实际消耗Token", "输入单价(估算,元/1M)", "输出单价(估算,元/1M)", "估算花费", "占总花费比"]
+    md_sep = "|------|---------|-------------|--------------|--------------|---------|-----------|"
+    rows = []
+    for m in tier_stats:
+        label = TIER_LABELS.get(m["model"], m["model"])
+        if m.get("is_router"):
+            label += "（未解析具体模型）"
+        eff = m.get("effective_cost", 0) or 0
+        ip = f"{m['unit_price_input']:.2f}" if m.get("configured") else "—"
+        op = f"{m['unit_price_output']:.2f}" if m.get("configured") else "—"
+        share = (eff / total_tier_cost * 100) if eff > 0 else 0.0
+        rows.append([label, str(m["calls"]), format_number(m.get("effective_tokens", 0)), ip, op, f"¥{eff:.2f}", f"{share:.1f}%"])
+    intro = ("WorkBuddy 的自动路由已拆为三档：**快速 / 均衡 / 极致**。它们在 trace 中以路由别名出现，"
+             "真实底层模型**从不落盘**，故只能做纯档位聚合，无法做「档位 × 真实模型」交叉表。"
+             "档位倍率是「积分维度」，与 ¥ 刊例价正交——本表单价仅作分析参考。")
+    disc = ("ℹ️ 档位为智能路由别名（执行时自动调配最适合模型，类似 openrouter/free），无单一单价；"
+            "其「单价 / 花费」为按积分倍率锚定的**估算值**"
+            + ("（倍率已用服务端配置缓存校准）" if cache_loaded else "")
+            + "，仅供横向对比参考，**不计入**账单总额，请以实际积分账单为准。")
+    json_lines = _tier_rates_snippet(meta)
+    if fmt == "md":
+        out = ["### 3.4 档位维度（快速 / 均衡 / 极致）", "", intro, "",
+               "| " + " | ".join(columns) + " |", md_sep]
+        out.extend("| " + " | ".join(r) + " |" for r in rows)
+        out.append("")
+        out.append("> " + disc)
+        out.append("")
+        out.append("<details>")
+        out.append("<summary>📝 档位估算单价来源与如何调整为精确值（改 <code>scripts/pricing.json</code> 的 <code>mode_rates</code> 即可，无需改代码）</summary>")
+        out.append("")
+        out.append("```json")
+        out.extend(json_lines)
+        out.append("```")
+        out.append("</details>")
+        out.append("")
+        return out
+    out = ['    <div class="section">',
+           '        <h3>3.4 档位维度（快速 / 均衡 / 极致）</h3>',
+           '        <p>' + _fmt_inline(intro, "html") + '</p>',
+           "        <table>",
+           "            <tr>" + "".join(f"<th>{_esc(c)}</th>" for c in columns) + "</tr>"]
+    out.extend("            <tr>" + "".join(f"<td>{_esc(c)}</td>" for c in r) + "</tr>" for r in rows)
+    out.append("        </table>")
+    out.append('        <p class="disclaimer">' + _fmt_inline(disc, "html") + '</p>')
+    out.append("        <details>")
+    out.append("            <summary>📝 点击展开：档位估算单价来源与如何调整为精确值（改 <code>scripts/pricing.json</code> 的 <code>mode_rates</code> 即可，无需改代码）</summary>")
+    out.append('            <pre><code class="language-json">')
+    out.extend(json_lines)
+    out.append("</code></pre>")
+    out.append("        </details>")
+    out.append('    </div>')
+    return out
 
 
 def _build_model_block_html(model_stats, is_exec=False, timed_free_map=None, compact=False):
-    """生成单一维度的模型表格 + 洞察 HTML（不含小节标题）。
-
-    compact=True 时仅渲染「模型 / 调用次数 / 实际消耗Token」三列（用于本地模型使用统计）。
-    GLM-5.2 家族合并已在调用方通过 merge_glm52_family() 完成。
-    """
-    configured = [m for m in model_stats if m.get("configured")]
-    # 实际产生计费的行（含未配置单价的 auto 路由，其成本来自 trace 级汇总）——用于占比分母与图表
-    priced = [m for m in model_stats if (m.get("effective_cost", 0) or 0) > 0]
-    total_billable = sum(m.get("effective_cost", 0) for m in priced) or 1
-    cost_header = "估算花费＊" if is_exec else "估算实际花费"
-    block = []
-    block.append("        <table>")
-    if compact:
-        block.append("            <tr><th>模型</th><th>调用次数</th><th>实际消耗Token</th></tr>")
-    else:
-        block.append(f"            <tr><th>模型</th><th>调用次数</th><th>实际消耗Token</th>"
-                     f"<th>输入单价(元/1M)</th><th>输出单价(元/1M)</th><th>{cost_header}</th><th>占总花费比</th></tr>")
-    for m in model_stats:
-        cfg = m.get("configured")
-        mname = m["model"]
-        if m.get("is_delisted"):
-            mname = f"{m['model']} 🗄️"
-        elif m.get("is_local"):
-            mname = f"{m['model']} 🔧🏠"
-        elif m.get("is_router_api"):
-            mname = f"{m['model']} 🔀"
-        elif m.get("is_custom"):
-            mname = f"{m['model']} 🔧"
-        elif is_exec and m.get("is_router"):
-            mname = f"{m['model']}（未解析具体模型）"
-        elif m.get("timed_free"):
-            mname = f"{m['model']}{_timed_free_label(m['model'], timed_free_map)}"
-        eff = m.get("effective_cost", 0) or 0.0
-        is_free = cfg and m.get("unit_price_input") == 0 and m.get("unit_price_output") == 0
-        if m.get("timed_free"):
-            # 限免期内实付 ¥0。若仍保留刊例单价（账单口径），一并显示以便看清「原价 vs 实付」。
-            ip = f"{m['unit_price_input']:.2f}" if cfg and m.get("unit_price_input") else "限时免费"
-            op = f"{m['unit_price_output']:.2f}" if cfg and m.get("unit_price_output") else "限时免费"
-            cost = "¥0.00"
-        elif is_free:
-            ip, op, cost = "免费", "免费", "¥0.00"
-        elif eff > 0:
-            # 真实产生计费（含未配置单价的 auto 路由，成本来自 trace 级汇总）——如实显示金额
-            ip = f"{m['unit_price_input']:.2f}" if cfg else "—"
-            op = f"{m['unit_price_output']:.2f}" if cfg else "—"
-            cost = f"¥{eff:.2f}"
-        elif m.get("is_delisted") and cfg:
-            # 下架但已知单价：trace 级未计成本时（如历史数据重算前），用单价×token 补算估算花费，
-            # 保证「已知单价≠未知」，避免有价的下架模型被误标为「已下架·未知」。
-            ep = m.get("unit_price_input") or 0.0
-            eo = m.get("unit_price_output") or 0.0
-            est = (m.get("input_tokens", 0) / 1_000_000) * ep + (m.get("output_tokens", 0) / 1_000_000) * eo
-            eff = est
-            ip = f"{ep:.2f}"
-            op = f"{eo:.2f}"
-            cost = f"¥{est:.2f}"
-        else:
-            ip = f"{m['unit_price_input']:.2f}" if cfg else "—"
-            op = f"{m['unit_price_output']:.2f}" if cfg else "—"
-            cost = "已下架·未知" if m.get("is_delisted") else "未配置"
-        share = (eff / total_billable * 100) if eff > 0 else 0.0
-        share_txt = f"{share:.1f}%" if eff > 0 else "—"
-        if compact:
-            block.append(
-                f"            <tr><td>{_esc(mname)}</td><td>{m['calls']}</td>"
-                f"<td>{format_number(m.get('effective_tokens', 0))}</td></tr>"
-            )
-        else:
-            block.append(
-                f"            <tr><td>{_esc(mname)}</td><td>{m['calls']}</td>"
-                f"<td>{format_number(m.get('effective_tokens', 0))}</td><td>{ip}</td><td>{op}</td>"
-                f"<td>{cost}</td><td>{share_txt}</td></tr>"
-            )
-    block.append("        </table>")
-    if is_exec:
-        block.append('        <p class="disclaimer">＊本表为<b>使用量分布估算（非计费口径）</b>：已解析具体模型的调用按其真实单价估算；'
-                     '未能解析具体模型的调用（路由别名 <code>auto</code>）按本周期计费模型均价估算。'
-                     '<b>本表总额不代表真实账单，且不可与 3.1 相加</b>。</p>')
-    if any(m.get("is_router") for m in model_stats):
-        block.append('        <p>ℹ️ <code>auto</code> 为智能路由别名（执行时自动调配最适合模型，类似 openrouter/free），'
-                     '无单一单价；其「单价 / 花费」为所有计费模型（单价&gt;0）的<b>均价估算值</b>，仅供横向对比参考。</p>')
-    if any(m.get("is_delisted") for m in model_stats):
-        block.append('        <p>🗄️ = 曾在 WorkBuddy 提供、现已下架的官方模型；历史调用仍正常统计与计价，单价未知者不计入成本。</p>')
-    if any(m.get("is_local") for m in model_stats):
-        block.append('        <p>🔧🏠 = 你通过 Ollama 本地推理运行的模型（零 API 成本），<b>不计入账单总额</b>；其「花费」恒为 ¥0.00，仅作本地使用量统计。</p>')
-    if any(m.get("is_custom") and not m.get("is_local") for m in model_stats):
-        block.append('        <p>🔧 = 你通过外部 API 接口自建 / 接入的自定义模型（非 WorkBuddy 官方模型），与 🗄️ 官方已下架模型<b>分开统计</b>；单价仅作粗略参考，实际账单请往对应接口查看。</p>')
-    if any(m.get("is_router_api") for m in model_stats):
-        block.append('        <p>🔀 = 智能路由 / 聚合网关（外部 API，如 OpenRouter 免费档、Groq 等）：一次调用可能落到不同底层模型或上游 host，单价 / 花费为粗略参考，实际账单请往对应接口查看。</p>')
-    if configured:
-        chart = build_model_cost_chart(configured)
-        if chart:
-            block.append(chart)
-        top_calls = max(model_stats, key=lambda x: x["calls"])
-        if priced:
-            concrete = [m for m in priced if not m.get("is_router")]
-            top_cost = max(concrete or priced, key=lambda x: x.get("effective_cost", 0))
-            share = top_cost.get("effective_cost", 0) / total_billable * 100 if total_billable else 0
-            block.append(
-                f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
-                f'（调用 {top_calls["calls"]} 次）；'
-                f'💸 <strong>最贵模型</strong>（按花费，不含路由别名）：<code>{_esc(top_cost["model"])}</code>'
-                f'（估算 ¥{top_cost.get("effective_cost", 0):.2f}，占 {share:.1f}%）。</p>'
-            )
-        else:
-            block.append(
-                f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
-                f'（调用 {top_calls["calls"]} 次）。当前已配置单价的模型均为免费模型，'
-                f'填入付费模型单价后显示最贵模型对比。</p>'
-            )
-    return block
+    """MD / HTML 合并实现见 _build_model_block(fmt, ...)；本函数仅作 HTML 入口薄封装。"""
+    return _build_model_block("html", model_stats, is_exec=is_exec, timed_free_map=timed_free_map, compact=compact)
 
 
 def build_model_section_html(data):
@@ -797,7 +862,7 @@ def build_model_section_html(data):
         lines.append('        <p>（本期无模型调用数据）</p>')
     lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>')
     # 3.3 缺失单价模型（数据驱动，仅当存在时显示）
-    lines += _build_unconfigured_models_section_html(data.get("meta", {}))
+    lines += _build_unconfigured_models_section("html", data.get("meta", {}))
     lines.append("    </div>")
     return lines
 
@@ -1014,6 +1079,7 @@ def generate_markdown_report(data):
 
     # （新增）三、模型使用与成本对比
     lines.extend(build_model_section_md(data))
+    lines.extend(build_tier_section_md(data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）
     lines.extend(build_cost_analysis_section_md(data))
@@ -1072,8 +1138,8 @@ def generate_markdown_report(data):
                 f"| {c_ratio:.0f}% | ¥{s.get('effective_cost', 0):.2f} | {pct:.1f}% |"
             )
         lines.append("")
-        lines.append("> ℹ️ 「其他」含无法关联会话记录（trace 的会话 ID 在本地会话库找不到）或自动分类失败的 token；")
-        lines.append("> 「未命名会话」= 本地会话库中无标题记录的会话。")
+        lines.append("> ℹ️ 「未关联会话」= trace 的会话 ID 在本地会话库找不到（孤儿 trace，已合并为单一汇总行）；")
+        lines.append("> 「未命名会话」= 本地会话库中确有但无标题的会话；「其他」= 任务类型无法自动归类或自动分类失败的 token。")
         lines.append("")
         top = task_token_stats[0]
         top_pct = (top.get("effective_tokens", 0) / total_eff * 100) if total_eff else 0
@@ -1328,47 +1394,44 @@ def _compute_failed_automation_cost(automation_runs, sessions_by_cwd, session_co
     return out
 
 
-def _render_failed_automation_md(items):
+def _render_failed_automation(fmt, items):
     if not items:
         return []
-    lines = []
-    lines.append("### 4.5 失败自动化成本归因")
-    lines.append("")
-    lines.append("> 💸 失败运行 = 消耗 token 但无产出。下列自动化本月存在失败运行，"
-                 "按「失败次数 × 该任务所在工作区平均单次成本」估算白白烧掉的成本。")
-    lines.append("> ⚠️ 估算口径：通过 `automation.source_cwd ↔ sessions.cwd` 关联；"
-                 "若同一工作区下含多个会话（含交互），平均成本可能略高估。")
-    lines.append("")
-    lines.append("| 自动化任务 | 状态 | 运行 | 失败 | 失败率 | 平均单次成本 | 估算浪费 |")
-    lines.append("|-----------|------|------|------|--------|-------------|---------|")
-    for r in items:
-        warn = " ⚠️" if r["fail_rate"] >= 30 else ""
-        if r.get("unresolved"):
-            avg_disp = "¥—（成本未解析）"
-            waste_disp = "¥—（成本未解析）"
-        else:
-            avg_disp = f"¥{r['avg_cost']:.2f}"
-            waste_disp = f"¥{r['waste']:.2f}"
-        lines.append(
-            f"| {r['name']}{warn} | {r['state']} | {r['total_runs']} | {r['fail']} | "
-            f"{r['fail_rate']:.0f}% | {avg_disp} | {waste_disp} |"
-        )
-    lines.append("")
-    total_waste = sum(r["waste"] for r in items)
-    lines.append(f"> 💸 **本月失败自动化总浪费估算：¥{total_waste:.2f}**"
-                 "（按失败次数 × 该任务所在工作区平均单次成本推算）。")
-    if any(r.get("unresolved") for r in items):
-        lines.append("> ⚠️ 部分失败任务的成本未解析（会话无 token 或模型未解析），其浪费无法估算，"
-                     "上表「总浪费」为可解析部分的下限，实际可能更高。")
-    lines.append("> 建议：失败率 ≥ 30% 的任务优先排查依赖环境与配置，或暂停直至修复。"
-                 "（apply 动作属 F8/v2，本节仅提供洞察。）")
-    lines.append("")
-    return lines
-
-
-def _render_failed_automation_html(items):
-    if not items:
-        return []
+    if fmt == "md":
+        lines = []
+        lines.append("### 4.5 失败自动化成本归因")
+        lines.append("")
+        lines.append("> 💸 失败运行 = 消耗 token 但无产出。下列自动化本月存在失败运行，"
+                     "按「失败次数 × 该任务所在工作区平均单次成本」估算白白烧掉的成本。")
+        lines.append("> ⚠️ 估算口径：通过 `automation.source_cwd ↔ sessions.cwd` 关联；"
+                     "若同一工作区下含多个会话（含交互），平均成本可能略高估。")
+        lines.append("")
+        lines.append("| 自动化任务 | 状态 | 运行 | 失败 | 失败率 | 平均单次成本 | 估算浪费 |")
+        lines.append("|-----------|------|------|------|--------|-------------|---------|")
+        for r in items:
+            warn = " ⚠️" if r["fail_rate"] >= 30 else ""
+            if r.get("unresolved"):
+                avg_disp = "¥—（成本未解析）"
+                waste_disp = "¥—（成本未解析）"
+            else:
+                avg_disp = f"¥{r['avg_cost']:.2f}"
+                waste_disp = f"¥{r['waste']:.2f}"
+            lines.append(
+                f"| {r['name']}{warn} | {r['state']} | {r['total_runs']} | {r['fail']} | "
+                f"{r['fail_rate']:.0f}% | {avg_disp} | {waste_disp} |"
+            )
+        lines.append("")
+        total_waste = sum(r["waste"] for r in items)
+        lines.append(f"> 💸 **本月失败自动化总浪费估算：¥{total_waste:.2f}**"
+                     "（按失败次数 × 该任务所在工作区平均单次成本推算）。")
+        if any(r.get("unresolved") for r in items):
+            lines.append("> ⚠️ 部分失败任务的成本未解析（会话无 token 或模型未解析），其浪费无法估算，"
+                         "上表「总浪费」为可解析部分的下限，实际可能更高。")
+        lines.append("> 建议：失败率 ≥ 30% 的任务优先排查依赖环境与配置，或暂停直至修复。"
+                     "（apply 动作属 F8/v2，本节仅提供洞察。）")
+        lines.append("")
+        return lines
+    # html
     L = []
     L.append('        <h3>4.5 失败自动化成本归因</h3>')
     L.append('        <p>💸 失败运行 = 消耗 token 但无产出。'
@@ -1400,6 +1463,15 @@ def _render_failed_automation_html(items):
     L.append('        <p>建议：失败率 ≥ 30% 的任务优先排查依赖环境与配置，或暂停直至修复。'
              '（apply 动作属 F8/v2，本节仅洞察。）</p>')
     return L
+
+
+def _render_failed_automation_md(items):
+    return _render_failed_automation("md", items)
+
+
+def _render_failed_automation_html(items):
+    return _render_failed_automation("html", items)
+
 
 
 def _compute_session_size_anomalies(rows):
@@ -1437,6 +1509,7 @@ def _compute_cache_and_untitled(data, threshold_pct=60.0):
 
     traces = data.get("traces") or []
     sessions = data.get("sessions") or []
+    known_session_ids = {s.get("id") for s in sessions}
     rows = (data.get("session_stats") or {}).get("rows", [])
     if not rows:
         return None
@@ -1477,7 +1550,7 @@ def _compute_cache_and_untitled(data, threshold_pct=60.0):
             gap = max(global_cache_rate - cr, 0)
             saving = cost * (gap / 100) * 0.5  # 保守估算：差距一半可补
             cache_items.append({
-                "title": (meta.get("title") or "未命名会话")[:30],
+                "title": (meta.get("title") or (ORPHAN_LABEL if sid not in known_session_ids else UNNAMED_LABEL))[:30],
                 "task_type": meta.get("task_type", "其他"),
                 "cache_rate": cr,
                 "calls": meta.get("calls", 0),
@@ -1500,7 +1573,7 @@ def _compute_cache_and_untitled(data, threshold_pct=60.0):
     for r in rows:
         title = r.get("title", "")
         cost = r.get("effective_cost", 0)
-        if (not title or title == "未命名会话") and cost >= cost_p95 and cost > 0:
+        if (not title or title == UNNAMED_LABEL) and cost >= cost_p95 and cost > 0:
             untitled.append({
                 "title": title or "未命名会话",
                 "task_type": r.get("task_type", "其他"),
@@ -1516,59 +1589,53 @@ def _compute_cache_and_untitled(data, threshold_pct=60.0):
             "cost_unresolved": cost_unresolved}
 
 
-def _render_cache_untitled_md(payload):
+def _render_cache_untitled(fmt, payload):
     if not payload:
         return []
     ch = payload["cache_health"]
-    lines = []
-    lines.append("### 4.6 缓存健康度与未命名高成本会话")
-    lines.append("")
-    lines.append(f"> 💡 全局缓存命中率 **{ch['global_rate']:.1f}%**——"
-                 f"提升缓存复用是「零质量风险」的直接省钱杠杆。"
-                 f"下列会话缓存率 < {ch['threshold']}%。")
-    lines.append("")
-    if ch["items"]:
-        lines.append("**📉 缓存健康度卡**（保守估算「差距 × 0.5 × 当前成本」为可省空间）：")
+    if fmt == "md":
+        lines = []
+        lines.append("### 4.6 缓存健康度与未命名高成本会话")
         lines.append("")
-        lines.append("| 任务名称 | 任务类型 | 缓存率 | 调用 | 当前成本 | 估算可省 |")
-        lines.append("|---------|---------|--------|------|---------|---------|")
-        for r in ch["items"]:
-            lines.append(
-                f"| {r['title']} | {r['task_type']} | {r['cache_rate']:.0f}% | "
-                f"{r['calls']} | ¥{r['cost']:.2f} | ¥{r['potential_saving']:.2f} |"
-            )
+        lines.append(f"> 💡 全局缓存命中率 **{ch['global_rate']:.1f}%**——"
+                     f"提升缓存复用是「零质量风险」的直接省钱杠杆。"
+                     f"下列会话缓存率 < {ch['threshold']}%。")
         lines.append("")
-        lines.append(f"> 💰 **缓存潜力总省：¥{ch['total_potential']:.2f}**"
-                     "（F8 prompt-caching 可承接）。")
-        lines.append("")
-    else:
-        lines.append(f"- 当前所有会话缓存率均 ≥ {ch['threshold']}%，暂无明显缓存优化空间。")
-        lines.append("")
-
-    if payload.get("cost_unresolved"):
-        lines.append("> ⚠️ 缓存潜力估算不可用：本期成本未解析（多为幽灵 / 空 trace），无法量化可省金额；"
-                     "请先解决 §4 顶部的数据缺失提示。")
-        lines.append("")
-
-    if payload["untitled"]:
-        lines.append(f"**⚠️ 未命名高成本会话**（成本 ≥ ¥{payload['cost_p95']:.2f}"
-                     " = 会话级 p95，建议补标题便于归因）：")
-        lines.append("")
-        lines.append("| 标题 | 任务类型 | 实际成本 | 调用 | 日期 |")
-        lines.append("|------|---------|---------|------|------|")
-        for r in payload["untitled"]:
-            lines.append(
-                f"| ⚠️ {r['title']} | {r['task_type']} | ¥{r['cost']:.2f} | "
-                f"{r['calls']} | {r['first_date']} |"
-            )
-        lines.append("")
-    return lines
-
-
-def _render_cache_untitled_html(payload):
-    if not payload:
-        return []
-    ch = payload["cache_health"]
+        if ch["items"]:
+            lines.append("**📉 缓存健康度卡**（保守估算「差距 × 0.5 × 当前成本」为可省空间）：")
+            lines.append("")
+            lines.append("| 任务名称 | 任务类型 | 缓存率 | 调用 | 当前成本 | 估算可省 |")
+            lines.append("|---------|---------|--------|------|---------|---------|")
+            for r in ch["items"]:
+                lines.append(
+                    f"| {r['title']} | {r['task_type']} | {r['cache_rate']:.0f}% | "
+                    f"{r['calls']} | ¥{r['cost']:.2f} | ¥{r['potential_saving']:.2f} |"
+                )
+            lines.append("")
+            lines.append(f"> 💰 **缓存潜力总省：¥{ch['total_potential']:.2f}**"
+                         "（F8 prompt-caching 可承接）。")
+            lines.append("")
+        else:
+            lines.append(f"- 当前所有会话缓存率均 ≥ {ch['threshold']}%，暂无明显缓存优化空间。")
+            lines.append("")
+        if payload.get("cost_unresolved"):
+            lines.append("> ⚠️ 缓存潜力估算不可用：本期成本未解析（多为幽灵 / 空 trace），无法量化可省金额；"
+                         "请先解决 §4 顶部的数据缺失提示。")
+            lines.append("")
+        if payload["untitled"]:
+            lines.append(f"**⚠️ 未命名高成本会话**（成本 ≥ ¥{payload['cost_p95']:.2f}"
+                         " = 会话级 p95，建议补标题便于归因）：")
+            lines.append("")
+            lines.append("| 标题 | 任务类型 | 实际成本 | 调用 | 日期 |")
+            lines.append("|------|---------|---------|------|------|")
+            for r in payload["untitled"]:
+                lines.append(
+                    f"| ⚠️ {r['title']} | {r['task_type']} | ¥{r['cost']:.2f} | "
+                    f"{r['calls']} | {r['first_date']} |"
+                )
+            lines.append("")
+        return lines
+    # html
     L = []
     L.append('        <h3>4.6 缓存健康度与未命名高成本会话</h3>')
     L.append(f'        <p>💡 全局缓存命中率 <b>{ch["global_rate"]:.1f}%</b>——'
@@ -1589,11 +1656,9 @@ def _render_cache_untitled_html(payload):
     else:
         L.append(f'        <p>当前所有会话缓存率均 ≥ {ch["threshold"]}%，'
                  '暂无明显缓存优化空间。</p>')
-
     if payload.get("cost_unresolved"):
         L.append('        <p style="color:var(--disclaimer-fg)">⚠️ 缓存潜力估算不可用：本期成本未解析'
                  '（多为幽灵 / 空 trace），无法量化可省金额；请先解决 §4 顶部的数据缺失提示。</p>')
-
     if payload["untitled"]:
         L.append(f'        <p><b>⚠️ 未命名高成本会话</b>（成本 ≥ ¥{payload["cost_p95"]:.2f}'
                  ' = 会话级 p95，建议补标题便于归因）：</p>')
@@ -1606,6 +1671,15 @@ def _render_cache_untitled_html(payload):
                      f"<td>{r['first_date']}</td></tr>")
         L.append('        </table>')
     return L
+
+
+def _render_cache_untitled_md(payload):
+    return _render_cache_untitled("md", payload)
+
+
+def _render_cache_untitled_html(payload):
+    return _render_cache_untitled("html", payload)
+
 
 
 def _unresolved_call_stats(data):
@@ -1680,31 +1754,22 @@ def _compute_free_token_share(data):
     return free_eff / total_eff
 
 
-def _free_period_disclaimer(data):
-    """若本期为免费 / 限时免费主导期，返回免责声明 md 段落（含末尾空行）；否则返回 []。"""
+def _free_period_disclaimer(fmt, data):
+    """若本期为免费 / 限时免费主导期，返回免责声明段落；否则返回 []。"""
     free_share = _compute_free_token_share(data)
     total_eff_cost = (data.get("summary", {}) or {}).get("total_effective_cost", 0) or 0
     free_dominant = (free_share >= 0.8) or (total_eff_cost == 0)
     if not free_dominant:
         return []
     pct = round(free_share * 100)
-    return [
-        f"> 🎁 **本期以免费 / 限时免费模型为主**（约 {pct}% 的有效 Token 来自零成本调用）。",
-        ">",
-        "> 成本相关洞察（§4.4 省钱杠杆、§4.5 失败自动化成本归因、§4.6 未命名高成本会话）在免费期参考意义有限；",
-        "> 请重点参考 **§4.3 Token 口径异常**（捕捉免费日的高 Token 峰值）与 **§4.6 缓存健康度**（与计费无关，始终有效）。",
-        "",
-    ]
-
-
-def _free_period_disclaimer_html(data):
-    """免费 / 限时免费主导期的免责声明（HTML 版），返回 html 行列表。"""
-    free_share = _compute_free_token_share(data)
-    total_eff_cost = (data.get("summary", {}) or {}).get("total_effective_cost", 0) or 0
-    free_dominant = (free_share >= 0.8) or (total_eff_cost == 0)
-    if not free_dominant:
-        return []
-    pct = round(free_share * 100)
+    if fmt == "md":
+        return [
+            f"> 🎁 **本期以免费 / 限时免费模型为主**（约 {pct}% 的有效 Token 来自零成本调用）。",
+            ">",
+            "> 成本相关洞察（§4.4 省钱杠杆、§4.5 失败自动化成本归因、§4.6 未命名高成本会话）在免费期参考意义有限；",
+            "> 请重点参考 **§4.3 Token 口径异常**（捕捉免费日的高 Token 峰值）与 **§4.6 缓存健康度**（与计费无关，始终有效）。",
+            "",
+        ]
     return [
         '        <div class="disclaimer-box">',
         f'            <b>🎁 本期以免费 / 限时免费模型为主</b>（约 {pct}% 的有效 Token 来自零成本调用）。',
@@ -1714,51 +1779,57 @@ def _free_period_disclaimer_html(data):
     ]
 
 
-def _render_anomaly_block_md(title, block, kind):
-    """渲染单口径（cost / token）异常块，返回 md 行列表。"""
-    lines = []
+def _free_period_disclaimer_md(data):
+    return _free_period_disclaimer("md", data)
+
+
+def _free_period_disclaimer_html(data):
+    return _free_period_disclaimer("html", data)
+
+
+
+def _render_anomaly_block(fmt, title, block, kind):
+    """渲染单口径（cost / token）异常块。"""
     thr = block.get("thresholds", {})
-    if kind == "cost":
-        lines.append(f"**💰 {title}**：日级成本阈值 p50 = ¥{thr.get('p50', 0):.2f}、"
-                     f"p95 = ¥{thr.get('p95', 0):.2f}；会话级 p95 = ¥{thr.get('session_p95', 0):.2f}。")
-    else:
-        lines.append(f"**📊 {title}**：日级有效 Token 阈值 p50 = {thr.get('p50', 0):,.0f}、"
-                     f"p95 = {thr.get('p95', 0):,.0f}；会话级 p95（调用次数）= {thr.get('session_p95', 0):,.0f}。")
-    lines.append("")
-    daily = block.get("daily", [])
-    if daily:
-        lines.append("**异常日**：")
-        lines.append("")
-        for a in daily:
-            v = _fmt_anom_val(a["value"], kind == "cost")
-            lines.append(f"- 🔺 **{a['date']}**：{v} —— {'；'.join(a['reasons'])}")
-        lines.append("")
-    else:
-        label = "成本" if kind == "cost" else "Token 消耗"
-        lines.append(f"- 日级{label}平稳，无超过 p95 或环比突增的异常日。")
-        lines.append("")
-    sess = block.get("session", [])
-    if sess:
+    if fmt == "md":
+        lines = []
         if kind == "cost":
-            lines.append("**异常高成本会话（超过会话级 p95）**：")
+            lines.append(f"**💰 {title}**：日级成本阈值 p50 = ¥{thr.get('p50', 0):.2f}、"
+                         f"p95 = ¥{thr.get('p95', 0):.2f}；会话级 p95 = ¥{thr.get('session_p95', 0):.2f}。")
         else:
-            lines.append("**异常高调用会话（调用次数超过 p95）**：")
+            lines.append(f"**📊 {title}**：日级有效 Token 阈值 p50 = {thr.get('p50', 0):,.0f}、"
+                         f"p95 = {thr.get('p95', 0):,.0f}；会话级 p95（调用次数）= {thr.get('session_p95', 0):,.0f}。")
         lines.append("")
-        for a in sess:
-            models = "、".join(a.get("models", [])[:3]) or "—"
+        daily = block.get("daily", [])
+        if daily:
+            lines.append("**异常日**：")
+            lines.append("")
+            for a in daily:
+                v = _fmt_anom_val(a["value"], kind == "cost")
+                lines.append(f"- 🔺 **{a['date']}**：{v} —— {'；'.join(a['reasons'])}")
+            lines.append("")
+        else:
+            label = "成本" if kind == "cost" else "Token 消耗"
+            lines.append(f"- 日级{label}平稳，无超过 p95 或环比突增的异常日。")
+            lines.append("")
+        sess = block.get("session", [])
+        if sess:
             if kind == "cost":
-                lines.append(f"- 💰 **{a['title']}**：¥{a['value']:.2f}（主要模型：{models}）")
+                lines.append("**异常高成本会话（超过会话级 p95）**：")
             else:
-                lines.append(f"- 💰 **{a['title']}**：实际消耗 {a['value']:,.0f} token、"
-                             f"调用 {a.get('calls', 0)} 次（主要模型：{models}）")
-        lines.append("")
-    return lines
-
-
-def _render_anomaly_block_html(title, block, kind):
-    """渲染单口径（cost / token）异常块，返回 html 行列表。"""
+                lines.append("**异常高调用会话（调用次数超过 p95）**：")
+            lines.append("")
+            for a in sess:
+                models = "、".join(a.get("models", [])[:3]) or "—"
+                if kind == "cost":
+                    lines.append(f"- 💰 **{a['title']}**：¥{a['value']:.2f}（主要模型：{models}）")
+                else:
+                    lines.append(f"- 💰 **{a['title']}**：实际消耗 {a['value']:,.0f} token、"
+                                 f"调用 {a.get('calls', 0)} 次（主要模型：{models}）")
+            lines.append("")
+        return lines
+    # html
     L = []
-    thr = block.get("thresholds", {})
     if kind == "cost":
         L.append(f"        <p><b>💰 {title}</b>：日级成本阈值 p50 = ¥{thr.get('p50', 0):.2f}、"
                  f"p95 = ¥{thr.get('p95', 0):.2f}；会话级 p95 = ¥{thr.get('session_p95', 0):.2f}。</p>")
@@ -1792,12 +1863,17 @@ def _render_anomaly_block_html(title, block, kind):
     return L
 
 
-def build_cost_analysis_section_md(data):
-    """Markdown 章节：四、成本深度分析（每会话 / 异常 / 省钱）。
+def _render_anomaly_block_md(title, block, kind):
+    return _render_anomaly_block("md", title, block, kind)
 
-    覆盖行业调研头号诉求「每任务 / 每会话成本」：token 成本往往只占 AI Agent 总成本的
-    30–70%，真正烧钱的是「每个会话跑几次调用、几次重试」。另含成本异常检测与省钱杠杆洞察。
-    """
+
+def _render_anomaly_block_html(title, block, kind):
+    return _render_anomaly_block("html", title, block, kind)
+
+
+
+def build_cost_analysis_section(fmt, data):
+    """章节：四、成本深度分析（每会话 / 异常 / 省钱）。MD / HTML 共用一份数据与逻辑。"""
     session_stats = data.get("session_stats") or {}
     rows = session_stats.get("rows", [])
     buckets = session_stats.get("buckets", [])
@@ -1806,127 +1882,99 @@ def build_cost_analysis_section_md(data):
     automation_runs = data.get("automation_runs") or []
     if not rows:
         return []
-    lines = []
-    lines.append("## 四、成本深度分析（每会话 / 异常 / 省钱）")
-    lines.append("")
-    lines.append("> 行业调研显示：Agent 使用者最关心「**每任务 / 每会话成本**」——token 成本往往只占 AI Agent 总成本的 30–70%，"
-                 "真正烧钱的是「每个会话跑几次调用、几次重试」。以下从会话维度拆解你的花费。")
-    lines.append("")
-    # 未解析 / 幽灵调用警告卡（D1：替代静默 ¥0.00，显式提示数据缺失）
-    _warn = _unresolved_warning_md(_unresolved_call_stats(data))
-    if _warn:
-        lines.append(_warn)
+    if fmt == "md":
+        lines = []
+        lines.append("## 四、成本深度分析（每会话 / 异常 / 省钱）")
         lines.append("")
-
-    # 免费 / 限时免费主导期免责声明（P1：避免 §4.4/4.5/4.6 成本洞察在免费期误导）
-    _disc = _free_period_disclaimer(data)
-    if _disc:
-        lines.extend(_disc)
-
-    # 4.1 每会话成本 Top 10
-    lines.append("### 4.1 每会话成本 Top 10")
-    lines.append("")
-    lines.append("| 排名 | 任务名称 | 任务类型 | 实际成本 | 实际消耗 | 调用 | 主要模型 |")
-    lines.append("|------|---------|---------|---------|---------|------|---------|")
-    for i, r in enumerate(rows[:10], 1):
-        models = "、".join(r.get("models", [])[:3]) or "—"
-        lines.append(
-            f"| {i} | {r['title']} | {r['task_type']} | ¥{r['effective_cost']:.2f} | "
-            f"{format_number(r['effective_tokens'])} | {r['calls']} | {models} |"
-        )
-    lines.append("")
-
-    # 4.2 成本分布
-    lines.append("### 4.2 每会话成本分布")
-    lines.append("")
-    total_cost = sum(b["cost"] for b in buckets) or 0
-    lines.append(f"本期共 {len(rows)} 个会话，合计实际成本 ¥{total_cost:.2f}。按单会话成本分桶（图表按会话数，明细含合计成本）：")
-    lines.append("")
-    bar = build_session_cost_bar_md(buckets)
-    if bar:
-        lines.append(bar)
+        lines.append("> 行业调研显示：Agent 使用者最关心「**每任务 / 每会话成本**」——token 成本往往只占 AI Agent 总成本的 30–70%，"
+                     "真正烧钱的是「每个会话跑几次调用、几次重试」。以下从会话维度拆解你的花费。")
         lines.append("")
-    lines.append("**明细**（成本区间 | 会话数 | 合计成本 | 占成本比）：")
-    lines.append("")
-    lines.append("| 成本区间 | 会话数 | 合计成本 | 占比 |")
-    lines.append("|---------|--------|---------|------|")
-    for b in buckets:
-        pct = (b["cost"] / total_cost * 100) if total_cost else 0
-        lines.append(f"| {b['label']} | {b['count']} | ¥{b['cost']:.2f} | {pct:.1f}% |")
-    lines.append("")
-
-    # 4.3 异常检测（双口径：成本 + Token）
-    lines.append("### 4.3 成本 / Token 异常与飙升检测（双口径）")
-    lines.append("")
-    lines.append("> 本节同时以「成本」与「Token 消耗」两个**独立**口径检测异常日，"
-                 "避免免费 / 限时免费模型拉低成本口径而漏报 Token 峰值。")
-    lines.append("")
-    cost_block = ca.get("cost")
-    if cost_block is None:
-        lines.append(f"> ⚠️ {ca.get('cost_note', '')}")
+        _warn = _unresolved_warning_md(_unresolved_call_stats(data))
+        if _warn:
+            lines.append(_warn)
+            lines.append("")
+        _disc = _free_period_disclaimer("md", data)
+        if _disc:
+            lines.extend(_disc)
+        lines.append("### 4.1 每会话成本 Top 10")
         lines.append("")
-    else:
-        lines.extend(_render_anomaly_block_md("成本口径", cost_block, "cost"))
-    lines.extend(_render_anomaly_block_md("Token 口径", ca["token"], "token"))
-
-    # 4.3.1 会话规模异常（O2 v1.5 增强，纯只读）
-    size_anom = _compute_session_size_anomalies(rows)
-    if size_anom and size_anom["items"]:
-        lines.append(f"**📊 会话规模异常**（调用次数 > {size_anom['threshold']}，"
-                     f"取 max(会话 p95={size_anom['p95']}, 200)，疑似 fan-out / 长链路）：")
-        lines.append("")
-        lines.append("| 任务名称 | 任务类型 | 调用 | 实际成本 |")
-        lines.append("|---------|---------|------|---------|")
-        for r in size_anom["items"]:
+        lines.append("| 排名 | 任务名称 | 任务类型 | 实际成本 | 实际消耗 | 调用 | 主要模型 |")
+        lines.append("|------|---------|---------|---------|---------|------|---------|")
+        for i, r in enumerate(rows[:10], 1):
+            models = "、".join(r.get("models", [])[:3]) or "—"
             lines.append(
-                f"| {r['title'][:30]} | {r['task_type']} | {r['calls']} | ¥{r['effective_cost']:.2f} |"
+                f"| {i} | {r['title']} | {r['task_type']} | ¥{r['effective_cost']:.2f} | "
+                f"{format_number(r['effective_tokens'])} | {r['calls']} | {models} |"
             )
         lines.append("")
-
-    # 4.4 省钱杠杆
-    lines.append("### 4.4 省钱杠杆（自动洞察）")
-    lines.append("")
-    items = si.get("items", [])
-    if items:
-        lines.append("基于「实际执行模型」维度分析，以下高占比付费模型存在更便宜的替代方案"
-                     "（假设 30% 的简单任务可迁移，估算口径，仅供参考）：")
+        lines.append("### 4.2 每会话成本分布")
         lines.append("")
-        for it in items:
-            lines.append(
-                f"- **{it['model']}** 当前花费 ¥{it['cost']:.2f}（占付费成本 {it['cost_share']:.1f}%）；"
-                f"若简单任务迁移至 **{it['alternative']}**（{it['note']}），"
-                f"预计月省 **¥{it['estimated_monthly_save']:.2f}**。"
-            )
+        total_cost = sum(b["cost"] for b in buckets) or 0
+        lines.append(f"本期共 {len(rows)} 个会话，合计实际成本 ¥{total_cost:.2f}。按单会话成本分桶（图表按会话数，明细含合计成本）：")
         lines.append("")
-        lines.append(f"> 💡 **合计预计月省 ¥{si.get('total_estimated_monthly_save', 0):.2f}**"
-                     f"（保守估算，实际取决于你可迁移的任务比例）。")
-    else:
-        lines.append("- 当前付费模型均已是最优性价比，暂无明确可迁移的更便宜替代；"
-                     "后续若引入更便宜模型或提升缓存复用率，可进一步降本。")
-    lines.append("")
-
-    # 4.5 失败自动化成本归因（O1 v1.5 增强，纯只读）
-    sessions_by_cwd, session_cost_by_id = _build_session_cwd_maps(data)
-    failed_items = _compute_failed_automation_cost(automation_runs, sessions_by_cwd, session_cost_by_id)
-    lines.extend(_render_failed_automation_md(failed_items))
-
-    # 4.6 缓存健康度与未命名高成本会话（O4+O6 v1.5 增强，纯只读）
-    cache_untitled = _compute_cache_and_untitled(data, threshold_pct=60.0)
-    lines.extend(_render_cache_untitled_md(cache_untitled))
-
-    return lines
-
-
-def build_cost_analysis_section_html(data):
-    """HTML 章节：四、成本深度分析（对应 MD 同名章节）。"""
-    session_stats = data.get("session_stats") or {}
-    rows = session_stats.get("rows", [])
-    buckets = session_stats.get("buckets", [])
-    ca = data.get("cost_anomalies") or {}
-    si = data.get("savings_insights") or {}
-    automation_runs = data.get("automation_runs") or []
-    if not rows:
-        return []
+        bar = build_session_cost_bar_md(buckets)
+        if bar:
+            lines.append(bar)
+            lines.append("")
+        lines.append("**明细**（成本区间 | 会话数 | 合计成本 | 占成本比）：")
+        lines.append("")
+        lines.append("| 成本区间 | 会话数 | 合计成本 | 占比 |")
+        lines.append("|---------|--------|---------|------|")
+        for b in buckets:
+            pct = (b["cost"] / total_cost * 100) if total_cost else 0
+            lines.append(f"| {b['label']} | {b['count']} | ¥{b['cost']:.2f} | {pct:.1f}% |")
+        lines.append("")
+        lines.append("### 4.3 成本 / Token 异常与飙升检测（双口径）")
+        lines.append("")
+        lines.append("> 本节同时以「成本」与「Token 消耗」两个**独立**口径检测异常日，"
+                     "避免免费 / 限时免费模型拉低成本口径而漏报 Token 峰值。")
+        lines.append("")
+        cost_block = ca.get("cost")
+        if cost_block is None:
+            lines.append(f"> ⚠️ {ca.get('cost_note', '')}")
+            lines.append("")
+        else:
+            lines.extend(_render_anomaly_block("md", "成本口径", cost_block, "cost"))
+        lines.extend(_render_anomaly_block("md", "Token 口径", ca["token"], "token"))
+        size_anom = _compute_session_size_anomalies(rows)
+        if size_anom and size_anom["items"]:
+            lines.append(f"**📊 会话规模异常**（调用次数 > {size_anom['threshold']}，"
+                         f"取 max(会话 p95={size_anom['p95']}, 200)，疑似 fan-out / 长链路）：")
+            lines.append("")
+            lines.append("| 任务名称 | 任务类型 | 调用 | 实际成本 |")
+            lines.append("|---------|---------|------|---------|")
+            for r in size_anom["items"]:
+                lines.append(
+                    f"| {r['title'][:30]} | {r['task_type']} | {r['calls']} | ¥{r['effective_cost']:.2f} |"
+                )
+            lines.append("")
+        lines.append("### 4.4 省钱杠杆（自动洞察）")
+        lines.append("")
+        items = si.get("items", [])
+        if items:
+            lines.append("基于「实际执行模型」维度分析，以下高占比付费模型存在更便宜的替代方案"
+                         "（假设 30% 的简单任务可迁移，估算口径，仅供参考）：")
+            lines.append("")
+            for it in items:
+                lines.append(
+                    f"- **{it['model']}** 当前花费 ¥{it['cost']:.2f}（占付费成本 {it['cost_share']:.1f}%）；"
+                    f"若简单任务迁移至 **{it['alternative']}**（{it['note']}），"
+                    f"预计月省 **¥{it['estimated_monthly_save']:.2f}**。"
+                )
+            lines.append("")
+            lines.append(f"> 💡 **合计预计月省 ¥{si.get('total_estimated_monthly_save', 0):.2f}**"
+                         f"（保守估算，实际取决于你可迁移的任务比例）。")
+        else:
+            lines.append("- 当前付费模型均已是最优性价比，暂无明确可迁移的更便宜替代；"
+                         "后续若引入更便宜模型或提升缓存复用率，可进一步降本。")
+        lines.append("")
+        sessions_by_cwd, session_cost_by_id = _build_session_cwd_maps(data)
+        failed_items = _compute_failed_automation_cost(automation_runs, sessions_by_cwd, session_cost_by_id)
+        lines.extend(_render_failed_automation("md", failed_items))
+        cache_untitled = _compute_cache_and_untitled(data, threshold_pct=60.0)
+        lines.extend(_render_cache_untitled("md", cache_untitled))
+        return lines
+    # html
     L = []
     L.append('    <div class="section">')
     L.append('        <h2 class="section-title">四、成本深度分析（每会话 / 异常 / 省钱）</h2>')
@@ -1936,11 +1984,7 @@ def build_cost_analysis_section_html(data):
     if _warn:
         _warn_html = _warn.replace("\n", " ").replace("⚠️", "").strip()
         L.append(f'        <div class="warn-box"><b>⚠️ 未解析 / 幽灵调用提示</b>：{_esc(_warn_html)}</div>')
-
-    # 免费 / 限时免费主导期免责声明（P1）
-    L.extend(_free_period_disclaimer_html(data))
-
-    # 4.1
+    L.extend(_free_period_disclaimer("html", data))
     L.append('        <h3>4.1 每会话成本 Top 10</h3>')
     L.append('        <table>')
     L.append('            <tr><th>排名</th><th>任务名称</th><th>任务类型</th><th>实际成本</th>'
@@ -1951,12 +1995,9 @@ def build_cost_analysis_section_html(data):
                  f"<td>¥{r['effective_cost']:.2f}</td><td>{format_number(r['effective_tokens'])}</td>"
                  f"<td>{r['calls']}</td><td>{models}</td></tr>")
     L.append('        </table>')
-
-    # 4.2
     L.append('        <h3>4.2 每会话成本分布</h3>')
     total_cost = sum(b["cost"] for b in buckets) or 0
     L.append(f"        <p>本期共 {len(rows)} 个会话，合计实际成本 ¥{total_cost:.2f}。按单会话成本分桶（环形图按会话数）：</p>")
-    # 环形图：每会话成本分布（按会话数，复用 build_donut_chart 并指定 value_key）
     bucket_stats = [{"task_type": b["label"], "count": b["count"], "cost": b["cost"]} for b in buckets]
     donut = build_donut_chart(bucket_stats, title="每会话成本分布（按会话数）",
                               center_label="会话数", value_key="count", unit=" 会话")
@@ -1969,8 +2010,6 @@ def build_cost_analysis_section_html(data):
         L.append(f"            <tr><td>{b['label']}</td><td>{b['count']}</td>"
                  f"<td>¥{b['cost']:.2f}</td><td>{pct:.1f}%</td></tr>")
     L.append('        </table>')
-
-    # 4.3 异常检测（双口径：成本 + Token）
     L.append('        <h3>4.3 成本 / Token 异常与飙升检测（双口径）</h3>')
     L.append('        <p>本节同时以「成本」与「Token 消耗」两个<b>独立</b>口径检测异常日，'
              '避免免费 / 限时免费模型拉低成本口径而漏报 Token 峰值。</p>')
@@ -1978,10 +2017,8 @@ def build_cost_analysis_section_html(data):
     if cost_block is None:
         L.append(f'        <p style="color:var(--disclaimer-fg)">⚠️ {ca.get("cost_note", "")}</p>')
     else:
-        L.extend(_render_anomaly_block_html("成本口径", cost_block, "cost"))
-    L.extend(_render_anomaly_block_html("Token 口径", ca["token"], "token"))
-
-    # 4.3.1 会话规模异常（O2 v1.5 增强，纯只读）
+        L.extend(_render_anomaly_block("html", "成本口径", cost_block, "cost"))
+    L.extend(_render_anomaly_block("html", "Token 口径", ca["token"], "token"))
     size_anom = _compute_session_size_anomalies(rows)
     if size_anom and size_anom["items"]:
         L.append(f'        <p><b>📊 会话规模异常</b>（调用次数 &gt; {size_anom["threshold"]}，'
@@ -1992,8 +2029,6 @@ def build_cost_analysis_section_html(data):
             L.append(f"            <tr><td>{_esc(r['title'][:30])}</td><td>{_esc(r['task_type'])}</td>"
                      f"<td>{r['calls']}</td><td>¥{r['effective_cost']:.2f}</td></tr>")
         L.append('        </table>')
-
-    # 4.4
     L.append('        <h3>4.4 省钱杠杆（自动洞察）</h3>')
     items = si.get("items", [])
     if items:
@@ -2011,18 +2046,22 @@ def build_cost_analysis_section_html(data):
     else:
         L.append("        <p>当前付费模型均已是最优性价比，暂无明确可迁移的更便宜替代；"
                  "后续若引入更便宜模型或提升缓存复用率，可进一步降本。</p>")
-
-    # 4.5 失败自动化成本归因（O1 v1.5 增强，纯只读）
     sessions_by_cwd, session_cost_by_id = _build_session_cwd_maps(data)
     failed_items = _compute_failed_automation_cost(automation_runs, sessions_by_cwd, session_cost_by_id)
-    L.extend(_render_failed_automation_html(failed_items))
-
-    # 4.6 缓存健康度与未命名高成本会话（O4+O6 v1.5 增强，纯只读）
+    L.extend(_render_failed_automation("html", failed_items))
     cache_untitled = _compute_cache_and_untitled(data, threshold_pct=60.0)
-    L.extend(_render_cache_untitled_html(cache_untitled))
-
+    L.extend(_render_cache_untitled("html", cache_untitled))
     L.append('    </div>')
     return L
+
+
+def build_cost_analysis_section_md(data):
+    return build_cost_analysis_section("md", data)
+
+
+def build_cost_analysis_section_html(data):
+    return build_cost_analysis_section("html", data)
+
 
 
 def generate_html_report(data):
@@ -2206,6 +2245,7 @@ def generate_html_report(data):
 
     # （新增）三、模型使用与成本对比
     lines.extend(build_model_section_html(data))
+    lines.extend(build_tier_section_html(data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）
     lines.extend(build_cost_analysis_section_html(data))
@@ -2252,7 +2292,7 @@ def generate_html_report(data):
                 f"<td>{c_ratio:.0f}%</td><td>¥{s.get('effective_cost', 0):.2f}</td><td>{pct:.1f}%</td></tr>"
             )
         lines.append("        </table>")
-        lines.append('        <p style="font-size:.85em;opacity:.75;margin:.4em 0">ℹ️ 「其他」含无法关联会话记录（trace 的会话 ID 在本地会话库找不到）或自动分类失败的 token；「未命名会话」= 本地会话库中无标题记录的会话。</p>')
+        lines.append('        <p style="font-size:.85em;opacity:.75;margin:.4em 0">ℹ️ 「未关联会话」= trace 的会话 ID 在本地会话库找不到（孤儿 trace，已合并为单一汇总行）；「未命名会话」= 本地会话库中确有但无标题的会话；「其他」= 任务类型无法自动归类或自动分类失败的 token。</p>')
         top = task_token_stats[0]
         top_pct = (top.get("effective_tokens", 0) / total_eff * 100) if total_eff else 0
         lines.append(
@@ -2474,6 +2514,11 @@ def generate_json_report(data):
             "end_date": meta.get("end_date", ""),
             "generated_at": _fmt_generated_at(),
             "data_sources": ["WorkBuddy 会话历史", "Traces", "workbuddy.db", "技能使用记录", "自动化配置"],
+            "mode_rates": meta.get("mode_rates"),
+            "mode_cost_estimated": meta.get("mode_cost_estimated"),
+            "mode_config_cache_loaded": meta.get("mode_config_cache_loaded"),
+            "mode_config_cache_path": meta.get("mode_config_cache_path"),
+            "mode_config_cache_mtime": meta.get("mode_config_cache_mtime"),
         },
         "summary": {
             "overview": {
@@ -2650,7 +2695,16 @@ def main():
             "session_stats": _session_stats,
             "cost_anomalies": collector.detect_cost_anomalies(daily_tokens, _session_stats),
             "savings_insights": collector.build_savings_insights(collector.aggregate_by_exec_model(traces)),
+            # v1.3.0：档位维度（快速/均衡/极致）。与 §3.1/§3.2 同源、金额口径一致。
+            "tier_stats": collector.aggregate_by_tier(traces),
         }
+        # v1.3.0：将档位估算倍率的「配置缓存校准」状态注入 meta，供 §3.4 与 JSON 输出展示。
+        _mode_meta = getattr(collector, "MODE_RATES_META", {}) or {}
+        data["meta"]["mode_rates"] = dict(_mode_meta.get("rates", {}) or {})
+        data["meta"]["mode_cost_estimated"] = bool(_mode_meta.get("auto_estimate", False))
+        data["meta"]["mode_config_cache_loaded"] = bool(_mode_meta.get("config_cache_loaded", False))
+        data["meta"]["mode_config_cache_path"] = _mode_meta.get("config_cache_path")
+        data["meta"]["mode_config_cache_mtime"] = _mode_meta.get("config_cache_mtime")
 
     if args.format == "markdown":
         report = generate_markdown_report(data)

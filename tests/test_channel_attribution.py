@@ -201,8 +201,9 @@ def _write_trace(traces_dir, idx, session_id, started_at,
 @allure.step("运行采集核心（含跨窗口补全会话）")
 def _run_collection(mod, db_path, traces_dir, start, end):
     """复刻 main() 的采集核心流程（含跨窗口补全会话修复），返回 trace 列表。"""
-    mod.DB_PATH = db_path
-    mod.TRACES_DIR = traces_dir
+    # Phase 1 拆分后，路径全局量定义在 ca_core / ca_sources；本测试隔离须写到「真实读取该全局的模块」
+    mod.ca_sources.DB_PATH = db_path
+    mod.ca_sources.TRACES_DIR = traces_dir
 
     db_data = mod.collect_db_data(start, end)
     sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}

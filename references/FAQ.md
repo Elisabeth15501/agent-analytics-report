@@ -2,7 +2,7 @@
 
 这里汇总使用本技能时最容易撞上的问题。按「安装 → 生成 → 计价 → 自定义模型 → 标记与合并 → 数据源与隐私 → 分类与异常 → 排查」排列，单篇自足，不用再翻 SKILL.md 和 README。
 
-> 适用版本：**v1.2.0**（核对 `config.json` / `metadata.json`）。**目前仅适配 WorkBuddy。**
+> 适用版本：**v1.3.0**（核对 `config.json` / `metadata.json`）。**目前仅适配 WorkBuddy。**
 
 ---
 
@@ -92,7 +92,9 @@ python scripts/generate_report.py data.json --output report.json  --format json 
 
 两份都缺时，回退到 `collect_usage_data.py` 里的内置 `MODEL_PRICING` 常量。单位是**元 / 每百万 tokens，输入按缓存未命中价**。
 
-截至 v1.2.0，发布版已配价的官方模型共 17 项（完整清单以 `scripts/pricing.json` 为准）：
+截至 v1.3.0，发布版已配价的官方模型共 17 项（完整清单以 `scripts/pricing.json` 为准）：
+
+另：自动路由器的三档**档位**（快速 / 均衡 / 极致，即 `fast-model` / `balanced-model` / `extreme-model`）走独立 `mode_rates` 段配置，不在上面这份「模型」清单里——它们按积分倍率计费，报告单设 §3.4 维度展示，详见 Q36 / Q37。
 
 `auto`（路由别名）· `hy3` / `hy3-x` · `hy4-preview` / `hy4-preview-x` · `glm-5.3` / `glm-5.3-flash` / `glm-5.2` / `glm-5.2-x` / `glm-5.1` / `glm-5v-turbo` · `minimax-m3` · `kimi-k3` / `kimi-k2.7-code` / `kimi-k2.6` · `deepseek-v4-flash` / `deepseek-v4-pro`
 
@@ -252,7 +254,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 .venv/Scripts/python.exe tools/render_allure_html.py --results-dir allure-results --output allure-report.html
 ```
 
-当前 **9 个测试文件、284 用例**。全部使用合成 fixture 数据，不含任何真实用量或个人资料，可安全公开。用例按 marker 分层（`smoke` / `unit` / `integration` / `regression` / `golden` / `metadata` / `privacy`），可用 `pytest -m regression` 过滤。
+当前 **10 个测试文件、306 用例**。全部使用合成 fixture 数据，不含任何真实用量或个人资料，可安全公开。用例按 marker 分层（`smoke` / `unit` / `integration` / `regression` / `golden` / `metadata` / `privacy`），可用 `pytest -m regression` 过滤。
 
 注意：`pytest.ini` 的 `addopts` 里带 `--alluredir`，若环境没装 `allure-pytest` 插件，跑测试要加 `-o addopts=""` 绕过。
 
@@ -261,3 +263,27 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 
 **Q35. 我在用另一个类似 WorkBuddy 的工具，想用这个Skill，但目前只支持 WorkBuddy，可以怎样做？**
 请参考 [ADAPTERS.md](ADAPTERS.md) 中的适配器说明。
+
+---
+
+## 九、档位维度（快速 / 均衡 / 极致）
+
+**Q36. 报告 §3.4 的「档位」是什么？为什么单价是估算值？**
+WorkBuddy 的 `auto` 自动路由下还有三档可选档位，按**积分消耗倍率**区分：
+
+| 档位 | 别名（trace 字面量） | 积分倍率 |
+|------|----------------------|----------|
+| 快速 | `fast-model` | 0.21x |
+| 均衡 | `balanced-model` | 0.65x |
+| 极致 | `extreme-model`（配置缓存规范 id 为 `deep-model`，报告已归一） | 1.20x |
+
+**这些是估算单价，不是真实账单价**：WorBuddy 只对档位做积分倍率计费，trace 里从不记录档位背后实际落地的底层模型，因此按档位直接算「花费」在概念上不成立。报告用「倍率锚定法」估算——按已知模型的官方倍率线性外推档位 ¥ 单价（快速 ≈¥1.24/2.47、均衡 ≈¥6.58/23.04、极致 ≈¥14.80/74.10），**仅用于横向对比档位间的相对成本**，章节内明确标注为估算值，且与 §3.1（账单口径）/ §3.2（入口视图）的真实计费完全解耦——改档位定价不影响任何真实金额。
+
+想调估算单价只改 `pricing.json`（或 `pricing.local.json`）的 `mode_rates` 段，不用动代码。
+
+**Q37. 为什么 §3.4 看不到档位背后的真实模型？**
+因为 WorkBuddy 的计费语义就是「按档位积分倍率」而非「按底层模型 token」。trace 里只有档位别名（`fast-model` 等），底层模型对调用方不可见，所以本报告只能做**纯档位聚合**，无法像 §3.2 那样展开成具体模型。这不是采集器漏采，而是上游数据本身就不包含该信息。若你确实需要「某档位跑了哪些模型」，只能从 WorkBuddy 后台按档位账单查证，本报告无法还原。
+
+---
+
+> 至此共 **36 问**。单篇自足；更多细节见 SKILL.md 与 README.md。

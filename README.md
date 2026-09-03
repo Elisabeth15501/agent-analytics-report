@@ -58,11 +58,11 @@ python scripts/generate_report.py data.json --output report.html --format html
 
 本技能附带一套分层回归测试，覆盖从数据采集、计费等效折算、报告生成到发布一致性的全链路。**全部用例使用合成 fixture 数据，不引用任何第三方商业 API、不含真实用量/个人信息**，可安全公开（适合作为作品集在 GitHub Pages 展示）。
 
-测试分层（共 9 个测试文件、284 用例全绿）：
+测试分层（共 10 个测试文件、306 用例全绿）：
 
 | 层 | 文件 | 覆盖要点 |
 |----|------|----------|
-| **L0 数据采集** | `test_cost_math.py` · `test_calendar_period.py` · `test_aggregation.py` · `test_display_merge.py` | 计价（GLM 折扣 / 缓存折算 / 限免 / blended 回退）、日历周期对齐、聚合与异常双口径检测、display_merge 合并显示与计费分离 |
+| **L0 数据采集** | `test_cost_math.py` · `test_calendar_period.py` · `test_aggregation.py` · `test_display_merge.py` · `test_mode_rates.py` | 计价（GLM 折扣 / 缓存折算 / 限免 / blended 回退）、日历周期对齐、聚合与异常双口径检测、display_merge 合并显示与计费分离、档位维度（快速/均衡/极致）倍率锚定与归一 |
 | **L1 报告生成** | `test_report_generation.py` | GLM-5.2 家族合并、XSS 转义、图表构建、三格式（md / html / json）跑通 |
 | **L2 定价边界** | `test_pricing_boundary.py` | 通道分支、已下架模型、零/负/超大值、blended 精度 |
 | **L3 CLI 端到端** | `test_e2e_cli.py` | 黑盒 subprocess 跑通报告生成三格式、CLI 参数校验、恶意模型名 XSS 回归 |
@@ -107,7 +107,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 
 ## 常见问题
 
-花费对不上、模型显示「未配置」、想加自己的模型、想知道那些小图标什么意思——集中解答见 [references/FAQ.md](references/FAQ.md)（34 问，单篇自足）。
+花费对不上、模型显示「未配置」、想加自己的模型、想知道那些小图标什么意思——集中解答见 [references/FAQ.md](references/FAQ.md)（36 问，单篇自足）。
 
 ---
 
@@ -115,7 +115,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 
 | 文件 | 职责 |
 |------|------|
-| `scripts/collect_usage_data.py` | 数据采集（当前为 WorkBuddy 适配器） |
+| `scripts/collect_usage_data.py` | 数据采集门面（当前为 WorkBuddy 适配器）；内部已拆分为 `ca_core` / `ca_sources` / `ca_sessions` / `ca_aggregate` 四模块，门面仅做 `from X import *` |
 | `scripts/generate_report.py` | 报告渲染（四色标记：🔀路由 / 🏠本地 / 🔧外部自定义 / 🗄️官方已下架） |
 | `scripts/pricing.json` | 官方模型计价库（含 `delisted` 历史下架模型、`display_merge` 显示合并配置） |
 | `scripts/pricing.local.json` | 用户本地覆盖（gitignore，不发布） |

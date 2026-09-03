@@ -81,5 +81,12 @@
     "hy4-preview-x": "hy4-preview",
     "hy3-x": "hy3"
   },
+  "mode_rates": {
+    "_comment": "档位（路由三档：快速/均衡/极致）估算单价（v1.3.0 新增分析维度）。档位倍率是「积分维度」，与 ¥ 刊例价正交——已确认不参与金额计算，仅作分析维度。下方 ¥ 单价为「倍率锚定法」估算：按已知模型倍率线性外推（见各档 anchor）。服务端配置缓存 acc-product-config-v3.json 的官方 credits 倍率会覆盖这里的 multiplier，但 ¥ 单价仍以本段锚定值为准（官方只给倍率不给 ¥）。若想更精确，请按你实际积分消耗反推后改本段 input/output；改完无需动 Python。别名 alias 为配置缓存规范 id（极致在缓存里叫 deep-model，trace 里是 extreme-model，采集器已自动归一）。",
+    "auto_estimate": true,
+    "fast": {"alias": "fast-model", "label": "快速", "multiplier": 0.21, "input": 1.24, "output": 2.47, "anchor": "DeepSeek-V4-Flash 0.17 (¥1/¥2) ×1.235"},
+    "balanced": {"alias": "balanced-model", "label": "均衡", "multiplier": 0.65, "input": 6.58, "output": 23.04, "anchor": "glm-5.2 0.79 (¥8/¥28) ×0.823"},
+    "extreme": {"alias": "deep-model", "label": "极致", "multiplier": 1.20, "input": 12.15, "output": 42.51, "anchor": "glm-5.2 0.79 (¥8/¥28) ×1.519"}
+  },
   "custom_local": {}
 }

@@ -2,6 +2,37 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.3.0] — 2026-09-02
+
+### ✨ 新特性 / 改进
+- **新增「档位维度」分析（§3.4 快速 / 均衡 / 极致）**。WorkBuddy 自动路由器（`auto`）下还有三档可选档位：`fast-model`（快速，倍率 0.21x）/ `balanced-model`（均衡，0.65x）/ `extreme-model`（极致，1.20x）。过去报告只在 `auto` 行里用「全网均价」估算，看不到你实际按哪一档跑了多少。现在新增独立章节，按档位聚合调用次数、Token、估算花费与占比。
+  - **档位倍率仅作分析维度，不参与 ¥ 金额计算**：这是 1.3.0 的核心口径决策——档位背后真实落地的底层模型在 trace 里从不记录（WorkBuddy 只对档位做积分倍率计费），因此按档位直接算出的「花费」在概念上不成立。报告里的档位 ¥ 单价是**倍率锚定法估算**（见下），仅用于横向对比档位间的相对成本，明确标注为估算值，与 §3.1（账单口径）/ §3.2（入口视图）的真实计费完全解耦、互不影响。
+  - **致命不一致已归一化**：本机配置缓存里极致档的规范 id 是 `deep-model`，而 trace 里字面量是 `extreme-model`。采集器新增 `TIER_ALIASES` / `TIER_CANON` / `TIER_LABELS`，在 `parse_channel()` 把 `extreme-model` 归一为 `deep-model` 后聚合，避免两处拼写各自成行。
+  - **数据来源：本地权威倍率表优先 + 手工映射兜底**。`_load_acc_product_config()` 读取本机 `~/.workbuddy/cache/acc-product-config-v3.json`（官方推送的 48 模型 credits 倍率表，`credits` 形如 `"x0.21"`，去 `x` 转 float），用官方倍率覆盖 `mode_rates` 的 multiplier；表缺失/解析失败时安全降级回 `pricing.json` 的锚定估算值（代码路径全部 `try/except` 兜底，serve 端产物无稳定性保证）。
+  - 新增 `aggregate_by_tier(traces)`，复用 `aggregate_traces_by()` 并在两处并行 router-avg 实现（L739-746 与 L1435-1453）同步排除路由类别名，确保档位行不参与 `auto` 均价计算、也不污染各维度金额。
+  - 实现要点：可配置——增删档位或调整估算单价只改 `pricing.json`（或 `pricing.local.json`）的 `mode_rates` 段，无需改 Python；报告 §3.4 含与 `auto` 一致的估算免责声明 + 可折叠 `mode_rates` 配置块；无档位数据自动返回空、不落 §3.3「未配置」假阳性（已配估算单价）。
+
+### 📚 文档
+- `references/FAQ.md` 新增档位专项（Q36 档位是什么 / 为什么单价是估算；Q37 为什么看不到档位背后的真实模型），版本号更新至 v1.3.0，FAQ 计数 34 → 36 问。
+- README.md / SKILL.md 测试规模、FAQ 计数、§3 描述同步；SKILL.md 新增 §3.4 档位维度说明。
+
+### 🐛 修复 / 数据完整性
+- **修复「未命名会话」频繁出现（孤儿 trace 误标）**。旧逻辑在 `aggregate_by_session` / `aggregate_top_tasks` 里把「trace 的 session_id 在本地会话库查不到」的**孤儿 trace** 与「会话存在于本地库但无标题」的**真·无标题会话**混为一谈，统一兜底成「未命名会话」。实测近 7 天 11 个会话明细行里 7 个标「未命名会话」，但 7 个**全部是孤儿 trace**（真正无标题会话为 0），导致 23.6M token / ¥6.04 成本被错误归因到「未命名会话」名下，并触发「未命名高成本会话」误告警。
+- **新增 `UNNAMED_LABEL` / `ORPHAN_LABEL` 双标签语义**：真·无标题会话仍标「未命名会话」；孤儿 trace 合并为**单一「未关联会话」汇总行**（不再逐条刷屏），且不再进入「未命名高成本会话」告警。MD/HTML 脚注同步说明三标签（未关联 / 未命名 / 其他）差异。
+- 新增 `tests/test_session_labeling.py`（5 用例）守护该不变量。
+
+### 🧪 测试
+- **新增 `tests/test_mode_rates.py`（14 用例）**：TIER_ALIASES 四拼写、parse_channel 归一 extreme→deep、mode_rates 并入 MODEL_PRICING、config cache 倍率覆盖、cache 缺失回退（BLOCKER）、三档独立成行 + is_router 排除、无档位数据返回空、金额守恒（BLOCKER）、§3.1/§3.2/§3.4 档位金额一致（BLOCKER）、不污染 auto 均价、Agent workflow schema 还原 alias、无 usage 辅助 span 不虚增、报告段落含 §3.4、不落 unconfigured 假阳性。
+
+测试规模同步更新：**11 个测试文件、312 用例全绿**（原 9 文件 / 284 用例）。
+
+### 🧹 内部重构 / 工程（行为零变更，仅提升可维护性）
+- **`collect_usage_data.py` 拆分为模块化架构（Phase 1a）**。原 2269 行单体脚本拆为：`ca_core.py`（公共常量 / 解析 / 单价工具）+ `ca_sources.py`（WorkBuddy 数据源读取）+ `ca_sessions.py`（会话归集）+ `ca_aggregate.py`（trace 聚合）；`collect_usage_data.py` 退化为仅做 `from X import *` 的薄门面。全部 312 用例零改动通过，CLI 行为字节级一致（由 `tests/test_publish_parity.py` 守护）。
+- **收敛两处 router 均价实现（Phase 1b / D14）**。原 `ca_sources.py` 与 `ca_aggregate.py` 各自内联了一份「等权平均 router 单价」逻辑，新增公共 `_router_avg_unit_price(pairs)` 后两处统一调用，消除重复、降低后续改动漏改风险。
+- **MD / HTML 报告生成去重（Phase 2 / D7）**。`generate_report.py` 中 5 对 MD/HTML 重复 builder——`_render_failed_automation_*`、`_render_cache_untitled_*`、`_render_anomaly_block_*`、`_free_period_disclaimer_*`、`build_cost_analysis_section_*`——合并为单一定义 + 按 `fmt` 分发的薄 wrapper，原 `*_md` / `*_html` 名称保留以保证外部调用 / 测试兼容。去重前后以「隔离金色基线」逐字节 diff 验证：仅生成时间行不同，其余输出 100% 一致。
+
+---
+
 ## [1.2.1] — 2026-08-29
 
 ### 🐛 修复 / 数据完整性
