@@ -25,7 +25,9 @@ if _HERE not in sys.path:
 
 __all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
 TIMED_FREE = {
-    "hy3": "2026-08-31",
+    # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
+    # 以 pricing.json 的 timed_free 段为准（权威源）。
+    "hy3": "2026-09-30",
 }
 
 MODEL_PRICING = {
@@ -33,7 +35,7 @@ MODEL_PRICING = {
     # 路由别名：无单一单价，由代码估算（见 ROUTER_ALIASES）
     "auto": None,            # WorkBuddy 智能路由：执行时自动调配最适合模型
     # —— 腾讯混元（官方 RMB）——
-    "hy3": {"input": 1.0, "output": 4.0},           # 腾讯混元官方：输入1 / 输出4（限时免费至 2026-08-31）
+    "hy3": {"input": 1.0, "output": 4.0},           # 腾讯混元官方：输入1 / 输出4（限时免费至 2026-09-30）
     "hy4-preview": {"input": 6.0, "output": 18.0},  # 腾讯混元 Hy4 preview（2026-08-28 发布开源，WorkBuddy 首发）：输入6 / 输出18（缓存命中0.3）；WorkBuddy 2 周限免
     # —— 智谱 GLM 系列（bigmodel.cn 国内官方 RMB，非 Z.ai 美元折算）——
     "glm-5.2": {"input": 8.0, "output": 28.0},      # 智谱官方 1M 上下文：输入8 / 输出28

@@ -254,7 +254,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 .venv/Scripts/python.exe tools/render_allure_html.py --results-dir allure-results --output allure-report.html
 ```
 
-当前 **10 个测试文件、306 用例**。全部使用合成 fixture 数据，不含任何真实用量或个人资料，可安全公开。用例按 marker 分层（`smoke` / `unit` / `integration` / `regression` / `golden` / `metadata` / `privacy`），可用 `pytest -m regression` 过滤。
+当前 **11 个测试文件、312 用例**。全部使用合成 fixture 数据，不含任何真实用量或个人资料，可安全公开。用例按 marker 分层（`smoke` / `unit` / `integration` / `regression` / `golden` / `metadata` / `privacy`），可用 `pytest -m regression` 过滤。
 
 注意：`pytest.ini` 的 `addopts` 里带 `--alluredir`，若环境没装 `allure-pytest` 插件，跑测试要加 `-o addopts=""` 绕过。
 
