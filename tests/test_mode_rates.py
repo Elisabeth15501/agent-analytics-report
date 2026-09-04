@@ -124,15 +124,23 @@ def test_mode_rates_loaded_into_pricing(collector_module):
 @allure.severity(allure.severity_level.NORMAL)
 def test_config_cache_overrides_multiplier(collector_module):
     """本地缓存优先：acc-product-config-v3.json 的 credits 应覆盖 pricing.json 的手工 multiplier。"""
-    # 该用例验证「本机官方配置缓存」对 mode_rates multiplier 的覆盖，
-    # 依赖本机 acc-product-config 缓存文件存在；干净 CI 检出无此文件时优雅跳过。
-    if not collector_module.MODE_RATES_META.get("config_cache_loaded"):
-        pytest.skip("本机官方配置缓存缺失，跳过缓存覆盖验证（仅本机有效）")
-    rates = collector_module.MODE_RATES_META.get("rates", {})
-    # 本机缓存存在时，fast 倍率应为官方 0.21、extreme 应为 1.20（deep-model 规范 id）
-    assert rates.get("fast", {}).get("multiplier") == 0.21, f"fast 倍率未被官方缓存覆盖：{rates.get('fast')}"
-    assert rates.get("extreme", {}).get("multiplier") == 1.20, f"extreme 倍率未被官方缓存覆盖：{rates.get('extreme')}"
-    assert collector_module.MODE_RATES_META.get("config_cache_loaded") is True
+    # 模拟本机缓存文件存在的情况，验证覆盖逻辑
+    orig = collector_module.ca_core._load_acc_product_config
+    collector_module.ca_core._load_acc_product_config = lambda: {
+        "path": "~/.workbuddy/cache/acc-product-config-v3.json",
+        "mtime": 1234567890,
+        "loaded": True,
+        "multipliers": {"fast-model": 0.21, "balanced-model": 0.65, "deep-model": 1.20}
+    }
+    try:
+        cfg, _ = collector_module._load_pricing_config()
+        rates = cfg["mode_rates_meta"]["rates"]
+        # 缓存存在时，fast 倍率应为官方 0.21、extreme 应为 1.20（deep-model 规范 id）
+        assert rates.get("fast", {}).get("multiplier") == 0.21, f"fast 倍率未被官方缓存覆盖：{rates.get('fast')}"
+        assert rates.get("extreme", {}).get("multiplier") == 1.20, f"extreme 倍率未被官方缓存覆盖：{rates.get('extreme')}"
+        assert cfg["mode_rates_meta"]["config_cache_loaded"] is True
+    finally:
+        collector_module.ca_core._load_acc_product_config = orig
 
 
 @allure.feature("档位维度 mode_rates")
