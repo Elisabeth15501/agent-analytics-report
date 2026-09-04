@@ -224,7 +224,7 @@ def _load_acc_product_config():
         info["mtime"] = target.stat().st_mtime
         info["loaded"] = True
         info["multipliers"] = mult
-    except Exception as e:
+    except (json.JSONDecodeError, FileNotFoundError, PermissionError) as e:
         print(f"[WARN] 读取 acc-product-config-v3.json 失败，回退手工 mode_rates：{e}", file=sys.stderr)
     return info
 
@@ -276,7 +276,7 @@ def _load_pricing_config():
                 cfg["mode_rates"] = dict(data["mode_rates"])
             if data.get("default_model"):
                 cfg["default_model"] = str(data["default_model"])
-        except Exception as e:
+        except (json.JSONDecodeError, FileNotFoundError, PermissionError) as e:
             print(f"[WARN] 读取 pricing.json 失败，回退内置定价：{e}", file=sys.stderr)
 
     local_loaded = False
@@ -306,8 +306,8 @@ def _load_pricing_config():
             if local.get("default_model"):
                 cfg["default_model"] = str(local["default_model"])
             local_loaded = True
-        except Exception as e:
-            print(f"[WARN] 读取 pricing.local.json 失败，忽略本地覆盖：{e}", file=sys.stderr)
+        except (json.JSONDecodeError, FileNotFoundError, PermissionError) as e:
+            print(f"[WARN] 读取 pricing.local.json 失败（数据格式错误/文件不存在/权限不足），忽略本地覆盖：{e}", file=sys.stderr)
     # ── 档位（mode_rates）并入 MODEL_PRICING + 官方倍率覆盖（v1.3.0）──
     acc = _load_acc_product_config()
     mode_rates = dict(cfg.get("mode_rates") or {})
@@ -519,7 +519,7 @@ def iso_to_date(iso_str, tz=TZ):
     try:
         dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
         return dt.astimezone(tz).strftime("%Y-%m-%d")
-    except Exception:
+    except (ValueError, TypeError):
         return None
 
 def parse_date_range(days):

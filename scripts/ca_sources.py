@@ -46,7 +46,7 @@ def _recover_model_info_from_spans(trace_file_dict):
             continue
         try:
             arr = json.loads(to) if isinstance(to, str) else to
-        except Exception:
+        except (json.JSONDecodeError, TypeError):
             continue
         if isinstance(arr, list):
             arr = arr[0] if arr else {}
@@ -254,7 +254,7 @@ def collect_db_data(start_date, end_date):
                 "model": r["model"],
                 "is_background_automation": bool(r["is_background_automation"]),
             })
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         print(f"[WARN] sessions query: {e}", file=sys.stderr)
 
     # 自动化任务名称映射（用于报告展示，避免只显示任务 ID）
@@ -271,7 +271,7 @@ def collect_db_data(start_date, end_date):
                 auto_status[r["id"]] = "DELETED"
             else:
                 auto_status[r["id"]] = (r["status"] or "UNKNOWN")
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         print(f"[WARN] automations query: {e}", file=sys.stderr)
         auto_names = {}
         auto_status = {}
@@ -297,7 +297,7 @@ def collect_db_data(start_date, end_date):
                 "source_cwd": r["source_cwd"],
                 "metadata_json": r["metadata_json"],
             })
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         print(f"[WARN] automation_runs query: {e}", file=sys.stderr)
 
     # 会话信用消耗
@@ -321,7 +321,7 @@ def collect_db_data(start_date, end_date):
                 "updated_date": ts_to_date(r["updated_at"]),
                 "credits": credit,
             })
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         print(f"[WARN] session_usage query: {e}", file=sys.stderr)
 
     db.close()
@@ -395,7 +395,7 @@ def collect_session_outputs(start_date, end_date):
                         "content": content,
                         "session_dir": session_dir.name,
                     })
-                except Exception:
+                except (OSError, IOError):
                     continue
 
     outputs.sort(key=lambda x: x["date"])
@@ -420,7 +420,7 @@ def _find_session_jsonl(session_id, cwd):
                 cand = PROJECTS_DIR / _transform_cwd(cwd) / f"{uuid}.jsonl"
                 if cand.exists():
                     return cand
-        except Exception:
+        except (json.JSONDecodeError, OSError):
             pass
     # 3. 兜底：全局搜索
     hits = list(PROJECTS_DIR.glob(f"**/{session_id}.jsonl"))
@@ -468,7 +468,7 @@ def get_session_artifact_fingerprint(session_id, cwd):
         for ln in jl.read_text(encoding="utf-8", errors="ignore").splitlines():
             try:
                 m = json.loads(ln)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             if m.get("type") == "function_call":
                 blob = json.dumps(m, ensure_ascii=False)
@@ -481,7 +481,7 @@ def get_session_artifact_fingerprint(session_id, cwd):
                 for fn in tb.keys():
                     if Path(fn).suffix.lower() in MEDIA_EXTS:
                         media_files.append(Path(fn).name.lower())
-    except Exception:
+    except (OSError, IOError):
         pass
     if not gen_tools and not media_files:
         return ""
@@ -511,7 +511,7 @@ def get_session_content(session_id, cwd, max_chars=3000):
         for ln in jl.read_text(encoding="utf-8", errors="ignore").splitlines():
             try:
                 m = json.loads(ln)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             t = m.get("type")
             if t == "message":
@@ -532,6 +532,6 @@ def get_session_content(session_id, cwd, max_chars=3000):
                     break
             if total >= max_chars:
                 break
-    except Exception:
+    except (OSError, IOError):
         pass
     return " ".join(parts)[:max_chars]

@@ -163,7 +163,7 @@ def _calendar_period(meta):
         if pk == "year":
             d = datetime.strptime(end, "%Y-%m-%d")
             return f"年报 · {d.year}"
-    except Exception:
+    except (ValueError, TypeError):
         pass
     return f"自定义报告 · {start}/{end}" if (start or end) else "自定义报告"
 
@@ -906,7 +906,7 @@ def build_next_week_outlook(summary, daily_tokens, automation_runs, session_cred
             d0 = datetime.strptime(dates[0], "%Y-%m-%d")
             d1 = datetime.strptime(dates[-1], "%Y-%m-%d")
             period_days = max((d1 - d0).days + 1, 1)
-        except Exception:
+        except (ValueError, TypeError):
             period_days = PERIOD_DAYS.get(period_key, 7)
         peak_day_cost = max((v.get("effective_cost", 0) for v in daily_tokens.values()), default=0)
         forecast_low = avg_daily_cost * period_days
@@ -1708,7 +1708,7 @@ def _unresolved_warning_md(stats):
         return ""
     try:
         from collect_usage_data import DEFAULT_MODEL
-    except Exception:
+    except (ImportError, AttributeError):
         DEFAULT_MODEL = "（未配置）"
     parts = []
     if stats["default"]:

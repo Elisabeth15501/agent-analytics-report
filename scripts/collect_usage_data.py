@@ -135,7 +135,7 @@ def main():
                     "is_background_automation": bool(r["is_background_automation"]),
                 })
             cdb.close()
-    except Exception as e:
+    except (sqlite3.Error, OSError) as e:
         print(f"[WARN] supplementary sessions query: {e}", file=sys.stderr)
 
     # 修复：补全会话后，把跨窗口长会话并入 sid_to_rawmodel 并重采 trace——
@@ -158,7 +158,7 @@ def main():
         try:
             meta_days = (datetime.strptime(args.end, "%Y-%m-%d")
                          - datetime.strptime(args.start, "%Y-%m-%d")).days + 1
-        except Exception:
+        except (ValueError, TypeError):
             meta_days = PERIOD_DAYS.get(period_key, 7)
     else:
         meta_days = PERIOD_DAYS.get(period_key, 7)
@@ -292,7 +292,7 @@ def main():
                         pricing_lookup["network_estimates"][model] = {
                             "input": float(rm["input"]), "output": float(rm["output"]),
                         }
-                except Exception as e:
+                except (requests.RequestException, ValueError, KeyError) as e:
                     print(f"[WARN] 联网检索 {model} 失败：{e}", file=sys.stderr)
     result["meta"]["pricing_lookup"] = pricing_lookup
 
