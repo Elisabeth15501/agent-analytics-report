@@ -82,7 +82,7 @@
         <h1>Workbuddy使用情况报告</h1>
         <p><strong>报告类型</strong>：周报 · 2026-W36（2026-08-31/2026-09-06）</p>
         <p><strong>报告周期</strong>：2026-08-31 至 2026-09-06</p>
-        <p><strong>生成时间</strong>：2026/09/07 09:00:00 (UTC+08:00)</p>
+        <p><strong>生成时间</strong>：2026/09/04 22:05:28 (UTC+08:00)</p>
         <p><strong>数据来源</strong>：WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置</p>
         <div class="theme-toggle" role="group" aria-label="主题切换">
             <button type="button" data-set-theme="light">☀ 浅色</button>
@@ -93,24 +93,48 @@
     <div class="section">
         <h2 class="section-title">一、概览统计</h2>
         <div class="stats-grid">
-            <div class="stat-card"><div class="stat-value">7 天</div><div class="stat-label">活跃天数</div></div>
-            <div class="stat-card"><div class="stat-value">29 个</div><div class="stat-label">会话总数</div></div>
-            <div class="stat-card"><div class="stat-value">14.91M</div><div class="stat-label">总 Token 消耗</div></div>
-            <div class="stat-card"><div class="stat-value">￥10.26</div><div class="stat-label">实际花费</div></div>
+            <div class="stat-card">
+                <div class="stat-value">7</div>
+                <div class="stat-label">活跃天数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">29</div>
+                <div class="stat-label">会话总数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">40</div>
+                <div class="stat-label">调用次数（0 未解析）</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">8</div>
+                <div class="stat-label">使用技能</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">11</div>
+                <div class="stat-label">自动化任务运行</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">0</div>
+                <div class="stat-label">实际消耗 Token</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">¥0.00</div>
+                <div class="stat-label">实际成本</div>
+            </div>
         </div>
     </div>
     <div class="section">
         <h2 class="section-title">二、Token 消耗可视化</h2>
         <table>
             <tr><th>指标</th><th>数值</th></tr>
-            <tr><td>原始总 Token（含缓存命中）</td><td>16.70M</td></tr>
-            <tr><td>实际消耗 Token（计费等效）</td><td>14.91M</td></tr>
+            <tr><td>原始总 Token（含缓存命中）</td><td>20.13M</td></tr>
+            <tr><td>实际消耗 Token（计费等效）</td><td>0</td></tr>
             <tr><td>输入 Token</td><td>5.96M</td></tr>
             <tr><td>输出 Token</td><td>8.95M</td></tr>
             <tr><td>缓存命中 Token</td><td>5.22M</td></tr>
             <tr><td>缓存占比</td><td>87.5%</td></tr>
             <tr><td>实际成本（计费等效）</td><td>¥0.00</td></tr>
-            <tr><td>原始总成本（含缓存全价）</td><td>¥15.06</td></tr>
+            <tr><td>原始总成本（含缓存全价）</td><td>¥0.00</td></tr>
         </table>
     </div>
     <div class="section">
@@ -120,285 +144,69 @@
         <div class="bar-row"><span class="bar-label" title="2026-08-31">2026-08-31</span><span class="bar-track"><span class="bar-fill" style="width:108px"></span></span><span class="bar-val">1.74M</span></div>
         <div class="bar-row"><span class="bar-label" title="2026-09-01">2026-09-01</span><span class="bar-track"><span class="bar-fill" style="width:220px"></span></span><span class="bar-val">3.54M</span></div>
         <div class="bar-row"><span class="bar-label" title="2026-09-02">2026-09-02</span><span class="bar-track"><span class="bar-fill" style="width:89px"></span></span><span class="bar-val">1.44M</span></div>
-        <div class="bar-row"><span class="bar-label" title="2026-09-03">2026-09-03</span><span class="bar-track"><span class="bar-fill" style="width:107px"></span></span><span class="bar-val">1.74M</span></div>
+        <div class="bar-row"><span class="bar-label" title="2026-09-03">2026-09-03</span><span class="bar-track"><span class="bar-fill" style="width:108px"></span></span><span class="bar-val">1.74M</span></div>
         <div class="bar-row"><span class="bar-label" title="2026-09-04">2026-09-04</span><span class="bar-track"><span class="bar-fill" style="width:98px"></span></span><span class="bar-val">1.58M</span></div>
         <div class="bar-row"><span class="bar-label" title="2026-09-05">2026-09-05</span><span class="bar-track"><span class="bar-fill" style="width:147px"></span></span><span class="bar-val">2.38M</span></div>
         <div class="bar-row"><span class="bar-label" title="2026-09-06">2026-09-06</span><span class="bar-track"><span class="bar-fill" style="width:154px"></span></span><span class="bar-val">2.49M</span></div>
         </div>
     </div>
     <div class="section">
-        <h2 class="section-title">三、模型使用与成本对比</h2>
-        <p>按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。本章节提供<b>两个维度</b>：<b>3.1 按实际计费模型</b>（账单口径，与概览总额一致）与 <b>3.2 按入口 / 配置模型</b>（使用分布）。未配置单价的模型以「未配置」标注——在 <code>scripts/pricing.local.json</code> 的 <code>models</code> 里补上单价即可（无需改 Python 代码；该本地文件升级 Skill 时不会被覆盖）。</p>
-        <h3>3.1 按实际计费模型（账单口径）</h3>
-        <p class="disclaimer">备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 <code>glm-5.2</code> 的花费中。</p>
-        <table>
-            <tr><th>模型</th><th>调用次数</th><th>实际消耗Token</th><th>输入单价(元/1M)</th><th>输出单价(元/1M)</th><th>估算实际花费</th><th>占总花费比</th></tr>
-            <tr><td>hy3</td><td>31</td><td>7.84M</td><td>1.00</td><td>4.00</td><td>¥2.92</td><td>28.5%</td></tr>
-            <tr><td>glm-5.2</td><td>22</td><td>1.64M</td><td>8.00</td><td>28.00</td><td>¥3.71</td><td>36.2%</td></tr>
-            <tr><td>minimax-m3</td><td>47</td><td>2.57M</td><td>1.00</td><td>4.00</td><td>¥1.62</td><td>15.8%</td></tr>
-            <tr><td>deepseek-v4-flash</td><td>23</td><td>1.20M</td><td>1.00</td><td>4.00</td><td>¥0.83</td><td>8.1%</td></tr>
-            <tr><td>kimi-k2.6</td><td>58</td><td>1.66M</td><td>4.00</td><td>12.00</td><td>¥1.18</td><td>11.5%</td></tr>
-        </table>
-    <div class="chart-bars">
-      <p><strong>各模型估算实际花费对比</strong></p>
-        <div class="bar-row"><span class="bar-label" title="glm-5.2">glm-5.2</span><span class="bar-track"><span class="bar-fill" style="width:220px"></span></span><span class="bar-val">¥3.71</span></div>
-        <div class="bar-row"><span class="bar-label" title="hy3">hy3</span><span class="bar-track"><span class="bar-fill" style="width:173px"></span></span><span class="bar-val">¥2.92</span></div>
-        <div class="bar-row"><span class="bar-label" title="minimax-m3">minimax-m3</span><span class="bar-track"><span class="bar-fill" style="width:96px"></span></span><span class="bar-val">¥1.62</span></div>
-        <div class="bar-row"><span class="bar-label" title="kimi-k2.6">kimi-k2.6</span><span class="bar-track"><span class="bar-fill" style="width:69px"></span></span><span class="bar-val">¥1.18</span></div>
-        <div class="bar-row"><span class="bar-label" title="deepseek-v4-flash">deepseek-v4-flash</span><span class="bar-track"><span class="bar-fill" style="width:49px"></span></span><span class="bar-val">¥0.83</span></div>
-    </div>
-        <p>🏆 <strong>最常使用模型</strong>：<code>kimi-k2.6</code>（调用 58 次）；💸 <strong>最贵模型</strong>（按花费，不含路由别名）：<code>glm-5.2</code>（估算 ¥3.71，占 36.2%）。</p>
-        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。3.1 各模型花费合计 = 报告概览「实际成本（计费等效）」总额。</p>
-        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>
-        <p>本维度按你配置的<b>入口 / 通道模型名</b>（如 <code>auto</code> 路由、<code>hy3</code>、<code>custom-local</code>）聚合，反映实际请求 / 配置的入口分布（非账单）。经由 <code>auto</code> 或限免入口实际执行的底层付费模型，其花费已计入 3.1 对应执行模型行，本表不直接展开。<b>本维度总额不代表真实账单，且不可与 3.1 相加</b>。</p>
-        <h4>3.2.1 官方 / 网关入口模型</h4>
-        <table>
-            <tr><th>模型</th><th>调用次数</th><th>实际消耗Token</th><th>输入单价(元/1M)</th><th>输出单价(元/1M)</th><th>估算花费＊</th><th>占总花费比</th></tr>
-            <tr><td>auto</td><td>96</td><td>7.20M</td><td>3.00</td><td>12.00</td><td>¥4.10</td><td>48.0%</td></tr>
-            <tr><td>hy3</td><td>42</td><td>4.10M</td><td>1.00</td><td>4.00</td><td>¥2.05</td><td>24.0%</td></tr>
-            <tr><td>glm-5.2</td><td>28</td><td>2.00M</td><td>8.00</td><td>28.00</td><td>¥2.40</td><td>28.1%</td></tr>
-        </table>
-        <p class="disclaimer">＊本表为<b>使用量分布估算（非计费口径）</b>：已解析具体模型的调用按其真实单价估算；未能解析具体模型的调用（路由别名 <code>auto</code>）按本周期计费模型均价估算。<b>本表总额不代表真实账单，且不可与 3.1 相加</b>。</p>
-    <div class="chart-bars">
-      <p><strong>各模型估算实际花费对比</strong></p>
-        <div class="bar-row"><span class="bar-label" title="auto">auto</span><span class="bar-track"><span class="bar-fill" style="width:220px"></span></span><span class="bar-val">¥4.10</span></div>
-        <div class="bar-row"><span class="bar-label" title="glm-5.2">glm-5.2</span><span class="bar-track"><span class="bar-fill" style="width:128px"></span></span><span class="bar-val">¥2.40</span></div>
-        <div class="bar-row"><span class="bar-label" title="hy3">hy3</span><span class="bar-track"><span class="bar-fill" style="width:110px"></span></span><span class="bar-val">¥2.05</span></div>
-    </div>
-        <p>🏆 <strong>最常使用模型</strong>：<code>auto</code>（调用 96 次）；💸 <strong>最贵模型</strong>（按花费，不含路由别名）：<code>auto</code>（估算 ¥4.10，占 48.0%）。</p>
-        <h4>3.2.2 本地模型（Ollama 本地推理）🔧🏠</h4>
-        <table>
-            <tr><th>模型</th><th>调用次数</th><th>实际消耗Token</th></tr>
-            <tr><td>custom-local:GLM-4.5-air 🔧🏠</td><td>18</td><td>1.61M</td></tr>
-        </table>
-        <p class="disclaimer">＊本表为<b>使用量分布估算（非计费口径）</b>：已解析具体模型的调用按其真实单价估算；未能解析具体模型的调用（路由别名 <code>auto</code>）按本周期计费模型均价估算。<b>本表总额不代表真实账单，且不可与 3.1 相加</b>。</p>
-        <p>🔧🏠 = 你通过 Ollama 本地推理运行的模型（零 API 成本），<b>不计入账单总额</b>；其「花费」恒为 ¥0.00，仅作本地使用量统计。</p>
-        <p>🏆 <strong>最常使用模型</strong>：<code>custom-local:GLM-4.5-air</code>（调用 18 次）。当前已配置单价的模型均为免费模型，填入付费模型单价后显示最贵模型对比。</p>
-        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>
-    </div>
-    <div class="section">
-        <h3>3.4 档位维度（快速 / 均衡 / 极致）</h3>
-        <p>WorkBuddy 的自动路由已拆为三档：<b>快速 / 均衡 / 极致</b>。它们在 trace 中以路由别名出现，真实底层模型<b>从不落盘</b>，故只能做纯档位聚合，无法做「档位 × 真实模型」交叉表。档位倍率是「积分维度」，与 ¥ 刊例价正交——本表单价仅作分析参考。</p>
-        <table>
-            <tr><th>档位</th><th>调用次数</th><th>实际消耗Token</th><th>输入单价(估算,元/1M)</th><th>输出单价(估算,元/1M)</th><th>估算花费</th><th>占总花费比</th></tr>
-            <tr><td>快速</td><td>84</td><td>6.50M</td><td>1.00</td><td>4.00</td><td>¥2.10</td><td>21.7%</td></tr>
-            <tr><td>均衡</td><td>72</td><td>5.80M</td><td>5.00</td><td>18.00</td><td>¥5.60</td><td>58.0%</td></tr>
-            <tr><td>极致</td><td>28</td><td>2.61M</td><td>2.00</td><td>8.00</td><td>¥1.96</td><td>20.3%</td></tr>
-        </table>
-        <p class="disclaimer">ℹ️ 档位为智能路由别名（执行时自动调配最适合模型，类似 openrouter/free），无单一单价；其「单价 / 花费」为按积分倍率锚定的<b>估算值</b>，仅供横向对比参考，<b>不计入</b>账单总额，请以实际积分账单为准。</p>
-        <details>
-            <summary>📝 点击展开：档位估算单价来源与如何调整为精确值（改 <code>scripts/pricing.json</code> 的 <code>mode_rates</code> 即可，无需改代码）</summary>
-            <pre><code class="language-json">
-  "mode_rates": {
-    "auto_estimate": true,
-    "fast-model": { "alias": "fast", "label": "快速", "multiplier": 0.25, "input": 1.0, "output": 4.0 },
-    "balanced-model": { "alias": "balanced", "label": "均衡", "multiplier": 1.0, "input": 5.0, "output": 18.0 },
-    "extreme-model": { "alias": "extreme", "label": "极致", "multiplier": 2.0, "input": 2.0, "output": 8.0 },
-    "reasoning-model": { "alias": "reasoning", "label": "推理", "multiplier": 1.5, "input": 1.0, "output": 4.0 },
-  }
-</code></pre>
-        </details>
-    </div>
-    <div class="section">
-        <h2 class="section-title">四、成本深度分析（每会话 / 异常 / 省钱）</h2>
-        <p>行业调研显示：Agent 使用者最关心「<b>每任务 / 每会话成本</b>」——token 成本往往只占 AI Agent 总成本的 30–70%，真正烧钱的是「每个会话跑几次调用、几次重试」。以下从会话维度拆解你的花费。</p>
-        <div class="disclaimer-box">
-            <b>🎁 本期以免费 / 限时免费模型为主</b>（约 0% 的有效 Token 来自零成本调用）。
-            <p>成本相关洞察（§4.4 省钱杠杆、§4.5 失败自动化成本归因、§4.6 未命名高成本会话）在免费期参考意义有限；请重点参考 <b>§4.3 Token 口径异常</b>（捕捉免费日的高 Token 峰值）与 <b>§4.6 缓存健康度</b>（与计费无关，始终有效）。</p>
-        </div>
-        <h3>4.1 每会话成本 Top 10</h3>
-        <table>
-            <tr><th>排名</th><th>任务名称</th><th>任务类型</th><th>实际成本</th><th>实际消耗</th><th>调用</th><th>主要模型</th></tr>
-            <tr><td>1</td><td>Agent 用量周报开发</td><td>代码生成</td><td>¥1.85</td><td>2.30M</td><td>18</td><td>glm-5.2、hy3</td></tr>
-            <tr><td>2</td><td>数据分析任务 #2</td><td>数据分析</td><td>¥0.79</td><td>1.77M</td><td>21</td><td>hy3</td></tr>
-            <tr><td>3</td><td>文档写作任务 #3</td><td>文档写作</td><td>¥0.59</td><td>1.76M</td><td>15</td><td>glm-5.3-flash</td></tr>
-            <tr><td>4</td><td>数据分析任务 #4</td><td>数据分析</td><td>¥0.97</td><td>1.01M</td><td>26</td><td>glm-5.2</td></tr>
-            <tr><td>5</td><td>其他任务 #5</td><td>其他</td><td>¥1.13</td><td>855.4K</td><td>25</td><td>deepseek-v4-flash</td></tr>
-            <tr><td>6</td><td>文档写作任务 #6</td><td>文档写作</td><td>¥0.68</td><td>1.42M</td><td>27</td><td>glm-5.2</td></tr>
-            <tr><td>7</td><td>其他任务 #7</td><td>其他</td><td>¥1.34</td><td>1.84M</td><td>36</td><td>hy3</td></tr>
-            <tr><td>8</td><td>其他任务 #8</td><td>其他</td><td>¥0.45</td><td>1.55M</td><td>27</td><td>hy3</td></tr>
-            <tr><td>9</td><td>其他任务 #9</td><td>其他</td><td>¥1.36</td><td>1.20M</td><td>8</td><td>minimax-m3</td></tr>
-            <tr><td>10</td><td>数据分析任务 #10</td><td>数据分析</td><td>¥1.49</td><td>1.03M</td><td>9</td><td>kimi-k2.6</td></tr>
-        </table>
-        <h3>4.2 每会话成本分布</h3>
-        <p>本期共 12 个会话，合计实际成本 ¥10.26。按单会话成本分桶（环形图按会话数）：</p>
-    <div class="chart-pie">
-        <svg width="220" height="220" viewBox="0 0 220 220" role="img" aria-label="每会话成本分布（按会话数）">
-            <g transform="rotate(-90 110 110)">
-                <circle cx="110" cy="110" r="80" fill="none" style="stroke:var(--table-border)" stroke-width="34" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#3498db" stroke-width="34" stroke-dasharray="251.33 251.33" stroke-dashoffset="-0.00" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#e74c3c" stroke-width="34" stroke-dasharray="125.66 376.99" stroke-dashoffset="-251.33" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#2ecc71" stroke-width="34" stroke-dasharray="83.78 418.88" stroke-dashoffset="-376.99" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#f39c12" stroke-width="34" stroke-dasharray="41.89 460.77" stroke-dashoffset="-460.77" />
-            </g>
-            <text x="110" y="106" text-anchor="middle" font-size="15" font-weight="bold" style="fill:var(--accent-fg)">12</text>
-            <text x="110" y="124" text-anchor="middle" font-size="11" style="fill:var(--muted)">会话数</text>
-        </svg>
-        <div class="legend">
-            <div class="legend-item"><span class="swatch" style="background:#3498db"></span>0-0.5：50.0%<span class="pct">（6 会话）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#e74c3c"></span>0.5-1.0：25.0%<span class="pct">（3 会话）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#2ecc71"></span>1.0-2.0：16.7%<span class="pct">（2 会话）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#f39c12"></span>2.0+：8.3%<span class="pct">（1 会话）</span></div>
-        </div>
-    </div>
-        <table>
-            <tr><th>成本区间</th><th>会话数</th><th>合计成本</th><th>占比</th></tr>
-            <tr><td>0-0.5</td><td>6</td><td>¥1.80</td><td>17.5%</td></tr>
-            <tr><td>0.5-1.0</td><td>3</td><td>¥2.40</td><td>23.4%</td></tr>
-            <tr><td>1.0-2.0</td><td>2</td><td>¥3.10</td><td>30.2%</td></tr>
-            <tr><td>2.0+</td><td>1</td><td>¥2.96</td><td>28.8%</td></tr>
-        </table>
-        <h3>4.3 成本 / Token 异常与飙升检测（双口径）</h3>
-        <p>本节同时以「成本」与「Token 消耗」两个<b>独立</b>口径检测异常日，避免免费 / 限时免费模型拉低成本口径而漏报 Token 峰值。</p>
-        <p style="color:var(--disclaimer-fg)">⚠️ 样本周期成本分布平稳，未触发成本异常阈值。</p>
-        <p><b>📊 Token 口径</b>：日级有效 Token 阈值 p50 = 2,100,000、p95 = 3,800,000；会话级 p95（调用次数）= 60。</p>
-        <p>日级Token 消耗平稳，无超过 p95 或环比突增的异常日。</p>
-        <h3>4.4 省钱杠杆（自动洞察）</h3>
-        <p>基于「实际执行模型」维度分析，以下高占比付费模型存在更便宜的替代方案（假设 30% 的简单任务可迁移，估算口径，仅供参考）：</p><ul>
-            <li><b>glm-5.2</b> 当前花费 ¥3.20（占付费成本 31.2%）；若简单任务迁移至 <b>glm-4.7-flash</b>（简单问答/格式化可迁移），预计月省 <b>¥1.10</b>。</li>
-            <li><b>kimi-k2.6</b> 当前花费 ¥1.10（占付费成本 10.7%）；若简单任务迁移至 <b>glm-5.3-flash</b>（中等长度生成可迁移），预计月省 <b>¥0.45</b>。</li>
-        </ul>
-        <p>💡 <b>合计预计月省 ¥1.55</b>（保守估算，实际取决于你可迁移的任务比例）。</p>
-        <h3>4.5 失败自动化成本归因</h3>
-        <p>💸 失败运行 = 消耗 token 但无产出。按「失败次数 × 该任务所在工作区平均单次成本」估算白白烧掉的成本。</p>
-        <p>⚠️ 估算口径：通过 automation.source_cwd ↔ sessions.cwd 关联；若同一工作区下含多个会话（含交互），平均成本可能略高估。</p>
-        <table>
-            <tr><th>自动化任务</th><th>状态</th><th>运行</th><th>失败</th><th>失败率</th><th>平均单次成本</th><th>估算浪费</th></tr>
-            <tr><td>AI 日报看板 ⚠️</td><td>未知</td><td>2</td><td>1</td><td>50%</td><td>¥0.93</td><td>¥0.93</td></tr>
-        </table>
-        <p>💸 <b>本月失败自动化总浪费估算：¥0.93</b>（按失败次数 × 该任务所在工作区平均单次成本推算）。</p>
-        <p>建议：失败率 ≥ 30% 的任务优先排查依赖环境与配置，或暂停直至修复。（apply 动作属 F8/v2，本节仅洞察。）</p>
-        <h3>4.6 缓存健康度与未命名高成本会话</h3>
-        <p>💡 全局缓存命中率 <b>87.5%</b>——提升缓存复用是「零质量风险」的直接省钱杠杆。下列会话缓存率 &lt; 60.0%。</p>
-        <p>当前所有会话缓存率均 ≥ 60.0%，暂无明显缓存优化空间。</p>
-        <p style="color:var(--disclaimer-fg)">⚠️ 缓存潜力估算不可用：本期成本未解析（多为幽灵 / 空 trace），无法量化可省金额；请先解决 §4 顶部的数据缺失提示。</p>
-    </div>
-    <div class="section">
         <h2 class="section-title">五、任务类型统计</h2>
         <p style="font-size:.85em;opacity:.75;margin:.4em 0">统计口径：仅含本期有 trace（token 活动）的会话；历史空会话（无 token 活动）不计入，避免虚高。</p>
         <table>
             <tr><th>任务类型</th><th>会话数</th><th>占比</th></tr>
-            <tr><td>问答</td><td>7</td><td>24.1%</td></tr>
-            <tr><td>调试</td><td>6</td><td>20.7%</td></tr>
-            <tr><td>代码生成</td><td>4</td><td>13.8%</td></tr>
-            <tr><td>研究</td><td>4</td><td>13.8%</td></tr>
-            <tr><td>数据分析</td><td>3</td><td>10.3%</td></tr>
-            <tr><td>其他</td><td>3</td><td>10.3%</td></tr>
-            <tr><td>文档写作</td><td>2</td><td>6.9%</td></tr>
+            <tr><td colspan='3'>暂无任务数据</td></tr>
         </table>
         <p style="font-size:.85em;opacity:.75;margin:.4em 0">ℹ️ 「其他」= 无法自动归类到已知任务类型的会话（含无标题且对话内容缺失的会话）。</p>
     </div>
     <div class="section">
         <h2 class="section-title">六、任务 Token 消耗统计</h2>
         <p>按任务类型聚合的 Token 消耗，排名按「实际消耗（计费等效）」排序；缓存命中 token 按约 1/10 价计费，不虚高。缓存占比高说明该任务大量复用同一段上下文。</p>
-        <table>
-            <tr><th>任务类型</th><th>会话数</th><th>实际消耗</th><th>原始总Token</th><th>输入</th><th>输出</th><th>缓存占比</th><th>实际成本</th><th>占比</th></tr>
-            <tr><td>调试</td><td>6</td><td>2.98M</td><td>3.34M</td><td>1.19M</td><td>1.79M</td><td>88%</td><td>¥2.09</td><td>20.0%</td></tr>
-            <tr><td>问答</td><td>7</td><td>2.70M</td><td>3.03M</td><td>1.08M</td><td>1.62M</td><td>88%</td><td>¥1.89</td><td>18.1%</td></tr>
-            <tr><td>数据分析</td><td>3</td><td>2.43M</td><td>2.72M</td><td>971.8K</td><td>1.46M</td><td>87%</td><td>¥1.70</td><td>16.3%</td></tr>
-            <tr><td>代码生成</td><td>4</td><td>2.19M</td><td>2.45M</td><td>876.6K</td><td>1.31M</td><td>87%</td><td>¥1.53</td><td>14.7%</td></tr>
-            <tr><td>文档写作</td><td>2</td><td>2.04M</td><td>2.29M</td><td>817.8K</td><td>1.23M</td><td>87%</td><td>¥1.43</td><td>13.7%</td></tr>
-            <tr><td>其他</td><td>3</td><td>1.61M</td><td>1.80M</td><td>643.5K</td><td>965.3K</td><td>87%</td><td>¥1.13</td><td>10.8%</td></tr>
-            <tr><td>研究</td><td>4</td><td>947.2K</td><td>1.06M</td><td>378.9K</td><td>568.3K</td><td>88%</td><td>¥0.66</td><td>6.4%</td></tr>
-        </table>
-        <p style="font-size:.85em;opacity:.75;margin:.4em 0">ℹ️ 「未关联会话」= trace 的会话 ID 在本地会话库找不到（孤儿 trace，已合并为单一汇总行）；「未命名会话」= 本地会话库中确有但无标题的会话；「其他」= 任务类型无法自动归类或自动分类失败的 token。</p>
-        <p>🔥 <strong>实际消耗最高的任务类型</strong>：调试 —— 2.98M token（原始 3.34M），占 20.0%，实际成本 ¥2.09。</p>
-        <p><strong>各任务类型 实际消耗 Token 占比</strong>：</p>
-    <div class="chart-pie">
-        <svg width="220" height="220" viewBox="0 0 220 220" role="img" aria-label="实际消耗 Token 占比（按任务类型，计费等效）">
-            <g transform="rotate(-90 110 110)">
-                <circle cx="110" cy="110" r="80" fill="none" style="stroke:var(--table-border)" stroke-width="34" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#3498db" stroke-width="34" stroke-dasharray="100.61 402.04" stroke-dashoffset="-0.00" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#e74c3c" stroke-width="34" stroke-dasharray="91.17 411.49" stroke-dashoffset="-100.61" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#2ecc71" stroke-width="34" stroke-dasharray="81.90 420.75" stroke-dashoffset="-191.78" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#f39c12" stroke-width="34" stroke-dasharray="73.88 428.78" stroke-dashoffset="-273.68" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#9b59b6" stroke-width="34" stroke-dasharray="68.93 433.73" stroke-dashoffset="-347.56" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#1abc9c" stroke-width="34" stroke-dasharray="54.24 448.42" stroke-dashoffset="-416.49" />
-        <circle cx="110" cy="110" r="80" fill="none" stroke="#e67e22" stroke-width="34" stroke-dasharray="31.93 470.72" stroke-dashoffset="-470.72" />
-            </g>
-            <text x="110" y="106" text-anchor="middle" font-size="15" font-weight="bold" style="fill:var(--accent-fg)">14.91M</text>
-            <text x="110" y="124" text-anchor="middle" font-size="11" style="fill:var(--muted)">实际消耗</text>
-        </svg>
-        <div class="legend">
-            <div class="legend-item"><span class="swatch" style="background:#3498db"></span>调试：20.0%<span class="pct">（2.98M）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#e74c3c"></span>问答：18.1%<span class="pct">（2.70M）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#2ecc71"></span>数据分析：16.3%<span class="pct">（2.43M）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#f39c12"></span>代码生成：14.7%<span class="pct">（2.19M）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#9b59b6"></span>文档写作：13.7%<span class="pct">（2.04M）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#1abc9c"></span>其他：10.8%<span class="pct">（1.61M）</span></div>
-            <div class="legend-item"><span class="swatch" style="background:#e67e22"></span>研究：6.4%<span class="pct">（947.2K）</span></div>
-        </div>
-    </div>
-        <p><strong>实际消耗最高的 10 个任务对话框</strong>（含自动化任务，按会话实际消耗排序）：</p>
-        <table>
-            <tr><th>排名</th><th>任务名称</th><th>任务类型</th><th>实际消耗</th><th>原始总Token</th><th>缓存占比</th><th>实际成本</th></tr>
-            <tr><td>1</td><td>研究任务会话 #1</td><td>研究</td><td>575.8K</td><td>1.04M</td><td>75%</td><td>¥0.66</td></tr>
-            <tr><td>2</td><td>其他任务会话 #2</td><td>其他</td><td>1.39M</td><td>1.77M</td><td>75%</td><td>¥1.13</td></tr>
-            <tr><td>3</td><td>调试任务会话 #3</td><td>调试</td><td>1.80M</td><td>3.28M</td><td>75%</td><td>¥2.09</td></tr>
-            <tr><td>4</td><td>文档写作任务会话 #4</td><td>文档写作</td><td>1.87M</td><td>2.25M</td><td>75%</td><td>¥1.43</td></tr>
-            <tr><td>5</td><td>文档写作任务会话 #5</td><td>文档写作</td><td>870.5K</td><td>2.25M</td><td>75%</td><td>¥1.43</td></tr>
-            <tr><td>6</td><td>其他任务会话 #6</td><td>其他</td><td>1.38M</td><td>1.77M</td><td>75%</td><td>¥1.13</td></tr>
-            <tr><td>7</td><td>代码生成任务会话 #7</td><td>代码生成</td><td>1.28M</td><td>2.41M</td><td>75%</td><td>¥1.53</td></tr>
-            <tr><td>8</td><td>调试任务会话 #8</td><td>调试</td><td>1.47M</td><td>3.28M</td><td>75%</td><td>¥2.09</td></tr>
-            <tr><td>9</td><td>问答任务会话 #9</td><td>问答</td><td>994.9K</td><td>2.97M</td><td>75%</td><td>¥1.89</td></tr>
-            <tr><td>10</td><td>数据分析任务会话 #10</td><td>数据分析</td><td>1.65M</td><td>2.67M</td><td>75%</td><td>¥1.70</td></tr>
-        </table>
+        <p>本周无任务 Token 消耗数据</p>
     </div>
     <div class="section">
         <h2 class="section-title">七、技能使用统计</h2>
         <table>
             <tr><th>技能名称</th><th>使用次数</th><th>最近使用</th></tr>
-            <tr><td>git-push-sandbox</td><td>5</td><td>2026-09-06</td></tr>
-            <tr><td>skill-creator</td><td>5</td><td>2026-09-03</td></tr>
-            <tr><td>github</td><td>4</td><td>2026-09-06</td></tr>
-            <tr><td>ai-weekly</td><td>3</td><td>2026-09-05</td></tr>
-            <tr><td>recommend-experts</td><td>3</td><td>2026-09-06</td></tr>
-            <tr><td>agent-analytics-report</td><td>2</td><td>2026-09-06</td></tr>
-            <tr><td>skillhub-publish</td><td>2</td><td>2026-09-06</td></tr>
+            <tr><td>git-push-sandbox</td><td>9</td><td>2026-09-02</td></tr>
+            <tr><td>skill-creator</td><td>7</td><td>2026-09-02</td></tr>
+            <tr><td>github</td><td>7</td><td>2026-09-05</td></tr>
+            <tr><td>agent-analytics-report</td><td>7</td><td>2026-09-05</td></tr>
+            <tr><td>skillhub-publish</td><td>7</td><td>2026-09-05</td></tr>
+            <tr><td>ai-weekly</td><td>5</td><td>2026-09-04</td></tr>
+            <tr><td>recommend-experts</td><td>3</td><td>2026-09-01</td></tr>
+            <tr><td>ta[REDACTED_SK_KEY]</td><td>3</td><td>2026-09-04</td></tr>
         </table>
     </div>
     <div class="section">
         <h2 class="section-title">八、自动化任务运行情况</h2>
         <table>
             <tr><th>任务名称</th><th>状态</th><th>运行次数</th><th>成功</th><th>失败</th><th>最近一次结果</th><th>最近一次运行日期</th></tr>
-            <tr><td>AI 日报看板</td><td>未知</td><td>2</td><td>1</td><td>1</td><td>失败</td><td>2026-09-04</td></tr>
-            <tr><td>token 用量巡检</td><td>未知</td><td>1</td><td>1</td><td>0</td><td>成功</td><td>2026-09-04</td></tr>
-            <tr><td>Skill 健康检查</td><td>未知</td><td>1</td><td>1</td><td>0</td><td>成功</td><td>2026-09-01</td></tr>
-            <tr><td>AI 周报生成</td><td>未知</td><td>1</td><td>1</td><td>0</td><td>成功</td><td>2026-08-31</td></tr>
+            <tr><td>unknown</td><td>未知</td><td>11</td><td>10</td><td>1</td><td>成功</td><td>-</td></tr>
         </table>
     </div>
     <div class="section">
         <h2 class="section-title">九、产出物清单</h2>
         <table>
             <tr><th>文件</th><th>类型</th><th>日期</th><th>大小</th></tr>
-            <tr><td>analysis.xlsx</td><td>xlsx</td><td>2026-09-06</td><td>6.2MB</td></tr>
-            <tr><td>analysis.py</td><td>py</td><td>2026-09-03</td><td>703.4KB</td></tr>
-            <tr><td>trace-log.docx</td><td>docx</td><td>2026-09-01</td><td>5.0MB</td></tr>
-            <tr><td>agent-report.json</td><td>json</td><td>2026-09-03</td><td>1.6MB</td></tr>
-            <tr><td>meeting-notes.md</td><td>md</td><td>2026-09-01</td><td>968.2KB</td></tr>
-            <tr><td>cache-dump.xlsx</td><td>xlsx</td><td>2026-09-03</td><td>7.8MB</td></tr>
-            <tr><td>agent-report.png</td><td>png</td><td>2026-09-06</td><td>6.2MB</td></tr>
-            <tr><td>draft.py</td><td>py</td><td>2026-09-01</td><td>1.3MB</td></tr>
-            <tr><td>summary.png</td><td>png</td><td>2026-08-31</td><td>5.6MB</td></tr>
+            <tr><td>-</td><td>-</td><td>2026-09-06</td><td>0B</td></tr>
+            <tr><td>-</td><td>-</td><td>2026-08-31</td><td>0B</td></tr>
+            <tr><td>-</td><td>-</td><td>2026-09-06</td><td>0B</td></tr>
+            <tr><td>-</td><td>-</td><td>2026-09-06</td><td>0B</td></tr>
         </table>
     </div>
     <div class="section">
         <h2 class="section-title">十、核心洞察与建议</h2>
         <h3>💰 花费速览</h3>
-        <p>本期实际花费 <strong>¥0.00</strong>（原始口径 ¥15.06），缓存复用为你节省约 <strong>¥15.06</strong>。</p>
-        <p>当前会话额度已用 <strong>3%</strong>（1.20G / 45.00G）。</p>
-        <h3>🔍 最大成本来源</h3>
-        <p><strong>高峰日 2026-09-01</strong>：实际花费 ¥2.44（3.54M token），占本期实际消耗 <strong>23.7%</strong>——占本期实际消耗比重正常，属单日波动。</p>
-        <h3>📊 任务类型洞察</h3>
-        <p><strong>主要任务类型</strong>：问答（7 次，24.1%）——分布较均衡，未见单一类型主导。</p>
+        <p>本期实际花费 <strong>¥0.00</strong>（原始口径 ¥0.00），缓存复用为你节省约 <strong>¥0.00</strong>。</p>
         <h3>✅ 省钱成就</h3>
-        <p>缓存命中率达 <strong>87.5%</strong>，按原始全价计费你本应付约 ¥15.06，实际仅 ¥0.00——<strong>缓存为你省下 ¥15.06</strong>，是实际成本远低于原始账单的主因。</p>
+        <p>缓存命中率达 <strong>87.5%</strong>，按原始全价计费你本应付约 ¥0.00，实际仅 ¥0.00——<strong>缓存为你省下 ¥0.00</strong>，是实际成本远低于原始账单的主因。</p>
     </div>
     <div class="section">
         <h2 class="section-title">十一、下周展望</h2>
         <p>基于本周实际数据，先预测下期用量，再按优先级给出行动建议：</p>
         <ul>
-            <li>💳 <strong>P2 关注 Token 额度</strong>：已用约 3%，建议定期核对防止高峰期任务因额度不足而失败。</li>
+            <li>使用趋势平稳，建议继续保持并关注高峰时段任务调度。</li>
         </ul>
     </div>
     <footer>
