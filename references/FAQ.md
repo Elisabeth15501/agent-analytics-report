@@ -286,4 +286,26 @@ WorkBuddy 的 `auto` 自动路由下还有三档可选档位，按**积分消耗
 
 ---
 
-> 至此共 **36 问**。单篇自足；更多细节见 SKILL.md 与 README.md。
+## 十、适用边界与兼容性
+
+**Q38. 支持哪些操作系统？**
+当前版本在以下环境测试通过：
+- Windows 10/11（64-bit）
+- macOS 10.15+（Catalina 及以上）
+- Ubuntu 20.04 / 22.04 LTS（Debian 系）
+
+依赖项：Python 3.12+、SQLite（系统自带）、标准库 `json`/`sqlite3`/`pathlib` 等。若你的工作区使用非标准路径（如 `/mnt/c/Users/...` WSL 双路径），请确认 `~/.workbuddy/` 在本机可访问。
+
+**Q39. 数据量上限是多少？大用户会不会慢？**
+实测规模：
+- **数万条 trace**（~1 个月活跃用户）：采集 + 报告生成约 5-15 秒，正常响应。
+- **10 万条以上 trace**：可能触发内存压力，建议分段采集（用 `--start/--end` 按月切分后合并）。
+- **超 50 万条**：未做压力测试，行为未定义，建议联系开发者评估。
+
+**Q40. 不同 WorkBuddy 版本的 trace 格式兼容性如何？**
+当前适配 schema a / schema b 两套 trace 格式（见 `ca_sources.py`）。WorkBuddy 升级后若引入新字段或变更 schema，本报告会：
+- 新字段：忽略，不影响既有统计
+- 关键字段缺失（如 `sessionId`、`modelInfo`）：按孤儿 trace 处理并打警告
+- 结构大变（schema c+）：需升级技能，旧版采集器可能解析失败
+
+若你遇到解析异常，先升级技能到最新版；仍不行则在 GitHub issue 提交一份样例 trace 供开发者适配。
