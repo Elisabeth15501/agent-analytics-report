@@ -97,6 +97,7 @@ allure-report-*.html
 # 不面向最终用户，故不推送到公开的 GitHub 仓库。
 TECH_DEBT.md
 TESTING.md
+OPTIMIZATION_PLAN.md
 
 # ---- CI 生成的 GitHub Pages 产物（由 workflow 自动生成并部署，不提交）----
 # docs_render.py / gen_report.py 在 CI 里从 markdown / allure 生成，
