@@ -702,6 +702,4 @@ _CHEAPER_ALT = {
     "glm-4.7": ("minimax-m3", "简单任务可迁移至 MiniMax-M3（约 ¥1/百万 tokens）"),
     "deepseek-v4-pro": ("deepseek-v4-flash", "简单检索/改写类任务可迁移至 DeepSeek-V4-Flash（约 ¥1/百万 tokens）"),
     "hy3": ("minimax-m3", "如非限时免费期，简单问答/抽取类任务可迁移至 MiniMax-M3"),
-    "gpt-4o": ("minimax-m3", "非复杂推理任务可迁移至 MiniMax-M3"),
-    "claude-3.5-sonnet": ("minimax-m3", "非复杂推理任务可迁移至 MiniMax-M3"),
 }

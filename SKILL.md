@@ -6,7 +6,7 @@ metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。首发支持 WorkBuddy，规划兼容更多 Agent。
 description: |
-  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。首发支持 WorkBuddy，规划兼容更多 Agent。
+  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。首发支持 WorkBuddy；后续版本计划兼容 Claude Code 等更多 Agent 的数据源（详见 ADAPTERS.md）。
 
   触发方式：当用户说「生成周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等时触发，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
@@ -87,6 +87,10 @@ python scripts/generate_report.py --start 2026-06-01 --end 2026-06-30 --output �
   - **联网（`--lookup-pricing online`）**：额外生成 DuckDuckGo 搜索链接；若提供 `--pricing-api <URL>`，会尝试从你自己的定价镜像端点拉价（拉到的价一律标 🌐 网络估算价，**不计入**任何成本总额，只供补写时参考）。两份 `pricing*.json` 缺失时回退到 `collect_usage_data.py` 内置 `MODEL_PRICING` 常量，向后兼容。
 
 ## 加入你自己的自定义模型（下载后本地配置，升级不丢失）
+
+> **自定义模型自动发现机制**：采集器启动时会读取 `~/.workbuddy/models.json`，自动识别你配置的自定义模型：
+> - 🏠 **本地模型**（Ollama / localhost）：零 API 成本，强制归零，不计入账单
+> - 🔧 **外部模型**（OpenRouter / 自建 API）：需你在 `pricing.local.json` 配置单价，否则报告标「未配置」
 
 发布版 `scripts/pricing.json` 只含 WorkBuddy 官方内置模型（11 个）+ `auto`，`custom_local` 段为空 `{}` —— **开发者不会把自己的自建/第三方模型带进发布包**。你本地使用的自定义模型（如自主接入外部API、自建开源模型、走第三方网关的模型、其它 GLM/MiniMax/Kimi/DeepSeek 变体、腾讯混元、OpenRouter 免费模型等）请加在**你自己下载的那份** `scripts/pricing.local.json` 里。
 
@@ -253,7 +257,7 @@ python scripts/generate_report.py --period week --output report.md
 
 ## 测试与质量保障
 
-本技能附带一套 **pytest + Allure 分层回归测试**（L0 数据采集 / L1 报告生成 / L2 定价边界 / L3 CLI 端到端 / L4 发布一致性，共 10 个测试文件、306 用例全绿），全部使用合成 fixture 数据，**不含任何真实用量/个人信息**，可安全公开用于作品集展示。运行方式与 Allure 报告渲染见 [README.md](README.md) 的「测试」章节。
+本技能附带一套 **pytest + Allure 分层回归测试**（L0 数据采集 / L1 报告生成 / L2 定价边界 / L3 CLI 端到端 / L4 发布一致性，共 13 个测试文件、318 用例全绿），全部使用合成 fixture 数据，**不含任何真实用量/个人信息**，可安全公开用于作品集展示。运行方式与 Allure 报告渲染见 [README.md](README.md) 的「测试」章节。
 
 几个关键的回归守护点：
 - `test_publish_parity.py` 校验 `config.json` 与 `metadata.json` 版本号一致，防止发布版本漂移；

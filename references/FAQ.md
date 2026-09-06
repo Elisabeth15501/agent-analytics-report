@@ -309,3 +309,18 @@ WorkBuddy 的 `auto` 自动路由下还有三档可选档位，按**积分消耗
 - 结构大变（schema c+）：需升级技能，旧版采集器可能解析失败
 
 若你遇到解析异常，先升级技能到最新版；仍不行则在 GitHub issue 提交一份样例 trace 供开发者适配。
+
+**Q41. 自定义模型是怎么自动发现的？**
+采集器在启动时会读取 `~/.workbuddy/models.json`（WorkBuddy 的模型配置文件），自动识别两类自定义模型：
+- **本地模型（🏠）**：`vendor=ollama` 或 `url` 含 `localhost:11434` 的模型。零 API 成本，报告强制归零并标 🏠，不计入账单。
+- **外部模型（🔧）**：`vendor=custom` 或 `url` 含 `openrouter` 的模型。可能仍有费用，需你在 `pricing.local.json` 配置单价。
+
+若 `models.json` 不存在或解析失败，采集器会安全回退到 `pricing.local.json` 的 `user_custom_models` 人工列表。
+
+**Q42. 我的模型没被自动发现怎么办？**
+三种手动兜底方式：
+1. **检查 models.json**：确认 WorkBuddy 里该模型已配置（`~/.workbuddy/models.json`），且 `vendor` 字段正确。
+2. **手动写入 pricing.local.json**：按 [Q18 的表](#q18-带-custom-local-前缀和裸名分别写哪一段) 把模型加进 `custom_local` 或 `models` 段。
+3. **告诉 Agent**：直接用大白话让 Agent 帮你写进 `pricing.local.json`（见 [Q17](#q17-怎么把我的自建--第三方模型加进报告)）。
+
+以上三种方式可组合使用——自动发现优先，手动写入覆盖。
