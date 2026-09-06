@@ -74,7 +74,7 @@ CLAUDE_PROJECTS_DIR=/path/to/projects \
 
 本技能附带一套分层回归测试，覆盖从数据采集、计费等效折算、报告生成到发布一致性的全链路。**全部用例使用合成 fixture 数据，不引用任何第三方商业 API、不含真实用量/个人信息**，可安全公开（适合作为作品集在 GitHub Pages 展示）。
 
-测试分层（共 14 个测试文件、353 用例全绿）：
+测试分层（共 16 个测试文件、398 用例全绿）：
 
 | 层 | 文件 | 覆盖要点 |
 |----|------|----------|
@@ -84,6 +84,8 @@ CLAUDE_PROJECTS_DIR=/path/to/projects \
 | **L3 CLI 端到端** | `test_e2e_cli.py` | 黑盒 subprocess 跑通报告生成三格式、CLI 参数校验、恶意模型名 XSS 回归 |
 | **L4 发布一致性** | `test_publish_parity.py` | `config.json` / `metadata.json` 版本对齐、交付物齐全、`.gitignore` 闸门（敏感产物不进包） |
 | **L0 适配器** | `test_claude_code_adapter.py` | Claude Code JSONL 解析、日期窗口过滤、缓存折扣与成本、坏行健壮性、会话派生与任务分类、`--source claude-code` CLI 黑盒（fixture 走 `CLAUDE_PROJECTS_DIR`，不读真实目录） |
+| **L0 任务分类** | `test_task_classification.py` | 加权评分取代首匹配、词边界（fix≠prefix）、信号密度取胜、置信度、task_rules.json 外置与回退、LLM 分类器 mock 全路径、collect_task_types 独立可调用（v1.3.0 拆分漏导入回归） |
+| **L0 定价更新** | `test_fetch_pricing.py` | 条目校验（schema/负数/倍率）、候选与 diff 产出、--apply 备份落盘、过期检查退出码、`FETCH_PRICING_ROOT` 隔离黑盒 |
 | 既有 | `test_channel_attribution.py` · `test_session_labeling.py` | 通道归因、跨窗口会话补全、孤儿 trace 合并、任务类型标签正确性 |
 
 运行方式：

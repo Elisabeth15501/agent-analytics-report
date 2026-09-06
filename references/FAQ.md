@@ -346,3 +346,36 @@ CLAUDE_PROJECTS_DIR=/path/to/projects python scripts/collect_usage_data.py --sou
 - 若你用的是 **Max 订阅**而非按量 API，实际边际成本为 0，报告里的金额只反映「按刊例价折算的等效价值」，不是真实账单。
 
 想改成自己的口径，在 `scripts/pricing.local.json` 覆盖对应模型即可（见 [Q18](#q18-带-custom-local-前缀和裸名分别写哪一段)）。
+
+**Q46. 任务分类的规则是什么？为什么有的会话分得不准？**
+分类按「对话内容 + 生成物指纹 + 会话标题」做**加权评分**（v1.4.1 起）：11 个任务类型全部参与打分，取总分最高者。每条关键词有权重——强信号（如 `skillhub install`、`imagegen`）一条顶多条，弱信号（如「了解」「对比」）要好几条叠加才能定类型。不准确的常见原因：
+- 会话内容太短或被截断，信号不足 → 归「其他」或低置信类型；
+- 多个类型信号混杂（既写了代码又提了周报）→ 取总分最高者，可看会话数据里的 `_task_confidence` 字段判断可信度（低于 0.25 表示两个类型几乎打平）。
+
+你可以直接编辑 `scripts/task_rules.json` 调整关键词和权重（文件缺失或写坏会自动回退内置规则，不会崩）。
+
+**Q47. 能用大模型来分类任务吗？**
+能，作为**可选增强**：
+```bash
+python scripts/collect_usage_data.py --task-classifier llm \
+    --task-llm-endpoint http://localhost:11434/v1 \
+    --task-llm-model qwen2.5:7b --period week -o data.json
+```
+要点：
+- 端点由**你自己提供**（本地 Ollama 的 `http://localhost:11434/v1`，或自有 OpenAI 兼容服务），本技能不内置、也不默认调用任何第三方商业 API；
+- 不配置就完全离线（默认 `heuristic` 启发式，零网络依赖）；
+- LLM 对某条会话分类失败（网络断、响应异常）会自动回退启发式，不影响采集；
+- 隐私提示：LLM 模式会把会话文本（截断至 1500 字符）发到你指定的端点。本地 Ollama 不出本机，第三方端点请自行评估。
+
+**Q48. 模型单价会自动更新吗？过期了怎么知道？**
+本技能**不自动抓取厂商网页**（合规与稳定性考虑），提供 `scripts/fetch_pricing.py` 半自动更新：
+```bash
+# 拉取你自备的定价镜像（URL 或本地 JSON），校验后产出候选，不直接落盘
+python scripts/fetch_pricing.py --url https://your-mirror/pricing.json
+# 产出 scripts/pricing.candidate.json + pricing-diff.md（接受/拒绝明细）
+# 审核无误后：
+python scripts/fetch_pricing.py --file ./new-prices.json --apply   # 自动备份原文件
+```
+安全机制：单价必须是非负数字；与现价偏差超过 5 倍的条目拒绝（确认无误加 `--force`）；`pricing.local.json` 本地覆盖永不被覆盖。
+
+CI 场景用 `--check --stale-days 30`：定价超过 30 天没更新（看 `pricing.json` 的 `_pricing_rules.updated`）就退出码 1，流水线可以据此提醒你更新。

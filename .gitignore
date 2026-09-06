@@ -109,3 +109,7 @@ test-report.html
 
 # 本机真实数据（含成本、使用情况、个人信息等）不应上传到公开仓库，避免泄露隐私或敏感信息。
 week_*.json
+# ---- P2-2 定价更新产物（生成物，不提交）----
+scripts/pricing.candidate.json
+pricing-diff.md
+scripts/pricing.json.bak-*

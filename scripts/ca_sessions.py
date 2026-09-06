@@ -19,24 +19,33 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 from ca_core import *  # 共享常量与纯函数
+from ca_sources import get_session_content, get_session_artifact_fingerprint
+# ↑ P0 修复：collect_task_types 依赖这两个 ca_sources 函数。v1.3.0 拆分时漏了导入，
+#   实际运行 collect_usage_data.py（WorkBuddy 源）会 NameError——e2e 测试只覆盖了
+#   generate_report 与 claude-code 分支，未触达此路径，故长期未被发现。
 
 __all__ = ['aggregate_task_token_stats', 'aggregate_top_tasks', 'classify_task', 'collect_task_types']
 
 def classify_task(session_text):
-    """根据会话文本推断任务类型。
+    """根据会话文本推断任务类型（P2-3 加权评分版）。
 
     传入的 session_text 通常已由 collect_task_types 拼接为
-    「对话内容 + 生成物指纹 + 会话标题」三部分，故此处只负责关键词匹配。
+    「对话内容 + 生成物指纹 + 会话标题」三部分。
+
+    算法：所有规则参与加权评分（signal 密度 + 权重 + 长度加分 + 重复衰减），
+    取总分最高者；同分按规则 priority 打破平局（保持旧版首匹配的稳定性）。
+    规则与评分参数见 scripts/task_rules.json（可编辑），缺失时回退内置规则。
     """
-    text = (session_text or "").lower()
-    for task_type, patterns in TASK_TYPE_RULES:
-        for pat in patterns:
-            if re.search(pat, text, re.IGNORECASE):
-                return task_type
+    result = score_task_types(session_text)
+    if result["top"] is not None:
+        return result["top"]
     return "其他"
 
-def collect_task_types(sessions):
+def collect_task_types(sessions, classifier=None):
     """为每个会话分配任务类型
+
+    classifier: 可选 callable(text) -> task_type（如 LLM 分类器，P2-3c）；
+                缺省用内置加权启发式 classify_task。
 
     分类依据（按优先级合并，全面覆盖「对话内容 + 生成物（含已删除）」）：
       1. 后台自动化会话（is_background_automation）直接归为「自动化配置」；
@@ -45,18 +54,30 @@ def collect_task_types(sessions):
          b) 生成物指纹：transcript 中的 ImageGen/VideoGen 调用、以及
             file-history-snapshot 保留的「已删除」文件键名（见 get_session_artifact_fingerprint）；
          c) 对话内容/生成物指纹均缺失时，回退到会话标题，保证分类稳定可复现。
+
+    透明度：启发式模式下把置信度写入 s["_task_confidence"]（0~1，
+    「最高分 − 次高分」占最高分的比例；0 = 平票不确定，1 = 一边倒）。
     """
     task_map = {}
     for s in sessions:
         if s.get("is_background_automation"):
             task_type = "自动化配置"
+            s["_task_confidence"] = 1.0
         else:
             content = get_session_content(s["id"], s.get("cwd", ""))
             artifacts = get_session_artifact_fingerprint(s["id"], s.get("cwd", ""))
             title = (s.get("title", "") + " " + s.get("custom_title", "")).strip()
-            combined = " ".join(p for p in (content, artifacts, title) if p)
+            dialogue = s.get("_dialogue_text", "") or ""  # claude-code 适配器的对话兜底
+            combined = " ".join(p for p in (content, artifacts, dialogue, title) if p)
             text = combined if combined.strip() else (s.get("title", "") + " " + s.get("custom_title", ""))
-            task_type = classify_task(text)
+            if classifier is not None:
+                # classifier 自带失败兜底（见 task_classifier_llm.build_llm_classifier）：
+                # 返回 falsy 时回退启发式
+                task_type = classifier(text) or classify_task(text)
+            else:
+                task_type = classify_task(text)
+                scored = score_task_types(text)
+                s["_task_confidence"] = scored.get("confidence", 0.0)
         s["task_type"] = task_type
         task_map[s["id"]] = task_type
     return task_map

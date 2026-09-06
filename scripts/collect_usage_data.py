@@ -88,6 +88,16 @@ def main():
                         help="数据源：workbuddy=默认（WorkBuddy traces/workbuddy.db/usage-log），"
                              "claude-code=读取 ~/.claude/projects/ 下的 Claude Code 会话 JSONL（P2-1 适配器 MVP）。"
                              "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算")
+    parser.add_argument("--task-classifier", choices=["heuristic", "llm"], default="heuristic",
+                        help="任务类型分类器（P2-3）：heuristic=默认加权启发式（离线、零依赖）；"
+                             "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
+                             "调用失败自动回退启发式")
+    parser.add_argument("--task-llm-endpoint", type=str, default=None,
+                        help="LLM 分类器的 OpenAI 兼容 /v1 根地址（如本地 Ollama http://localhost:11434/v1）")
+    parser.add_argument("--task-llm-model", type=str, default=None,
+                        help="LLM 分类器使用的模型名（如本地 Ollama 的 qwen2.5:7b）")
+    parser.add_argument("--task-llm-api-key", type=str, default=None,
+                        help="LLM 端点的 API Key（本地端点可省略）")
     args = parser.parse_args()
 
     if args.realtime:
@@ -118,6 +128,19 @@ def main():
         else:
             print(f"[INFO] 采集范围[{period_label}]：{start_date} ~ {end_date}（默认一周，可用 --period/--days/--start/--end 自定义）", file=sys.stderr)
 
+    # 任务分类器（P2-3）：默认启发式零依赖；llm 仅在显式提供端点时启用
+    task_classifier = None
+    if args.task_classifier == "llm":
+        try:
+            from task_classifier_llm import build_llm_classifier
+            task_classifier = build_llm_classifier(
+                args.task_llm_endpoint, args.task_llm_model,
+                api_key=args.task_llm_api_key)
+            print(f"[INFO] 任务分类器：LLM 增强（{args.task_llm_model} @ {args.task_llm_endpoint}，失败自动回退启发式）",
+                  file=sys.stderr)
+        except (ValueError, ImportError) as e:
+            print(f"[WARN] LLM 分类器不可用（{e}），回退加权启发式", file=sys.stderr)
+
     # 采集各数据源：先取会话（sessions.model 含带通道前缀的原始模型标识符，
     # 是「接口通道」的真相源），据其构建 session_id→raw_model 映射，再采集 trace 并关联通道。
     if args.source == "claude-code":
@@ -129,9 +152,12 @@ def main():
         sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
         skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
         outputs, memory_logs = ([], {})
-        # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源），
-        # 此处直接收口为 {id: task_type}，跳过 WorkBuddy 专属的 get_session_content 查询。
-        task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
+        # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源）；
+        # 若启用 LLM 分类器则基于 _dialogue_text 重分类，否则直接收口预分类结果。
+        if task_classifier is not None:
+            task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+        else:
+            task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
         print(f"[INFO] Claude Code 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
               file=sys.stderr)
     else:
@@ -173,8 +199,8 @@ def main():
         skill_usage = collect_skill_usage(start_date, end_date)
         outputs, memory_logs = collect_session_outputs(start_date, end_date)
 
-        # 任务类型分类（基于对话内容）
-        task_types = collect_task_types(db_data["sessions"])
+        # 任务类型分类（P2-3）：默认加权启发式；--task-classifier llm 时走可选 LLM 增强
+        task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
 
     # 汇总
     if args.days is not None:

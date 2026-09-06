@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.4.0
+version: 1.5.0
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy 与 Claude Code 两种数据源（--source 切换）。
@@ -92,6 +92,7 @@ python scripts/generate_report.py data.json --output ClaudeCode_周报.html --fo
 > - 自定义报告 · 起止日期
 
 - 三个脚本（`collect_usage_data.py` / `generate_report.py` / `analyze_tokens.py`）均支持上述参数；优先级：**绝对日期 > `--days` > `--period`**。
+- `--task-classifier heuristic|llm`：任务分类器切换（见「任务类型判定」节）。LLM 模式需自备 OpenAI 兼容端点，如 `--task-llm-endpoint http://localhost:11434/v1 --task-llm-model qwen2.5:7b`。
 - 报告内所有"本期/下期"措辞仍随周期自适应（日报→当日/次日，周报→本周/下周，月报→本月/下月，年报→本年/明年）。
 - 想生成「某年 / 某月的年报 / 月报」但用 `--period` 是**滚动窗口**（会跨年 / 跨月）：推荐改用 `--start/--end` 绝对日期，采集器会自动识别为对应周期类型——例如 `--start 2026-01-01 --end 2026-08-03` → `年报 · 2026年`（年初至今）；`--start 2026-07-01 --end 2026-07-31` → `月报 · 2026年7月`。整年（1/1~12/31）也同样识别为年报。
 - 原有 `--days`（仅滚动天数）仍完全兼容。
@@ -195,31 +196,32 @@ python scripts/generate_report.py data.json --output ClaudeCode_周报.html --fo
      指纹以 `[artifacts] imagegen/videogen 媒体文件名...` 形式注入候选文本，供「内容生成」类型强判定（媒体文件名规则必须紧跟 `[artifacts]` 标记，避免"领券截图/二维码"等非创作媒体误判）。
    - 对话内容与生成物指纹均缺失时，回退到会话标题。
 
-匹配规则按**顺序命中即返回**，关键顺序约定：
+分类采用**加权评分**（v1.4.1 / P2-3），不再「顺序命中即返回」：
 
-- **技能开发 / 代码开发 排在 自动化配置 之前**——后者的裸词 `automation`/`自动化` 极易在代码/agent 会话里 incidental 命中，会抢走真正的开发类任务；故 自动化配置 只保留高置信短语（定时任务、领券、提醒、每日任务/提醒、配置/设置自动化、`schedul`）。
-- **内容生成 排在 代码开发 之前**：除对话内容里的短剧/剧本/分镜/小说/文案等创作信号外，更可靠的依据是**生成物指纹**（`imagegen`/`videogen` 工具调用、`[artifacts]` 媒体文件名）——即便对话 jsonl 已归档、或产物已删除，仍可据生成物判为内容生成。例：创建AI短剧生成团队（连续多轮中长文本/分镜/角色/视频生成）归内容生成。
-- **代码开发 含 agent 团队搭建语义**（`agent.*team`、`多智能体`、`创建.*团队`、`团队搭建`），但仅当无内容创作/生成物信号时（如搭建开发团队协作规范）才归代码开发。
-- 研究学习 / Bug修复 的通用词（学习/研究/调试）排在靠后，避免被 python 等通用词抢先。
+- **所有规则参与打分，取总分最高者**；同分按 priority（原顺序）打破平局。
+- 每条 pattern 有权重（`scripts/task_rules.json` 可编辑）：强信号（如 `skillhub install`、`SKILL.md`、`imagegen`）权重 2~2.5，弱信号（如「了解」「对比」）权重 0.5~0.8，需多条叠加才能取胜。
+- **信号密度取胜**：同类型内多个**不同** pattern 命中各自累加；同一 pattern 重复命中按几何级数衰减（`repeat_decay=0.35`），刷词无效。
+- **ASCII 词自动加词边界**：`fix` 不会误命中 `prefix` / `fixture`（旧版 `re.search` 无边界的缺陷已修复）。
+- **置信度透明**：启发式分类把 `_task_confidence`（0~1，最高分与次高分的差距比）写入会话数据；平票→0，一边倒→1。低于 0.25 视为不确定。
+- **可选 LLM 增强**：`--task-classifier llm --task-llm-endpoint <URL> --task-llm-model <模型>`。仅接受用户自备的 OpenAI 兼容端点（本地 Ollama `http://localhost:11434/v1` 或自有服务），**不内置任何第三方商业 API 默认值**；每条会话调用失败自动回退启发式，不中断采集。默认 `heuristic`，完全离线。
 
-当前规则（顺序敏感，命中即返回）：
+规则表（`scripts/task_rules.json`，可增删改，文件缺失/损坏自动回退内置规则）：
 
-| 顺序 | 任务类型 | 匹配关键词（示例） |
+| 优先级 | 任务类型 | 高权重信号（示例） |
 |------|----------|-----------|
-| 1 | 技能安装 | skillhub install、安装 skill、技能安装 |
-| 2 | 技能开发 | SKILL.md、技能创建/开发、打包 skill |
-| 3 | 报告生成 | 周报、weekly report、AI report |
-| 4 | Bug修复 | bug、修复、fix、误报、debug、调试、错误、速率限制 |
-| 5 | 内容生成 | 短剧、剧本、分镜、小说、文案、故事/剧情、台词/旁白、文生图/文生视频/图生视频、AI生成图、图像生成、长文本/中长文本、连续生成、content generat、创作（创作型任务，token 主要消耗在内容创作而非写代码；例："创建AI短剧生成团队"因连续多轮中长文本/分镜/角色生成归此类） |
-| 6 | 代码开发 | 编程、python、练习、编写/实现/新增、github、上传、添加支持、多格式、写代码、代码实现、agent团队/多智能体/创建团队 |
-| 7 | 自动化配置 | 自动化任务、配置/设置自动化、定时任务、schedul、领券、提醒、每日任务/提醒 |
-| 8 | 环境搭建 | SkillHub、环境搭建、配置python、install cli、环境变量 |
-| 9 | 研究学习 | 第一性原理、学习、研究、教程、调研、趋势、对比、了解、用途、主线 |
-| 10 | 代码分析 | hermes、解构、分析项目、代码结构、健康检查、审查、解读、诊断 |
-| 11 | 文档编写 | 指南、guide、文档、规范、流程、交付 |
+| 1 | 技能安装 | skillhub install、技能安装 |
+| 2 | 技能开发 | SKILL.md、技能创建/开发/封装 |
+| 3 | 报告生成 | 周报/月报/年报/日报、生成报告 |
+| 4 | Bug修复 | 错误修复、bug、修复、debug、调试 |
+| 5 | 内容生成 | imagegen/videogen、短剧/剧本/分镜/小说、文生图/图生视频、创作 |
+| 6 | 代码开发 | 编写代码、实现功能、python、github |
+| 7 | 自动化配置 | 定时任务、cron 表达式、每日任务、schedule |
+| 8 | 环境搭建 | 环境搭建、虚拟环境、conda/poetry、依赖安装 |
+| 9 | 研究学习 | 第一性原理、教程、调研、学习笔记 |
+| 10 | 代码分析 | 代码分析/审查/诊断、hermes、健康检查 |
+| 11 | 文档编写 | 编写文档、操作手册、API 文档 |
 
-> 注：分类为关键词启发式，可能误分类；命不中任何规则则归为「其他」。
-> **内容生成 vs 代码开发 优先级**：内容生成（#5）排在代码开发（#6）之前，避免"短剧/剧本/分镜"类创作任务被 `创建.*团队` 误判为代码开发；但内容生成规则已收紧为强创作领域词（去掉 `生成.*图片`/`生成.*内容`/`角色设定` 等会在二维码工具、开发规范、配置类标题里 incidental 命中的泛词），确保纯开发/配置/练习会话仍归代码开发或原类型。**Token 关联**：`aggregate_task_token_stats` 按 `traces.session_id → sessions.id → task_type` 聚合；`main()` 会补全会话（窗口内有 trace 但创建于窗口外的会话也纳入），确保 token 全部关联到任务类型、不出现「未关联」占位行（除非确有孤儿 trace）。
+> **内容生成 vs 代码开发**：内容生成的权重更高（生成物指纹 `imagegen`/`videogen`/`[artifacts]` 媒体文件名是 2.0+ 的强信号），纯开发/配置会话不会被创作词 incidental 抢走。**Token 关联**：`aggregate_task_token_stats` 按 `traces.session_id → sessions.id → task_type` 聚合；`main()` 会补全会话（窗口内有 trace 但创建于窗口外的会话也纳入），确保 token 全部关联到任务类型、不出现「未关联」占位行（除非确有孤儿 trace）。
 
 ## 脚本说明
 
@@ -254,6 +256,30 @@ python scripts/analyze_tokens.py data.json --output token_report.md
 - 按模型统计
 - 按任务类型统计
 - ASCII 趋势图
+
+### scripts/fetch_pricing.py
+
+定价数据更新助手（P2-2）。**数据源由你自备**（你自己的定价镜像 URL / 官方机器可读端点 / 本地 JSON 文件），不抓取任何厂商网页。流程：拉取 → 校验 → 产出候选与差异报告 → 人工审核 → 落盘。
+
+```bash
+# 拉取并校验（默认只出候选，不落盘）
+python scripts/fetch_pricing.py --file ./new-prices.json
+python scripts/fetch_pricing.py --url https://your-mirror/pricing.json
+
+# 产出：scripts/pricing.candidate.json（候选）+ pricing-diff.md（差异报告）
+
+# 审核无误后落盘（自动备份为 pricing.json.bak-<时间戳>）
+python scripts/fetch_pricing.py --file ./new-prices.json --apply
+
+# CI 过期检查：定价超过 30 天未更新则退出码 1
+python scripts/fetch_pricing.py --check --stale-days 30
+```
+
+**校验规则**：单价必须为非负数字（≤10000）；与现价偏差超过 `--max-ratio`（默认 5 倍）的条目拒绝并写入差异报告，确认无误可加 `--force`；无变化的条目跳过。落盘前后均不动 `pricing.local.json`（本地覆盖始终优先）。
+
+### scripts/task_classifier_llm.py
+
+可选 LLM 任务分类器（P2-3c），默认不加载。仅当 `collect_usage_data.py` 传入 `--task-classifier llm` 且提供自备 OpenAI 兼容端点时启用；失败自动回退启发式。
 
 ### scripts/generate_report.py
 

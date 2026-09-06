@@ -23,7 +23,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
-__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
+__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'load_task_rules', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
 TIMED_FREE = {
     # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
     # 以 pricing.json 的 timed_free 段为准（权威源）。
@@ -706,6 +706,125 @@ TASK_TYPE_RULES = [
                    r"编写.*文档", r"文档.*编写", r"操作手册", r"使用说明",
                    r"安装指南", r"配置指南", r"API.*文档"]),
 ]
+
+# ── P2-3：任务分类规则外置 + 加权评分 ──────────────────────────────────────
+# 规则优先从 scripts/task_rules.json 读取（可由用户直接编辑，含权重）；
+# 文件缺失或解析失败时回退到上方内置 TASK_TYPE_RULES（全部权重 1.0）。
+
+TASK_RULES_PATH = Path(__file__).resolve().parent / "task_rules.json"
+
+_TASK_SCORING_DEFAULTS = {
+    "default_weight": 1.0,        # patterns 未标 w 时的默认权重
+    "repeat_decay": 0.35,         # 同一 pattern 重复命中的衰减系数（防刷词）
+    "length_bonus_per_char": 0.012,   # pattern 字面越长越具体，微加分
+    "max_length_bonus": 0.6,      # 长度加分上限
+    "low_confidence_threshold": 0.25,  # 置信度低于此值视为不确定
+    "auto_word_boundary": True,   # 纯 ASCII 词 pattern 自动加 \b（修 fix→prefix 误匹配）
+}
+
+_TASK_TYPES_FALLBACK = [
+    {"name": name, "priority": i, "patterns": [{"p": p, "w": 1.0} for p in pats]}
+    for i, (name, pats) in enumerate(TASK_TYPE_RULES, 1)
+]
+
+
+def load_task_rules(path=None):
+    """加载任务分类规则。返回 (types, meta, source)。
+
+    types: [{"name", "priority", "patterns": [{"p", "w"}]}]
+    meta:  评分参数字典（含 default_weight / repeat_decay 等）
+    source: "task_rules.json" 或 "builtin"
+    文件缺失 / 解析失败 / 结构不合法 → 静默回退内置规则，绝不抛异常。
+    """
+    p = Path(path) if path else TASK_RULES_PATH
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            types_raw = data.get("types")
+            if isinstance(types_raw, dict) and types_raw:
+                meta = dict(_TASK_SCORING_DEFAULTS)
+                meta.update(data.get("_meta", {}).get("scoring", {}) or {})
+                types = []
+                for name, spec in types_raw.items():
+                    if not isinstance(spec, dict):
+                        continue
+                    pats = []
+                    for item in spec.get("patterns", []):
+                        if isinstance(item, str) and item:
+                            pats.append({"p": item, "w": float(meta["default_weight"])})
+                        elif isinstance(item, dict) and item.get("p"):
+                            try:
+                                w = float(item.get("w", meta["default_weight"]))
+                            except (TypeError, ValueError):
+                                w = float(meta["default_weight"])
+                            pats.append({"p": str(item["p"]), "w": w})
+                    if pats:
+                        try:
+                            prio = int(spec.get("priority", 999))
+                        except (TypeError, ValueError):
+                            prio = 999
+                        types.append({"name": str(name), "priority": prio, "patterns": pats})
+                if types:
+                    types.sort(key=lambda t: (t["priority"], t["name"]))
+                    return types, meta, "task_rules.json"
+        except (json.JSONDecodeError, OSError, AttributeError):
+            pass
+    return _TASK_TYPES_FALLBACK, dict(_TASK_SCORING_DEFAULTS), "builtin"
+
+
+_ASCII_WORD_RE = re.compile(r"^[A-Za-z0-9_]+$")
+
+
+def _compiled_patterns(types, meta):
+    """把规则编译为 [(type_name, priority, regex, weight)]，含词边界处理。"""
+    out = []
+    for t in types:
+        for item in t["patterns"]:
+            pat = item["p"]
+            if meta.get("auto_word_boundary") and _ASCII_WORD_RE.match(pat):
+                # 纯 ASCII 词（如 fix / python）：两侧加 \b，避免 fix 误匹配 prefix
+                pat = r"\b" + pat + r"\b"
+            try:
+                out.append((t["name"], t["priority"], re.compile(pat, re.IGNORECASE), item["w"]))
+            except re.error:
+                continue  # 用户写坏的正则直接跳过，不让整个分类崩掉
+    return out
+
+
+def score_task_types(text, types=None, meta=None):
+    """对文本做加权评分，返回所有任务类型的得分明细（P2-3 核心）。
+
+    评分模型：
+      - 每个 pattern 基础分 = 权重 w + 长度加分（pattern 越长越具体）；
+      - 同一 pattern 重复命中按几何级数衰减（1 + d + d² + …，d=repeat_decay），
+        多个**不同** pattern 命中则各自累加——信号多样性比刷词更有说服力；
+      - 纯 ASCII 词自动加词边界。
+    返回 {"scores": {类型: 分}, "top": 类型|None, "second": 分, "confidence": 0~1}。
+    """
+    if types is None or meta is None:
+        types, meta, _src = load_task_rules()
+    text = (text or "").lower()
+    if not text.strip():
+        return {"scores": {}, "top": None, "second": 0.0, "confidence": 0.0}
+    scores = {}
+    for tname, _prio, rx, w in _compiled_patterns(types, meta):
+        hits = len(rx.findall(text))
+        if not hits:
+            continue
+        length_bonus = min(len(rx.pattern) * meta["length_bonus_per_char"], meta["max_length_bonus"])
+        base = w + length_bonus
+        d = meta["repeat_decay"]
+        # 几何级数：1 + d + d² + … (hits 项)，重复命中收益递减但非零
+        gain = base * (1 - d ** hits) / (1 - d) if d > 0 else base * hits
+        scores[tname] = scores.get(tname, 0.0) + gain
+    if not scores:
+        return {"scores": {}, "top": None, "second": 0.0, "confidence": 0.0}
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    top_name, top_score = ranked[0]
+    second = ranked[1][1] if len(ranked) > 1 else 0.0
+    confidence = (top_score - second) / top_score if top_score > 0 else 0.0
+    return {"scores": scores, "top": top_name, "second": second,
+            "confidence": round(min(confidence, 1.0), 4)}
 
 SYSTEM_REMINDER_RE = re.compile(r"<system-reminder.*?</system-reminder>", re.DOTALL)
 

@@ -2,6 +2,44 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.5.0] — 2026-09-07
+
+### 🐛 修复 / 数据完整性（P0 级）
+
+- **修复 v1.3.0 模块拆分遗留的 NameError（WorkBuddy 默认路径完全不可用）**。`collect_task_types` 迁入 `ca_sessions.py` 时漏了导入 `get_session_content` / `get_session_artifact_fingerprint`（实际定义在 `ca_sources.py`），导致 `collect_usage_data.py --source workbuddy` 在真实运行时必然 `NameError` 崩溃。此前 353 个测试全绿却未发现——e2e 只覆盖了 `generate_report` 与 claude-code 分支，未触达 WorkBuddy 采集路径。已补显式导入 + 独立可调用回归测试。
+
+### ✨ 新特性：任务分类加权评分（P2-3）
+
+- **`classify_task` 从「顺序命中即返回」重写为加权评分**：所有规则参与打分取最高分；同分按原顺序打破平局。
+  - **信号密度取胜**：同类型多个不同 pattern 命中各自累加，同一 pattern 重复命中几何衰减（0.35）——刷词无效，多样信号更有说服力；
+  - **词边界修复**：纯 ASCII 词自动加 `\b`，`fix` 不再误命中 `prefix` / `fixture`（旧版 `re.search` 的真实误判）；
+  - **置信度透明**：会话数据新增 `_task_confidence`（0~1），平票→0、一边倒→1，为报告端的「低置信度提示」留好接缝；
+  - **规则外置** `scripts/task_rules.json`：每条 pattern 可配权重（强信号 2~2.5，弱信号 0.5~0.8），用户可直接增删改；文件缺失/损坏/含坏正则时安全回退内置规则或跳过该条。顺带修正原规则错别字 `小要`→`小说`。
+- **可选 LLM 分类器（opt-in）**：`--task-classifier llm --task-llm-endpoint <URL> --task-llm-model <名>`。仅接受用户自备 OpenAI 兼容端点（本地 Ollama / 自有服务），**不内置任何第三方商业 API 默认值**；逐条分类失败打印 WARN 并回退启发式，绝不中断采集。默认 `heuristic` 完全离线。
+- claude-code 数据源同样受益：`collect_task_types` 兼容 `_dialogue_text` 兜底，LLM 模式下两种数据源行为一致。
+
+### ✨ 新特性：定价自动更新机制（P2-2）
+
+- **新增 `scripts/fetch_pricing.py`**：拉取（`--url` 自备镜像端点 / `--file` 本地 JSON）→ 校验 → 候选 → 人工审核 → 落盘。
+  - **合规设计**：不抓取任何厂商网页，数据源完全自备；
+  - **默认不落盘**：产出 `scripts/pricing.candidate.json` + `pricing-diff.md`（接受/拒绝明细表），显式 `--apply` 才写入且自动备份 `pricing.json.bak-<时间戳>`；
+  - **校验前置**：非数字/负数/超上限（¥10000/百万）拒绝；与现价偏差超 `--max-ratio`（默认 5x）拒绝并要求 `--force` 放行；无变化条目跳过；
+  - **CI 过期检查**：`--check --stale-days 30` 按 `_pricing_rules.updated` 判断，过期退出码 1；
+  - **测试缝**：`FETCH_PRICING_ROOT` 环境变量重定向路径，黑盒测试零接触真实定价文件。
+- 落盘不动 `pricing.local.json`（本地覆盖始终优先）。
+
+### 🧪 测试
+
+- 新增 `tests/test_task_classification.py`（28 用例）与 `tests/test_fetch_pricing.py`（17 用例），含 3 个真实 bug 的回归守护（漏导入 NameError、拒绝条目双重收录、default-arg 绑定绕过 monkeypatch）。
+- 测试规模：**16 个测试文件、398 用例全绿**（原 14 文件 / 353 用例）。
+
+### ⚠️ 行为变化
+
+- 依赖规则顺序的边界 case 分类结果可能变化（这正是本次修复的目的：多信号类型不再被排在前面的单信号类型抢走）。
+- 版本 1.4.0 → 1.5.0。
+
+---
+
 ## [1.4.0] — 2026-09-06
 
 ### ✨ 新特性：多 Agent 数据源（Claude Code 适配器）
