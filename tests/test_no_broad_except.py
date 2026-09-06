@@ -19,6 +19,7 @@ pytestmark = pytest.mark.regression
 ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS_DIR = ROOT / "scripts"
 TESTS_DIR = ROOT / "tests"
+ADAPTERS_DIR = ROOT / "adapters"
 
 
 @allure.feature("代码质量")

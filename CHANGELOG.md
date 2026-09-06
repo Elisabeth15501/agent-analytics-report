@@ -2,6 +2,43 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.4.0] — 2026-09-06
+
+### ✨ 新特性：多 Agent 数据源（Claude Code 适配器）
+
+- **新增 `--source` 参数，数据源可切换**。此前技能只能统计 WorkBuddy；现在可用 `--source claude-code` 统计 Claude Code 的用量，报告格式、聚合逻辑、计价与渲染完全复用。
+
+  ```bash
+  python scripts/collect_usage_data.py --source claude-code --period week -o data.json
+  python scripts/generate_report.py data.json --output report.html --format html
+  ```
+
+- **新增 `adapters/claude_code.py`**：读取 `~/.claude/projects/**/*.jsonl`（每个文件一次会话），解析每轮 assistant 消息的 `usage` 字段归一化为统一 trace schema，并现场合成会话记录，使下游任务分类、Top 任务、每日趋势、模型对比无需任何改动。
+  - **根目录定位三级回退**：`CLAUDE_PROJECTS_DIR` > `CLAUDE_CONFIG_DIR` > 平台默认（Windows `%APPDATA%/Claude/projects`、Unix `~/.claude/projects`），并兼容 Claude Desktop agent 模式的嵌套 `projects/` 子树。
+  - **口径与 WorkBuddy 一致**：`cache_read_input_tokens` 计入缓存折扣（命中只按 10% 计），`cache_creation_input_tokens` 以 `_cache_creation_input_tokens` 透明字段保留供后续精细计价。
+  - **健壮性**：坏 JSON 行、非 dict 行、无 `usage` 的 assistant 行一律跳过，不抛异常。
+- **Claude 模型定价入库**：`pricing.json` 与 `ca_core.MODEL_PRICING` 新增 Opus 4（108/540）、Sonnet 4（21.6/108）、Haiku 4（5.76/28.8）及日期后缀变体，单位元/百万 tokens。`parse_channel()` 识别 `claude-code:` 前缀，`price_of()` 新增该通道分支。
+  - ⚠️ 单价为 **Anthropic 美元刊例价按 ~7.2 汇率折算的估算值**，已在文档与 FAQ 明确标注，可用 `pricing.local.json` 覆盖。
+
+### 📚 文档
+
+- **`ADAPTERS.md` 全量重写**：从「未来扩展设想」改为「已实现说明 + 新增 Agent 指南」，含字段映射表、会话派生结构、计价表、已知限制与验收清单。
+- `SKILL.md` / `README.md` 支持范围改为三行表格（WorkBuddy / Claude Code / 未实现），补 `--source` 用法示例与数据源路径表。
+- `references/FAQ.md` 新增 Q43（能统计 Claude Code 吗）/ Q44（为什么没有技能与自动化）/ Q45（单价准吗），FAQ 计数 43 → 45 问。
+
+### 🧪 测试
+
+- **新增 `tests/test_claude_code_adapter.py`（11 用例）**：JSONL 解析正确性、日期窗口过滤（闭区间）、缓存折扣与成本、坏行健壮性、会话派生与任务分类、`--source claude-code` CLI 黑盒（采集 + HTML 渲染）。fixture 经 `CLAUDE_PROJECTS_DIR` 指向 `tmp_path`，**不读取用户真实目录**。
+- 测试规模：**14 个测试文件、353 用例全绿**（原 13 文件 / 318 用例）。
+
+### ⚠️ 已知限制（Claude Code 源）
+
+- 无**技能调用**与**自动化运行**维度——Claude Code 的会话日志不落盘这两类数据，属客观限制而非采集失败。
+- `duration_ms` 恒为 0（JSONL 无可靠端到端耗时字段，未做推测）。
+- 不区分 Max 订阅与按量 API，一律按刊例价折算；订阅用户实际边际成本为 0。
+
+---
+
 ## [1.3.0] — 2026-09-02
 
 ### ✨ 新特性 / 改进

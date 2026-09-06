@@ -1,12 +1,12 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.3.0
+version: 1.4.0
 metadata: metadata.json
 displayName: Agent 用量分析报告
-summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。首发支持 WorkBuddy，规划兼容更多 Agent。
+summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy 与 Claude Code 两种数据源（--source 切换）。
 description: |
-  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。首发支持 WorkBuddy；后续版本计划兼容 Claude Code 等更多 Agent 的数据源（详见 ADAPTERS.md）。
+  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。数据源用 --source 切换：workbuddy（默认，读 ~/.workbuddy/）/ claude-code（读 ~/.claude/projects/ 的 JSONL 会话日志）；更多 Agent 可扩展（详见 ADAPTERS.md）。
 
   触发方式：当用户说「生成周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等时触发，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
@@ -56,7 +56,20 @@ python scripts/collect_usage_data.py --days 14 --output data.json
 
 # 绝对日期范围（最优先，覆盖 --period 与 --days）
 python scripts/generate_report.py --start 2026-06-01 --end 2026-06-30 --output 六月报告.md
+
+# 切换数据源：生成 Claude Code 的用量报告（读 ~/.claude/projects/）
+python scripts/collect_usage_data.py --source claude-code --period week --output data.json
+python scripts/generate_report.py data.json --output ClaudeCode_周报.html --format html
 ```
+
+### 数据源（--source）
+
+| 取值 | 读取位置 | 说明 |
+|------|----------|------|
+| `workbuddy`（默认） | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） | 完整能力：技能调用、自动化运行、任务分类全部可用 |
+| `claude-code` | `~/.claude/projects/**/*.jsonl` | 解析 Claude Code 会话日志，产出 token / 成本 / 任务类型 / 每日趋势；无技能与自动化维度。可用 `CLAUDE_PROJECTS_DIR` 环境变量指向自定义目录 |
+
+> Claude Code 源的限制与扩展方式见 `ADAPTERS.md`。
 
 ### 时间窗口（可调节）
 
@@ -138,12 +151,22 @@ python scripts/generate_report.py --start 2026-06-01 --end 2026-06-30 --output �
 
 ## 数据源说明
 
+默认数据源为 WorkBuddy（`--source workbuddy`）：
+
 | 数据源 | 路径 | 内容 |
 |--------|------|------|
 | Traces | `~/.workbuddy/traces/` | Token 消耗、模型信息、会话时长 |
 | SQLite DB | `~/.workbuddy/workbuddy.db` | 会话元数据、自动化运行、信用消耗 |
 | Usage Log | `~/.workbuddy/usage-log.json` | 技能使用记录、活跃天数 |
 | 会话目录 | `~/WorkBuddy/` | 产出文件、记忆日志 |
+
+切换到 Claude Code（`--source claude-code`）时读取：
+
+| 数据源 | 路径 | 内容 |
+|--------|------|------|
+| 会话 JSONL | `~/.claude/projects/**/*.jsonl` | 每轮 assistant 消息的 `usage`（输入/输出/缓存读写 token）、模型名、`cwd`、用户提问文本 |
+
+适配器把 JSONL 归一化为同一套 trace schema 并现场合成会话记录，因此下游聚合、计价、任务分类与报告渲染完全复用（详见 `ADAPTERS.md`）。
 
 ## Token 口径：原始总量 vs 实际消耗（计费等效）
 

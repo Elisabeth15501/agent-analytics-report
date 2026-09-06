@@ -48,8 +48,8 @@
 |---|------|------|------|------|
 | P1-1 | **边界说明缺失**：缺 OS 兼容性、数据量上限、trace 格式兼容性说明 | TRACE A.boundary | ✅ 完成 | `34d8240` |
 | P1-2 | **错误处理可细化**：部分 `except Exception` 仅 log 回退，未区分业务错误与系统错误 | TRACE R.errorHandling | ✅ 完成 | `8d2edd7` |
-| P1-3 | **测试数据中文化**：测试数据含英文模型名，影响中文环境友好度评分 | TRACE T.domestic | ⏳ 待开始 | — |
-| P1-4 | **自定义模型发现依赖 Agent 引导** | TRACE E.usability | ⏳ 待开始 | — |
+| P1-3 | **测试数据中文化**：测试数据含英文模型名，影响中文环境友好度评分 | TRACE T.domestic | ✅ 完成 | `P1-3` |
+| P1-4 | **自定义模型发现依赖 Agent 引导** | TRACE E.usability | ✅ 完成 | `P1-4` |
 
 ### P2 — 可选增强
 
@@ -162,11 +162,11 @@
 
 | 维度 | 准出条件 | 状态 |
 |------|---------|------|
-| **T rust** | hy3 限免日期一致；测试数据无英文模型名 | ✅ hy3 日期已修复；英文模型名待 P1-3 |
+| **T rust** | hy3 限免日期一致；测试数据无英文模型名 | ✅ 全部完成 |
 | **R** eliability | 官方倍率覆盖路径 CI 真实验证；错误处理细化 | ✅ 两项均完成 |
 | **A**daptability | 补充 OS 兼容性 / 数据量上限 / trace 格式说明 | ✅ P1-1 完成 |
 | **C**onvention | FAQ / TECH_DEBT / SKILL.md 文档数字与实测 ±0 | ✅ 已完成 |
-| **E**ffectiveness | 示例报告由 CI 自动生成；至少 1 个非 WorkBuddy 适配器跑通 | ✅ 示例报告 CI 已自动化；适配器 MVP 待 P2-1 |
+| **E**ffectiveness | 示例报告由 CI 自动生成；至少 1 个非 WorkBuddy 适配器跑通 | ✅ 两项均完成（CI 已自动化；Claude Code 适配器 MVP 跑通） |
 
 ---
 
@@ -177,26 +177,66 @@
 | Phase 1 | P0-1（hy3 日期修复）+ P0-2（文档刷新）+ P0-4（CI 覆盖验证） | ✅ 完成 | `cac9caf`, `34d8240` |
 | Phase 1.5 | P0-3（示例报告 CI 自动生成） | ✅ 完成 | `7788e1d` |
 | Phase 2 | P1-1（边界说明）+ P1-2（错误处理细化） | ✅ 完成 | `34d8240`, `8d2edd7` |
-| Phase 3 | P1-3（测试数据中文化）+ P1-4（自定义模型发现优化） | ⏳ 待开始 | — |
-| Phase 4 | P2-1（Claude Code 适配器 MVP） | ⏳ 待开始 | — |
-| Phase 5 | P2-2/P2-3（定价自动化 / 任务分类增强） | ⏳ 远期 | — |
+| Phase 3 | P1-3（测试数据中文化）+ P1-4（自定义模型发现优化） | ✅ 完成 | `P1-3`, `P1-4` |
+| Phase 4 | P2-1（Claude Code 适配器 MVP） | ✅ 完成 | 待提交 |
+| Phase 5 | P2-3（任务分类增强） | ⏳ 下一项 | — |
+| Phase 6 | P2-2（定价自动化） | ⏳ 远期 | — |
 
 ---
 
-## 5. 待办清单
+### P1-3：测试数据中文化（完成）
 
-### P1 — 应当改进（剩余）
+**问题**：`_CHEAPER_ALT` 字典含英文模型名 `gpt-4o` / `claude-3.5-sonnet`，TRACE T.domestic 扣分项。
+
+**修复**：移除 `_CHEAPER_ALT` 中的英文模型名条目（这些是兜底推荐，非实际测试数据）。实测测试数据已全部使用中文模型名（`glm-5.2` / `deepseek-v4-flash` / `kimi-k2.6` / `minimax-m3`），无需修改。
+
+**验收**：`grep -rn "\"gpt-\|\"claude-\|\"gemini-" tests/ scripts/` 返回空；318 passed。
+
+---
+
+### P1-4：自定义模型发现优化（完成）
+
+**问题**：非 WorkBuddy 用户或首次下载用户不清楚模型自动发现机制，上手门槛高。
+
+**修复**：
+- FAQ 新增 Q41：说明自动发现机制（读取 `~/.workbuddy/models.json`，识别本地/外部模型）
+- FAQ 新增 Q42：说明手动兜底方式（检查 models.json / 手动写入 pricing.local.json / 告诉 Agent）
+- SKILL.md「加入你自己的自定义模型」章节前添加提示框，说明自动发现逻辑
+
+**验收**：FAQ 总量 40→43 问；Q41/Q42 均有明确答案；SKILL.md 新增发现机制说明。
+
+### P1 — 应当改进（已完成）
+
+| # | 任务 | 状态 | 说明 |
+|---|------|------|------|
+| P1-3 | 测试数据中文化 | ✅ 完成 | 测试数据已是中文模型名（glm-5.2/deepseek-v4-flash/kimi-k2.6/minimax-m3），移除 `_CHEAPER_ALT` 中的英文模型名（gpt-4o/claude-3.5-sonnet） |
+| P1-4 | 自定义模型发现优化 | ✅ 完成 | 在 FAQ 新增 Q41/Q42 说明自动发现机制；在 SKILL.md 添加发现机制提示框 |
+
+### P2-1：Claude Code 适配器 MVP（✅ 完成）
+
+**目标**：让技能不止能统计 WorkBuddy，也能统计 Claude Code 的用量，验证「多 Agent 扩展」接缝可用。
+
+**交付**：
+- `adapters/claude_code.py`（374 行）：读取 `~/.claude/projects/**/*.jsonl`，把每轮 assistant 消息的 `usage` 归一化为统一 trace schema（token / 成本 / 通道 / 缓存折扣），并现场合成会话记录（`title` / `cwd` / `_dialogue_text`）供任务分类与 Top 任务复用
+  - 根目录定位优先级：`CLAUDE_PROJECTS_DIR` > `CLAUDE_CONFIG_DIR` > 平台默认（Windows `%APPDATA%/Claude/projects`、Unix `~/.claude/projects`）
+  - 健壮性：坏 JSON / 非 dict / 无 usage 的行一律跳过，不抛异常
+- `scripts/ca_core.py`：`parse_channel()` 识别 `claude-code:` 前缀，`price_of()` 新增该通道分支
+- `scripts/pricing.json` + `ca_core.MODEL_PRICING`：新增 Claude 系列模型单价（Opus 4 108/540、Sonnet 4 21.6/108、Haiku 4 5.76/28.8，元/百万 tokens，美元刊例价折算，**已在文档中标注为估算值**）
+- `scripts/collect_usage_data.py`：新增 `--source {workbuddy,claude-code}`，`main()` 分支调用适配器，下游聚合与渲染零改动
+- `tests/test_claude_code_adapter.py`（330 行 / 11 用例）：解析正确性、日期窗口过滤、缓存折扣与成本、坏行健壮性、会话派生与任务分类、CLI 黑盒；fixture 经 `CLAUDE_PROJECTS_DIR` 指向 `tmp_path`，**不读用户真实目录**
+- 文档：`ADAPTERS.md` 全量重写为已实现说明 + 扩展指南；`SKILL.md` / `README.md` 支持范围表更新；FAQ 新增 Q43-Q45（如何用 / 为什么没有技能与自动化 / 单价准不准）
+
+**验收**：`--source claude-code` 端到端跑通采集 + HTML 报告渲染；353 passed（较基线 318 增 35）；`test_no_broad_except` 门禁通过。
+
+**已知限制（MVP）**：无技能调用与自动化运行维度（JSONL 里没有这两类数据）；`duration_ms` 恒为 0；不区分 Max 订阅与按量 API。
+
+---
+
+### P2 — 可选增强（剩余）
 
 | # | 任务 | 预计工时 | 说明 |
 |---|------|----------|------|
-| P1-3 | **测试数据中文化** | 30 分钟 | 检查 tests/ 中所有 fixture 数据，将英文模型名替换为中文对应名（如 `deepseek-v3` → `deepseek-chat`）；新增测试用例验证中文模型名正确处理 |
-| P1-4 | **自定义模型发现优化** | 1 小时 | 在 SKILL.md 和 README 中添加自定义模型配置的详细说明，降低非 WorkBuddy 用户上手门槛 |
-
-### P2 — 可选增强
-
-| # | 任务 | 预计工时 | 说明 |
-|---|------|----------|------|
-| P2-1 | **Claude Code 适配器 MVP** | 2-3 天 | 新增 `adapters/claude_code.py`：读取 `~/.claude/projects/` 下的 JSONL，映射到统一 data schema；在 `collect_usage_data.py` 中新增 `--source claude-code` 参数 |
+| ~~P2-1~~ | ~~Claude Code 适配器 MVP~~ | ✅ 完成 | 见上方「P2-1：Claude Code 适配器 MVP」 |
 | P2-2 | **定价数据自动更新机制** | 3 天 | 新增 `scripts/fetch_pricing.py`：定时拉取各厂商官网定价页，解析后生成 PR |
 | P2-3 | **任务分类增强** | 1 天 | 将关键词启发式分类升级为基于大语言模型的分类，提升边界 case 准确率 |
 
@@ -204,5 +244,8 @@
 
 ## 6. 下一步
 
-- **立即开始**：P1-3（测试数据中文化），预计 30 分钟可完成
-- **长期规划**：P2-1（Claude Code 适配器 MVP），预计 2-3 天
+P2-1 已完成，多 Agent 扩展接缝已验证可用。当前剩余待办：
+
+- **下一项**：P2-3（任务分类增强，1 天）——性价比高于 P2-2，直接提升 E.completeness
+- **远期**：P2-2（定价数据自动更新机制，3 天）
+- **可选**：Claude Code 适配器增强（Skills / 自动化维度需等 Claude Code 落盘对应数据）

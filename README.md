@@ -1,19 +1,24 @@
 # agent-analytics-report
 
 > 生成 Agent 用量分析报告：Token 消耗趋势、缓存命中占比、各模型成本对比、异常自动预警。支持日 / 周 / 月 / 年。
-> **首发支持 WorkBuddy，规划兼容更多 Agent。**
+> **数据源可切换：WorkBuddy（默认）+ Claude Code。**
 
 ---
 
-## ⚠️ 当前支持范围（请先读）
+## 当前支持范围
 
-本技能**目前仅适配 WorkBuddy**，请勿声称已兼容其他 Agent：
+| 数据源 | `--source` | 状态 | 读取位置 |
+|---|---|---|---|
+| WorkBuddy | `workbuddy`（默认） | ✅ | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） |
+| Claude Code | `claude-code` | ✅ | `~/.claude/projects/**/*.jsonl` |
+| Trae / 千问办公 | — | ⬜ 未实现 | — |
 
-- 数据采集自 WorkBuddy 本机数据（`~/.workbuddy/`、会话目录、`workbuddy.db`、`usage-log.json` 等）；
-- 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含 GLM-5.3 / GLM-5.3-Flash / Hy4 preview 等最新模型）；
+- **WorkBuddy**：完整能力，含技能调用、自动化运行、任务分类；
+- **Claude Code**：解析会话日志的 token / 成本 / 任务类型 / 每日趋势，无技能与自动化维度（JSONL 里没有这两类数据）。
+- 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含 GLM-5.3 / GLM-5.3-Flash / Hy4 preview 等），以及 Claude 系列模型的**人民币折算估算价**（以 Anthropic 美元刊例价为准，可用 `pricing.local.json` 覆盖）；
 - 升级机制依赖 `skillhub upgrade`。
 
-架构已为「多 Agent 扩展」预留接缝（见 [ADAPTERS.md](ADAPTERS.md)），但 **Trae / 千问办公 等适配器尚未实现**。
+新增数据源的扩展方式见 [ADAPTERS.md](ADAPTERS.md)。
 
 ---
 
@@ -52,22 +57,34 @@ python scripts/generate_report.py data.json --output report.md   --format markdo
 python scripts/generate_report.py data.json --output report.html --format html
 ```
 
+### 切换数据源（Claude Code）
+
+```bash
+python scripts/collect_usage_data.py --source claude-code --period week --output data.json
+python scripts/generate_report.py data.json --output report.html --format html
+
+# 自定义 Claude Code projects 目录
+CLAUDE_PROJECTS_DIR=/path/to/projects \
+  python scripts/collect_usage_data.py --source claude-code --period week --output data.json
+```
+
 ---
 
 ## 测试（pytest + Allure）
 
 本技能附带一套分层回归测试，覆盖从数据采集、计费等效折算、报告生成到发布一致性的全链路。**全部用例使用合成 fixture 数据，不引用任何第三方商业 API、不含真实用量/个人信息**，可安全公开（适合作为作品集在 GitHub Pages 展示）。
 
-测试分层（共 10 个测试文件、306 用例全绿）：
+测试分层（共 14 个测试文件、353 用例全绿）：
 
 | 层 | 文件 | 覆盖要点 |
 |----|------|----------|
-| **L0 数据采集** | `test_cost_math.py` · `test_calendar_period.py` · `test_aggregation.py` · `test_display_merge.py` · `test_mode_rates.py` | 计价（GLM 折扣 / 缓存折算 / 限免 / blended 回退）、日历周期对齐、聚合与异常双口径检测、display_merge 合并显示与计费分离、档位维度（快速/均衡/极致）倍率锚定与归一 |
+| **L0 数据采集** | `test_cost_math.py` · `test_calendar_period.py` · `test_aggregation.py` · `test_display_merge.py` · `test_mode_rates.py` · `test_no_broad_except.py` · `test_example_report_sanity.py` | 计价（GLM 折扣 / 缓存折算 / 限免 / blended 回退）、日历周期对齐、聚合与异常双口径检测、display_merge 合并显示与计费分离、档位维度（快速/均衡/极致）倍率锚定与归一、禁止宽泛异常捕获、示例报告健康度 |
 | **L1 报告生成** | `test_report_generation.py` | GLM-5.2 家族合并、XSS 转义、图表构建、三格式（md / html / json）跑通 |
 | **L2 定价边界** | `test_pricing_boundary.py` | 通道分支、已下架模型、零/负/超大值、blended 精度 |
 | **L3 CLI 端到端** | `test_e2e_cli.py` | 黑盒 subprocess 跑通报告生成三格式、CLI 参数校验、恶意模型名 XSS 回归 |
 | **L4 发布一致性** | `test_publish_parity.py` | `config.json` / `metadata.json` 版本对齐、交付物齐全、`.gitignore` 闸门（敏感产物不进包） |
-| 既有 | `test_channel_attribution.py` | 通道归因、跨窗口会话补全（最早一批测试） |
+| **L0 适配器** | `test_claude_code_adapter.py` | Claude Code JSONL 解析、日期窗口过滤、缓存折扣与成本、坏行健壮性、会话派生与任务分类、`--source claude-code` CLI 黑盒（fixture 走 `CLAUDE_PROJECTS_DIR`，不读真实目录） |
+| 既有 | `test_channel_attribution.py` · `test_session_labeling.py` | 通道归因、跨窗口会话补全、孤儿 trace 合并、任务类型标签正确性 |
 
 运行方式：
 

@@ -324,3 +324,25 @@ WorkBuddy 的 `auto` 自动路由下还有三档可选档位，按**积分消耗
 3. **告诉 Agent**：直接用大白话让 Agent 帮你写进 `pricing.local.json`（见 [Q17](#q17-怎么把我的自建--第三方模型加进报告)）。
 
 以上三种方式可组合使用——自动发现优先，手动写入覆盖。
+**Q43. 能统计 Claude Code 的用量吗？**
+能。用 `--source claude-code` 切换数据源：
+```bash
+python scripts/collect_usage_data.py --source claude-code --period week -o data.json
+python scripts/generate_report.py data.json --output report.html --format html
+```
+采集器会读取 `~/.claude/projects/**/*.jsonl`（每个文件是一次会话），解析每轮 assistant 消息的 `usage` 字段得到输入 / 输出 / 缓存 token，再按 `pricing.json` 里的 Claude 模型单价折算成本。
+
+若你的 Claude Code 数据不在默认位置，用环境变量指向：
+```bash
+CLAUDE_PROJECTS_DIR=/path/to/projects python scripts/collect_usage_data.py --source claude-code ...
+```
+
+**Q44. Claude Code 报告为什么没有技能调用和自动化运行？**
+因为 Claude Code 的会话日志里**没有这两类数据**——它只记录每轮对话的 token 与消息内容，不落盘「调用了哪个技能」「自动化任务跑了几次」。所以该数据源下报告只呈现 token、成本、任务类型、每日趋势、Top 任务与模型对比，技能与自动化两节为空。这是数据源的客观限制，不是采集失败。
+
+**Q45. Claude 模型的单价准吗？**
+是**估算值**。`pricing.json` 里的 Claude 单价由 Anthropic 美元刊例价按约 7.2 汇率折算成人民币（Opus 4 108/540、Sonnet 4 21.6/108、Haiku 4 5.76/28.8，单位元/百万 tokens）。两点要注意：
+- 汇率与官方调价都会变，请以 Anthropic 官网最新定价为准；
+- 若你用的是 **Max 订阅**而非按量 API，实际边际成本为 0，报告里的金额只反映「按刊例价折算的等效价值」，不是真实账单。
+
+想改成自己的口径，在 `scripts/pricing.local.json` 覆盖对应模型即可（见 [Q18](#q18-带-custom-local-前缀和裸名分别写哪一段)）。

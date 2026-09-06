@@ -32,6 +32,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
+# 技能根目录（scripts/ 的上一级），用于导入 adapters/ 下的多 Agent 数据源适配器
+_SKILL_ROOT = os.path.dirname(_HERE)
+if _SKILL_ROOT not in sys.path:
+    sys.path.insert(0, _SKILL_ROOT)
+
 from ca_core import *
 from ca_sources import *
 from ca_sessions import *
@@ -79,6 +84,10 @@ def main():
     parser.add_argument("--pricing-api", type=str, default=None,
                         help="online 模式可选：指向一个返回 {\"models\": {模型名: {input,output}}} 的 JSON 端点，"
                              "用于补全缺失模型单价（取自你自己的定价镜像，避免抓第三方页面）")
+    parser.add_argument("--source", choices=["workbuddy", "claude-code"], default="workbuddy",
+                        help="数据源：workbuddy=默认（WorkBuddy traces/workbuddy.db/usage-log），"
+                             "claude-code=读取 ~/.claude/projects/ 下的 Claude Code 会话 JSONL（P2-1 适配器 MVP）。"
+                             "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算")
     args = parser.parse_args()
 
     if args.realtime:
@@ -111,45 +120,61 @@ def main():
 
     # 采集各数据源：先取会话（sessions.model 含带通道前缀的原始模型标识符，
     # 是「接口通道」的真相源），据其构建 session_id→raw_model 映射，再采集 trace 并关联通道。
-    db_data = collect_db_data(start_date, end_date)
-    sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
-    traces = collect_traces(start_date, end_date, sid_to_rawmodel)
+    if args.source == "claude-code":
+        # ── Claude Code 数据源（P2-1 适配器 MVP）──
+        # 无需 WorkBuddy 环境，直接读 ~/.claude/projects/ 下的会话 JSONL；
+        # 适配器产出与 WorkBuddy 同源的 trace / sessions，任务类型已预分类。
+        from adapters.claude_code import collect_claude_code
+        traces, db_data = collect_claude_code(start_date, end_date)
+        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
+        outputs, memory_logs = ([], {})
+        # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源），
+        # 此处直接收口为 {id: task_type}，跳过 WorkBuddy 专属的 get_session_content 查询。
+        task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
+        print(f"[INFO] Claude Code 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
+              file=sys.stderr)
+    else:
+        # ── WorkBuddy 默认数据源 ──
+        db_data = collect_db_data(start_date, end_date)
+        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        traces = collect_traces(start_date, end_date, sid_to_rawmodel)
 
-    # 补全会话：窗口内有 trace 但创建于窗口外的会话，确保 token 统计能关联到任务类型
-    try:
-        trace_sids = {t.get("session_id") for t in traces if t.get("session_id")}
-        existing_ids = {s["id"] for s in db_data["sessions"]}
-        missing = trace_sids - existing_ids
-        if missing:
-            cdb = sqlite3.connect(str(DB_PATH))
-            cdb.row_factory = sqlite3.Row
-            ph = ",".join("?" * len(missing))
-            for r in cdb.execute(
-                f"SELECT * FROM sessions WHERE id IN ({ph}) AND deleted_at IS NULL", list(missing)
-            ).fetchall():
-                db_data["sessions"].append({
-                    "id": r["id"], "cwd": r["cwd"], "title": r["title"] or "",
-                    "custom_title": r["custom_title"] or "", "status": r["status"],
-                    "created_at": r["created_at"], "created_date": ts_to_date(r["created_at"]),
-                    "updated_at": r["updated_at"], "mode": r["mode"], "model": r["model"],
-                    "is_background_automation": bool(r["is_background_automation"]),
-                })
-            cdb.close()
-    except (sqlite3.Error, OSError) as e:
-        print(f"[WARN] supplementary sessions query: {e}", file=sys.stderr)
+        # 补全会话：窗口内有 trace 但创建于窗口外的会话，确保 token 统计能关联到任务类型
+        try:
+            trace_sids = {t.get("session_id") for t in traces if t.get("session_id")}
+            existing_ids = {s["id"] for s in db_data["sessions"]}
+            missing = trace_sids - existing_ids
+            if missing:
+                cdb = sqlite3.connect(str(DB_PATH))
+                cdb.row_factory = sqlite3.Row
+                ph = ",".join("?" * len(missing))
+                for r in cdb.execute(
+                    f"SELECT * FROM sessions WHERE id IN ({ph}) AND deleted_at IS NULL", list(missing)
+                ).fetchall():
+                    db_data["sessions"].append({
+                        "id": r["id"], "cwd": r["cwd"], "title": r["title"] or "",
+                        "custom_title": r["custom_title"] or "", "status": r["status"],
+                        "created_at": r["created_at"], "created_date": ts_to_date(r["created_at"]),
+                        "updated_at": r["updated_at"], "mode": r["mode"], "model": r["model"],
+                        "is_background_automation": bool(r["is_background_automation"]),
+                    })
+                cdb.close()
+        except (sqlite3.Error, OSError) as e:
+            print(f"[WARN] supplementary sessions query: {e}", file=sys.stderr)
 
-    # 修复：补全会话后，把跨窗口长会话并入 sid_to_rawmodel 并重采 trace——
-    # 否则这些会话的 sid 在映射里缺失，raw_model 会退化成 trace 执行模型名，
-    # 导致通道误判（如 hy3 网关会话里的 deepseek-v4-pro 被错归、或反之）。
-    for s in db_data["sessions"]:
-        sid_to_rawmodel.setdefault(s["id"], s.get("model") or "default")
-    traces = collect_traces(start_date, end_date, sid_to_rawmodel)
+        # 修复：补全会话后，把跨窗口长会话并入 sid_to_rawmodel 并重采 trace——
+        # 否则这些会话的 sid 在映射里缺失，raw_model 会退化成 trace 执行模型名，
+        # 导致通道误判（如 hy3 网关会话里的 deepseek-v4-pro 被错归、或反之）。
+        for s in db_data["sessions"]:
+            sid_to_rawmodel.setdefault(s["id"], s.get("model") or "default")
+        traces = collect_traces(start_date, end_date, sid_to_rawmodel)
 
-    skill_usage = collect_skill_usage(start_date, end_date)
-    outputs, memory_logs = collect_session_outputs(start_date, end_date)
+        skill_usage = collect_skill_usage(start_date, end_date)
+        outputs, memory_logs = collect_session_outputs(start_date, end_date)
 
-    # 任务类型分类（基于对话内容）
-    task_types = collect_task_types(db_data["sessions"])
+        # 任务类型分类（基于对话内容）
+        task_types = collect_task_types(db_data["sessions"])
 
     # 汇总
     if args.days is not None:
@@ -172,6 +197,7 @@ def main():
             "days": meta_days,
             "generated_at": datetime.now(TZ).isoformat(),
             "is_realtime": args.realtime,
+            "source": args.source,
         },
         "traces": traces,
         "sessions": db_data["sessions"],

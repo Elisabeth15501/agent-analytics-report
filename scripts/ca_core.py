@@ -52,6 +52,13 @@ MODEL_PRICING = {
     # —— DeepSeek（官方 RMB 永久价）——
     "deepseek-v4-flash": {"input": 1.0, "output": 2.0}, # 官方：输入1 / 输出2
     "deepseek-v4-pro": {"input": 3.0, "output": 6.0},  # 官方永久价：输入3 / 输出6
+    # —— Anthropic Claude（Claude Code 数据源；美元刊例价按 ~7.2 折算 CNY 的估算值，详见 pricing.json 注释）——
+    "claude-opus-4": {"input": 108.0, "output": 540.0},   # Opus 4/4.5：$15/$75 per MTok 折算
+    "claude-opus-4-5-20251101": {"input": 108.0, "output": 540.0},
+    "claude-sonnet-4": {"input": 21.6, "output": 108.0},  # Sonnet 4/4.5：$3/$15 per MTok 折算
+    "claude-sonnet-4-20250514": {"input": 21.6, "output": 108.0},
+    "claude-haiku-4": {"input": 5.76, "output": 28.8},    # Haiku 4/4.5：$0.8/$4 per MTok 折算
+    "claude-haiku-4-20250514": {"input": 5.76, "output": 28.8},
 }
 
 DEFAULT_MODEL = "glm-5.2"
@@ -439,6 +446,10 @@ def parse_channel(raw_model_id):
         return ("openrouter-free", raw)
     if n.startswith("custom-local:"):
         return ("custom-local", raw[len("custom-local:"):].strip())
+    # Claude Code 外部入口：claude-code: 前缀标识来自 Claude Code 数据源的模型，
+    # 计价走官方 Anthropic 刊例价（见 price_of 的 claude-code 分支命中 MODEL_PRICING）。
+    if n.startswith("claude-code:"):
+        return ("claude-code", raw[len("claude-code:"):].strip())
     # SiliconFlow 等第三方 API 接入：trace 中保留 Vendor/Model 前缀，但 sessions.model
     # 可能未带 custom-local: 前缀；凭 vendor 前缀强制判为 custom-local，避免混入官方入口。
     if any(n.startswith(p) for p in SILICONFLOW_VENDOR_PREFIXES):
@@ -486,6 +497,12 @@ def price_of(model_name, channel=None, as_of_date=None):
         if p:
             return (p.get("input"), p.get("output"))
         return (None, None)
+    # Claude Code 外部入口：claude-code 通道直接按裸模型名查官方刊例价（与 gateway 同源）
+    if channel == "claude-code":
+        p = MODEL_PRICING.get(normalize_model(model_name))
+        if not p:
+            return (None, None)
+        return (p.get("input"), p.get("output"))
     # gateway（默认网关）
     p = MODEL_PRICING.get(normalize_model(model_name))
     if not p:
