@@ -196,7 +196,7 @@ python scripts/generate_report.py data.json --output ClaudeCode_周报.html --fo
      指纹以 `[artifacts] imagegen/videogen 媒体文件名...` 形式注入候选文本，供「内容生成」类型强判定（媒体文件名规则必须紧跟 `[artifacts]` 标记，避免"领券截图/二维码"等非创作媒体误判）。
    - 对话内容与生成物指纹均缺失时，回退到会话标题。
 
-分类采用**加权评分**（v1.4.1 / P2-3），不再「顺序命中即返回」：
+分类采用**加权评分**（v1.5.0 / P2-3），不再「顺序命中即返回」：
 
 - **所有规则参与打分，取总分最高者**；同分按 priority（原顺序）打破平局。
 - 每条 pattern 有权重（`scripts/task_rules.json` 可编辑）：强信号（如 `skillhub install`、`SKILL.md`、`imagegen`）权重 2~2.5，弱信号（如「了解」「对比」）权重 0.5~0.8，需多条叠加才能取胜。
