@@ -19,6 +19,7 @@
 - 升级机制依赖 `skillhub upgrade`。
 
 新增数据源的扩展方式见 [ADAPTERS.md](ADAPTERS.md)。
+- 版本发布与更新日志见 [releases.md](releases.md)（含各版本 GitHub Release 链接与速览）。
 
 ---
 
