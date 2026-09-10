@@ -142,7 +142,7 @@ def _extract_text(content):
 
 def _stable_pid(seed):
     """从字符串生成稳定非负 int（模拟 WorkBuddy 的 pid_dir.name → int）。"""
-    h = hashlib.md5(seed.encode("utf-8")).hexdigest()
+    h = hashlib.sha256(seed.encode("utf-8")).hexdigest()
     return int(h[:8], 16)
 
 
