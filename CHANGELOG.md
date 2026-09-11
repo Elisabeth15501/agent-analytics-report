@@ -2,6 +2,30 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.5.1] — 2026-09-12
+
+### 🔄 定价数据刷新（DeepSeek 换代 + Hy4 限免新规）
+
+- **DeepSeek V4-Flash 下架**：`deepseek-v4-flash` 由 `models` 移入 `delisted`（历史调用仍按 ¥1/¥2 计价，报告标 🗄️ 官方已下架）。旧模型名仍可调用，但已由 V4.1-Flash 承接、按 Flash 价计费。
+- **新增 DeepSeek V4.1-Flash**：`deepseek-v4.1-flash`（官方在售名 `deepseek-flash`，二者报告内合并显示为一行）。2026-09-10 12:00 上线，1M 上下文、原生多模态（图像理解）。
+  - **峰谷双档计费**（元/百万 tokens，缓存未命中口径）：空闲 输入 1 / 输出 4 / 缓存命中 0.02，高峰翻倍 输入 2 / 输出 8 / 缓存命中 0.04；高峰时段 = 周一至周五 09:00-12:00、14:00-18:00。
+  - 本表 `input`/`output` 取**空闲档**，高峰值另以 `peak_input`/`peak_output` 记录供查阅（代码只读 `input`/`output`）；新增 `_pricing_rules.peak_valley` 说明该口径。
+- **DeepSeek V4-Pro 下线预警**：官方计划 2026-09-14 12:00 下线，请求自动路由至 V4.1-Flash 并按 Flash 价计费。同条 `note` 记录了「本表 ¥3/¥6 与官方现行刊例 ¥9/¥27 不一致」的疑点，留待核对。
+- **Hy4 preview 限免改规**：普适免费期已于 2026-09-10 结束，`timed_free.hy4-preview = 2026-09-10` **保留不变**（保证 09-10 及更早的历史调用继续计 ¥0）。新规为分人群 + 时段制（已体验用户夜间 23:00–08:00 免费；未体验用户在 2026-10-10 23:59 前首次开启起 14 天每日额度），静态价表无法表达，已记入 `_definitions.hy4_night_free`；需精确者用本机 `pricing.local.json` 覆盖。
+- `mode_rates.fast.anchor`：原锚点 DeepSeek-V4-Flash 已下架，如实标注「沿用旧锚点、待按新倍率重锚」。
+- `_sources` 补 DeepSeek 新定价页与 Hy4 限免新规来源；`_pricing_rules.updated` → 2026-09-12。
+
+### 🧪 测试
+
+- 回归守护：本次改造过程中全量测试抓到 1 处真实回归——移除 `timed_free.hy4-preview` 会使 2026-09-10 及以前的真实免费调用被计费（`tests/test_display_merge.py::test_merged_cost_counts_only_paid_variant`）。已回滚并保留该截止日。
+- 测试规模：**441 用例全绿**。
+
+### ⚠️ 行为变化
+
+- 2026-09-11 起的 `hy4-preview` 调用由「限免 ¥0」变为按官方刊例价 6/18 计（老用户夜间免费额度为分人群 + 时段制，静态价表不计入，报告可能偏高）。
+- 依赖 DeepSeek V4-Flash 名称的报表行现标 🗄️ 官方已下架。
+- 版本 1.5.0 → 1.5.1。
+
 ## [1.5.0] — 2026-09-07
 
 ### 🐛 修复 / 数据完整性（P0 级）

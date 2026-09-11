@@ -18,6 +18,17 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 ---
 
+## v1.5.1 — 2026-09-12
+
+**定价数据刷新：DeepSeek V4.1-Flash（峰谷双档）· V4-Flash 下架 · Hy4 限免新规**
+
+- 🔄 **DeepSeek 换代**：`deepseek-v4-flash` 移入 `delisted`（历史调用仍计价、报告标 🗄️）；新增 `deepseek-v4.1-flash`（官方在售名 `deepseek-flash`）——2026-09-10 上线，1M 上下文、原生多模态图像理解。
+- 💰 **峰谷双档计费**：空闲 输入 1 / 输出 4、高峰翻倍 2 / 8（元/百万 tokens）；主字段取空闲档，高峰值记 `peak_input`/`peak_output`。
+- ⏳ **V4-Pro 下线预警**：2026-09-14 12:00 下线，请求自动路由至 V4.1-Flash 并按 Flash 价计费。
+- 🟡 **Hy4 preview 限免改规**：普适免费期 2026-09-10 结束（`timed_free` 保留该日以保历史计价正确）；新规为分人群 + 时段制，静态价表不表达。
+- 🧪 **441 用例全绿**（含捕捉到 1 处 `timed_free` 误删回归）。
+- 🔗 [GitHub Release v1.5.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.1)
+
 ## v1.5.0 — 2026-09-07
 
 **任务分类加权评分（P2-3）· 定价自动更新机制（P2-2）· P0 数据完整性修复**
