@@ -84,10 +84,12 @@ def main():
     parser.add_argument("--pricing-api", type=str, default=None,
                         help="online 模式可选：指向一个返回 {\"models\": {模型名: {input,output}}} 的 JSON 端点，"
                              "用于补全缺失模型单价（取自你自己的定价镜像，避免抓第三方页面）")
-    parser.add_argument("--source", choices=["workbuddy", "claude-code"], default="workbuddy",
+    parser.add_argument("--source", choices=["workbuddy", "claude-code", "codex"], default="workbuddy",
                         help="数据源：workbuddy=默认（WorkBuddy traces/workbuddy.db/usage-log），"
                              "claude-code=读取 ~/.claude/projects/ 下的 Claude Code 会话 JSONL（P2-1 适配器 MVP）。"
-                             "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算")
+                             "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算。"
+                             "codex=读取 ~/.codex/sessions/ 下的 OpenAI Codex CLI rollout JSONL，"
+                             "无需 WorkBuddy 环境，成本按 pricing.json 中 OpenAI 模型估算价计算")
     parser.add_argument("--task-classifier", choices=["heuristic", "llm"], default="heuristic",
                         help="任务类型分类器（P2-3）：heuristic=默认加权启发式（离线、零依赖）；"
                              "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
@@ -159,6 +161,23 @@ def main():
         else:
             task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
         print(f"[INFO] Claude Code 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
+              file=sys.stderr)
+    elif args.source == "codex":
+        # ── OpenAI Codex CLI 数据源 ──
+        # 无需 WorkBuddy 环境，直接读 ~/.codex/sessions/ 下的 rollout JSONL（按日期分目录）；
+        # 适配器产出与 WorkBuddy 同源的 trace / sessions，任务类型已预分类。
+        from adapters.codex import collect_codex
+        traces, db_data = collect_codex(start_date, end_date)
+        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
+        outputs, memory_logs = ([], {})
+        # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源）；
+        # 若启用 LLM 分类器则基于 _dialogue_text 重分类，否则直接收口预分类结果。
+        if task_classifier is not None:
+            task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+        else:
+            task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
+        print(f"[INFO] Codex CLI 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
               file=sys.stderr)
     else:
         # ── WorkBuddy 默认数据源 ──

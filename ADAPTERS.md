@@ -7,9 +7,14 @@
 |---|---|---|---|
 | WorkBuddy | `workbuddy`（默认） | ✅ 内置 | `~/.workbuddy/` |
 | Claude Code | `claude-code` | ✅ 已实现 | `~/.claude/projects/**/*.jsonl` |
+| OpenAI Codex CLI | `codex` | ✅ 已实现（MVP，需真实样例复核） | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 | Trae / 千问办公等 | — | ⬜ 未实现 | 见文末「新增一个 Agent」 |
+| OpenClaw | — | ⬜ 未实现（规划中） | 见文末「新增一个 Agent」 |
 
 > ⚠️ 在适配器实现并验证前，请勿在文档 / 市场文案中声称已支持该 Agent。
+> Codex 适配器已通过单元测试（11 例，覆盖解析 / 日期过滤 / 缓存折扣 / 健壮性 / CLI 端到端），
+> 但由于 Codex CLI rollout schema 跨版本有差异（如 `reasoning_output_tokens` vs `reasoning_tokens`、
+> `type` vs `item_type`），建议用一份你本机真实 `rollout-*.jsonl` 跑一次 `--source codex` 复核后再对外宣称支持。
 
 ---
 

@@ -450,6 +450,10 @@ def parse_channel(raw_model_id):
     # 计价走官方 Anthropic 刊例价（见 price_of 的 claude-code 分支命中 MODEL_PRICING）。
     if n.startswith("claude-code:"):
         return ("claude-code", raw[len("claude-code:"):].strip())
+    # Codex CLI 外部入口：codex: 前缀标识来自 Codex 数据源的模型，
+    # 计价走 OpenAI 刊例价（见 price_of 的 codex 分支命中 MODEL_PRICING）。
+    if n.startswith("codex:"):
+        return ("codex", raw[len("codex:"):].strip())
     # SiliconFlow 等第三方 API 接入：trace 中保留 Vendor/Model 前缀，但 sessions.model
     # 可能未带 custom-local: 前缀；凭 vendor 前缀强制判为 custom-local，避免混入官方入口。
     if any(n.startswith(p) for p in SILICONFLOW_VENDOR_PREFIXES):
@@ -499,6 +503,13 @@ def price_of(model_name, channel=None, as_of_date=None):
         return (None, None)
     # Claude Code 外部入口：claude-code 通道直接按裸模型名查官方刊例价（与 gateway 同源）
     if channel == "claude-code":
+        p = MODEL_PRICING.get(normalize_model(model_name))
+        if not p:
+            return (None, None)
+        return (p.get("input"), p.get("output"))
+    # Codex CLI 外部入口：codex 通道直接按裸模型名查 OpenAI 刊例价（与 claude-code 同源，
+    # 均命中 MODEL_PRICING；OpenAI 模型单价见 pricing.json 的 codex 估算段）。
+    if channel == "codex":
         p = MODEL_PRICING.get(normalize_model(model_name))
         if not p:
             return (None, None)

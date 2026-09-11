@@ -36,7 +36,8 @@
     "glm47_compare": "https://llm-stats.com/models/compare/glm-4.7-vs-glm-4.7-flash (GLM-4.7 付费 ~$0.60/$2.20 每百万 tokens；GLM-4.7-Flash 免费 ~$0.07/$0.40)",
     "glm46v_cny": "https://finance.eastmoney.com/a/202512083585666118.html (智谱官方报道: GLM-4.6V 多模态 106B-A12B 开源, 官方刊例价 输入1元/输出3元 每百万 tokens, GLM-4.6V-Flash 免费) — 证实 glm-4.6v 真实存在",
     "glm53flash_cny": "https://m.21jingji.com/article/20260828/herald/e8a2a10a2a3f742dc7a2f914f2620c0f.html (2026-08-28 报道引智谱官方: GLM-5.3-Flash 每百万 tokens 输入0.8 / 输出2.8 / 缓存命中输入0.23 元，为 GLM-5.3 的 1/10；上线前两周半价，限时折扣期低至 1/20；OpenRouter z-ai/glm-5.3-flash 国际价 $0.15/$0.50/$0.03)",
-    "hy4_preview": "https://www.cnstock.com/commonDetail/779697 (2026-08-28 腾讯混元 Hy4 preview 发布并开源，已在 WorkBuddy/CodeBuddy 国内版及国际版、元宝、ima 同步首发；官方定价 输入6 / 输出18 / 缓存命中0.3 每百万 tokens；WorkBuddy/CodeBuddy 面向用户开展为期 2 周限时免费活动)"
+    "hy4_preview": "https://www.cnstock.com/commonDetail/779697 (2026-08-28 腾讯混元 Hy4 preview 发布并开源，已在 WorkBuddy/CodeBuddy 国内版及国际版、元宝、ima 同步首发；官方定价 输入6 / 输出18 / 缓存命中0.3 每百万 tokens；WorkBuddy/CodeBuddy 面向用户开展为期 2 周限时免费活动)",
+    "openai_cny": "https://platform.openai.com/docs/pricing (OpenAI 官方美元定价) — Codex 常用模型 gpt-5-codex / gpt-5.1-codex / gpt-5.2-codex / o4-mini / gpt-4o / gpt-4.1 等；本表按其美元刊例价 ×7.2 折 CNY 记录，标注为估算值，待 OpenAI 官方 CNY 定价确认；若你的 Codex 跑其它模型名，请把对应单价加进本机 scripts/pricing.local.json"
   },
   "default_model": "glm-5.2",
   "models": {
@@ -140,6 +141,36 @@
       "input": 5.76,
       "output": 28.8,
       "note": "Haiku 4（2025-05-14）估算值，美元刊例价折算 CNY"
+    },
+    "gpt-5-codex": {
+      "input": 9.0,
+      "output": 72.0,
+      "note": "OpenAI Codex 编程模型（美元 $1.25/$10 per MTok ×7.2 估算；源 _sources.openai_cny）"
+    },
+    "gpt-5.1-codex": {
+      "input": 9.0,
+      "output": 72.0,
+      "note": "OpenAI Codex 编程模型（美元 $1.25/$10 per MTok ×7.2 估算；源 _sources.openai_cny）"
+    },
+    "gpt-5.2-codex": {
+      "input": 9.0,
+      "output": 72.0,
+      "note": "OpenAI Codex 编程模型（美元 $1.25/$10 per MTok ×7.2 估算；源 _sources.openai_cny）"
+    },
+    "o4-mini": {
+      "input": 7.92,
+      "output": 31.68,
+      "note": "OpenAI o4-mini 推理模型（美元 $1.10/$4.40 per MTok ×7.2 估算；源 _sources.openai_cny）"
+    },
+    "gpt-4o": {
+      "input": 18.0,
+      "output": 72.0,
+      "note": "OpenAI GPT-4o（美元 $2.50/$10 per MTok ×7.2 估算；源 _sources.openai_cny）"
+    },
+    "gpt-4.1": {
+      "input": 14.4,
+      "output": 57.6,
+      "note": "OpenAI GPT-4.1（美元 $2.00/$8 per MTok ×7.2 估算；源 _sources.openai_cny）"
     }
   },
   "delisted": {
