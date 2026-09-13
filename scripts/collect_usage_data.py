@@ -330,6 +330,10 @@ def main():
     # 限时免费截止日（来自 pricing.json 的 timed_free），供报告渲染「限时免费至 X」标签，
     # 避免在渲染器里硬编码日期——用户改了 pricing.json 后标签会自动跟随。
     result["meta"]["timed_free"] = dict(TIMED_FREE)
+    # 成本置信度（v1.5.2）：模型名 -> 「静态估算与实际计费存在系统性偏差」的原因。
+    # 供报告把受服务端时段 / 配额减免影响的模型标为低置信度、不参与成本结论。
+    # 同样来自 pricing.json（可用 pricing.local.json 覆盖），渲染层不硬编码。
+    result["meta"]["low_confidence"] = dict(LOW_CONFIDENCE)
     # 是否加载了本地定价覆盖（pricing.local.json），供报告透明提示。
     result["meta"]["pricing_local_loaded"] = bool(_PRICING_LOCAL_LOADED)
     # 档位维度元信息（v1.3.0）：档位估算标记、官方倍率缓存是否生效、最终档位单价表。

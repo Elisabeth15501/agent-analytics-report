@@ -335,12 +335,22 @@ def build_task_type_chart_md(stats, title="各任务类型 实际消耗 Token �
 
 
 # ── 模型使用与成本对比（新章节）────────────────────────────
-def build_model_cost_chart_md(model_stats, title="各模型估算实际花费对比"):
+def _lc_reason(name, low_conf_map):
+    """查模型是否属低置信度（估算与实际计费存在已知系统性偏差），返回原因或空串。"""
+    if not low_conf_map or not name:
+        return ""
+    return low_conf_map.get(name) or low_conf_map.get(str(name).lower()) or ""
+
+
+def build_model_cost_chart_md(model_stats, title="各模型估算实际花费对比", low_conf_map=None):
     """Markdown 横向条形图：各模型估算实际花费对比（与 HTML 条形图对齐）。
 
     用 fenced ``` 代码块承载 ASCII 横向条：查看器按代码块主题自适应明暗，
     且对超长模型名（如 custom-local:GLM-4.5-air）无渲染问题。条形长度按
     最大花费线性映射，行尾标注金额，与 HTML `build_model_cost_chart` 同源。
+
+    v1.5.2：低置信度模型（受服务端时段减免 / 配额影响）在行首标 ⚠，
+    并在图下追加免责脚注，避免用户拿它做预算。
     """
     items = [m for m in model_stats if (m.get("effective_cost", 0) or 0) > 0]
     if not items:
@@ -348,40 +358,62 @@ def build_model_cost_chart_md(model_stats, title="各模型估算实际花费对
     items = sorted(items, key=lambda x: x.get("effective_cost", 0), reverse=True)
     maxc = max(m.get("effective_cost", 0) for m in items) or 1
     bar_w = 32          # ASCII 条最大长度
-    label_w = 28        # 模型名列宽
+    label_w = 28        # 模型名列宽（含 2 字符置信度标记位）
     rows = [f"**{title}**", ""]
+    n_lc = 0
     for m in items:
         c = m.get("effective_cost", 0)
         n = max(int(bar_w * c / maxc), 1)
         bar = "█" * n
-        label = str(m["model"])
+        hit = bool(_lc_reason(m.get("model"), low_conf_map))
+        if hit:
+            n_lc += 1
+        label = ("⚠ " if hit else "  ") + str(m["model"])
         if len(label) > label_w:
             label = label[:label_w - 1] + "…"
         else:
             label = label.ljust(label_w)
         rows.append(f"{label} | {bar} ¥{c:.2f}")
+    if n_lc:
+        rows.append("")
+        rows.append(f"⚠ = 低置信度估算（{n_lc} 个模型存在服务端时段减免 / 配额，"
+                    "估算与实际计费偏差已知较大），不参与成本结论，请勿据此做预算。")
     return "```\n" + "\n".join(rows) + "\n```"
 
 
-def build_model_cost_chart(model_stats, title="各模型估算实际花费对比"):
-    """HTML 内联条形图：各模型估算实际花费对比（仅含已配置单价模型）。"""
+def build_model_cost_chart(model_stats, title="各模型估算实际花费对比", low_conf_map=None):
+    """HTML 内联条形图：各模型估算实际花费对比（仅含已配置单价模型）。
+
+    v1.5.2：低置信度模型标 ⚠ 并附 title 提示，图下追加免责脚注。
+    """
     items = [m for m in model_stats if (m.get("effective_cost", 0) or 0) > 0]
     if not items:
         return ""
     items = sorted(items, key=lambda x: x.get("effective_cost", 0), reverse=True)
     maxc = max(m.get("effective_cost", 0) for m in items) or 1
     rows = []
+    n_lc = 0
     for m in items:
         c = m.get("effective_cost", 0)
         w = max(int(220 * c / maxc), 1)
+        reason = _lc_reason(m.get("model"), low_conf_map)
+        if reason:
+            n_lc += 1
+        tip = _esc(reason or str(m["model"]))
+        mark = f'<span class="lc-flag" title="{tip}">⚠</span>' if reason else ""
         rows.append(
-            f'        <div class="bar-row"><span class="bar-label" title="{m["model"]}">{m["model"]}</span>'
+            f'        <div class="bar-row"><span class="bar-label" title="{m["model"]}">{mark}{m["model"]}</span>'
             f'<span class="bar-track"><span class="bar-fill" style="width:{w}px"></span></span>'
             f'<span class="bar-val">¥{c:.2f}</span></div>'
         )
+    foot = ""
+    if n_lc:
+        foot = (f'\n      <p class="lc-note">⚠ = 低置信度估算（{n_lc} 个模型存在服务端时段减免 / 配额，'
+                '估算与实际计费偏差已知较大），不参与成本结论，请勿据此做预算。</p>')
     return (
         f'    <div class="chart-bars">\n      <p><strong>{title}</strong></p>\n'
         + "\n".join(rows)
+        + foot
         + "\n    </div>"
     )
 
@@ -423,12 +455,16 @@ def merge_glm52_family(model_stats):
     return model_stats
 
 
-def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_free_map=None, compact=False):
+def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_free_map=None, compact=False,
+                       low_conf_map=None):
     """单一维度模型表格 + 洞察（MD / HTML 共用同一套数据计算，仅渲染层不同）。
 
     compact=True 时仅渲染「模型 / 调用次数 / 实际消耗Token」三列（用于本地模型使用统计，
     因本地推理零成本，单价/花费/占比列无意义）。
     GLM-5.2 家族合并已在调用方通过 merge_glm52_family() 完成。
+
+    v1.5.2：low_conf_map 为「成本置信度」配置（模型名 -> 偏差原因）。命中的模型在
+    表格里加 ⚠ 标记并在表下说明，且**不参与「最贵模型」结论**（避免拿估算做决策）。
     """
     configured = [m for m in model_stats if m.get("configured")]
     # 实际产生计费的行（含未配置单价的 auto 路由，其成本来自 trace 级汇总）——用于占比分母与图表
@@ -457,6 +493,11 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
             mname = f"{m['model']}（未解析具体模型）"
         elif m.get("timed_free"):
             mname = f"{m['model']}{_timed_free_label(m['model'], timed_free_map)}"
+        # v1.5.2：低置信度（估算与实际计费存在已知系统性偏差）——与限免标记可共存
+        _lc = _lc_reason(m["model"], low_conf_map)
+        if _lc:
+            _lc_mark = ' <span class="lc-flag" title="低置信度估算">⚠</span>' if fmt == "html" else " ⚠"
+            mname = f"{mname}{_lc_mark}"
         eff = m.get("effective_cost", 0) or 0.0
         is_free = cfg and m.get("unit_price_input") == 0 and m.get("unit_price_output") == 0
         if m.get("timed_free"):
@@ -516,36 +557,76 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
     if any(m.get("is_router_api") for m in model_stats):
         out.extend(_emit_note("🔀 = 智能路由 / 聚合网关（外部 API，如 OpenRouter 免费档、Groq 等）：一次调用可能落到不同底层模型或上游 host，"
                                "单价 / 花费为粗略参考，实际账单请往对应接口查看。", fmt))
+    # v1.5.2：低置信度说明（只有本期真的命中时才出现，避免噪音）
+    _lc_hits = {m["model"]: _lc_reason(m["model"], low_conf_map) for m in model_stats}
+    _lc_hits = {k: v for k, v in _lc_hits.items() if v}
+    if _lc_hits:
+        out.extend(_emit_note("⚠ = **低置信度估算**：该模型存在服务端时段减免 / 用户配额，静态价表无法表达，"
+                              "估算与实际计费偏差已知较大；**不参与「最贵模型」结论，请勿据此做预算或对账**。", fmt))
+        for _n, _r in sorted(_lc_hits.items()):
+            out.extend(_emit_note(f"　　`{_n}`：{_r}", fmt))
     # 洞察（🏆 最常使用 / 💸 最贵）——MD 与 HTML 结构不同
     if fmt == "md":
         if model_stats:
             top_calls = max(model_stats, key=lambda x: x["calls"])
             out.append(f"> 🏆 **最常使用模型**：`{top_calls['model']}` —— 调用 {top_calls['calls']} 次。")
         if priced:
-            concrete = [m for m in priced if not m.get("is_router")]
+            # v1.5.2：低置信度模型不参与「最贵模型」结论（估算偏差已知较大）
+            concrete = [m for m in priced
+                        if not m.get("is_router") and not _lc_reason(m["model"], low_conf_map)]
+            if not concrete and priced:
+                concrete = [m for m in priced if not m.get("is_router")]
             top_cost = max(concrete or priced, key=lambda x: x.get("effective_cost", 0))
             share = top_cost.get("effective_cost", 0) / total_billable * 100 if total_billable else 0
-            out.append(f"> 💸 **最贵模型**（按花费，不含路由别名）：`{top_cost['model']}` —— 估算花费 ¥{top_cost.get('effective_cost', 0):.2f}，"
+            # 仅当本期真的存在低置信度模型时才在标题里提它，避免无配置时的无谓噪音
+            _lc_suffix = "与 ⚠ 低置信度模型" if any(_lc_reason(m["model"], low_conf_map) for m in priced) else ""
+            out.append(f"> 💸 **最贵模型**（按花费，不含路由别名{_lc_suffix}）：`{top_cost['model']}` —— 估算花费 ¥{top_cost.get('effective_cost', 0):.2f}，"
                        f"占总花费 {share:.1f}%。")
+            # 被剔除的低置信度模型不得悄悄消失：逐条列出金额，避免用一个误导替换另一个
+            _skipped = sorted((m for m in priced
+                               if _lc_reason(m["model"], low_conf_map)
+                               and m is not top_cost),
+                              key=lambda x: x.get("effective_cost", 0), reverse=True)
+            if _skipped:
+                _sk = "、".join(f"`{m['model']}` ¥{m.get('effective_cost', 0):.2f}" for m in _skipped)
+                out.append(f"> ⚠ 未计入本结论的低置信度模型：{_sk} —— 估算偏差已知较大，不代表真实支出（见报告顶部「成本口径」）。")
         elif configured:
             out.append("> 💸 当前已配置单价的模型均为免费模型（花费 ¥0.00）；填入付费模型单价后此处显示最贵模型。")
         out.append("")
     else:
         if configured:
-            chart = build_model_cost_chart(configured)
+            chart = build_model_cost_chart(configured, low_conf_map=low_conf_map)
             if chart:
                 out.append(chart)
             top_calls = max(model_stats, key=lambda x: x["calls"])
             if priced:
-                concrete = [m for m in priced if not m.get("is_router")]
+                # v1.5.2：低置信度模型不参与「最贵模型」结论
+                concrete = [m for m in priced
+                            if not m.get("is_router") and not _lc_reason(m["model"], low_conf_map)]
+                if not concrete and priced:
+                    concrete = [m for m in priced if not m.get("is_router")]
                 top_cost = max(concrete or priced, key=lambda x: x.get("effective_cost", 0))
                 share = top_cost.get("effective_cost", 0) / total_billable * 100 if total_billable else 0
+                _lc_note = (' ⚠<span class="lc-note">（低置信度估算，仅供参考）</span>'
+                            if _lc_reason(top_cost["model"], low_conf_map) else "")
+                _lc_suffix = ("与 ⚠ 低置信度模型"
+                              if any(_lc_reason(m["model"], low_conf_map) for m in priced) else "")
                 out.append(
                     f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
                     f'（调用 {top_calls["calls"]} 次）；'
-                    f'💸 <strong>最贵模型</strong>（按花费，不含路由别名）：<code>{_esc(top_cost["model"])}</code>'
+                    f'💸 <strong>最贵模型</strong>（按花费，不含路由别名{_lc_suffix}）：'
+                    f'<code>{_esc(top_cost["model"])}</code>'
                     f'（估算 ¥{top_cost.get("effective_cost", 0):.2f}，占 {share:.1f}%）。</p>'
                 )
+                _skipped = sorted((m for m in priced
+                                   if _lc_reason(m["model"], low_conf_map)
+                                   and m is not top_cost),
+                                  key=lambda x: x.get("effective_cost", 0), reverse=True)
+                if _skipped:
+                    _sk = "、".join(f'<code>{_esc(m["model"])}</code> ¥{m.get("effective_cost", 0):.2f}'
+                                    for m in _skipped)
+                    out.append(f'        <p class="disclaimer">⚠ 未计入本结论的低置信度模型：{_sk}'
+                               ' —— 估算偏差已知较大，不代表真实支出（见报告顶部「成本口径」）。</p>')
             else:
                 out.append(
                     f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(top_calls["model"])}</code>'
@@ -572,6 +653,7 @@ def build_model_section_md(data):
     lines.append("- **3.2 按入口 / 配置模型（使用维度）**：按你配置的入口 / 通道（如 `auto` 路由、`hy3`、`custom-local`）聚合，反映你实际请求 / 配置了哪些入口、各多少次——属「使用分布」而非「账单」；本维度总额不代表真实账单，且不可与 3.1 相加。")
     lines.append("")
     tf_map = meta.get("timed_free", {}) or {}
+    lc_map = meta.get("low_confidence", {}) or {}
     if tf_map:
         _tf_txt = "、".join(f"`{k}`（至 **{v}**）" for k, v in sorted(tf_map.items()))
         lines.append(f"> 🎁 **限时免费**：{_tf_txt} 在限免活动期间免费，相关调用花费记为 ¥0.00；"
@@ -586,8 +668,8 @@ def build_model_section_md(data):
     lines.append("> 备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 `glm-5.2` 的花费中。")
     lines.append("")
     model_stats = merge_glm52_family(model_stats)
-    lines += _build_model_block("md", model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map)
-    chart = build_model_cost_chart_md([m for m in model_stats if m.get("configured")])
+    lines += _build_model_block("md", model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map, low_conf_map=lc_map)
+    chart = build_model_cost_chart_md([m for m in model_stats if m.get("configured")], low_conf_map=lc_map)
     if chart:
         lines.append(chart)
         lines.append("")
@@ -606,24 +688,24 @@ def build_model_section_md(data):
         if official_exec:
             lines.append("#### 3.2.1 官方 / 网关入口模型")
             lines.append("")
-            lines += _build_model_block("md", official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map)
-            chart2 = build_model_cost_chart_md([m for m in official_exec if m.get("configured")])
+            lines += _build_model_block("md", official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map)
+            chart2 = build_model_cost_chart_md([m for m in official_exec if m.get("configured")], low_conf_map=lc_map)
             if chart2:
                 lines.append(chart2)
                 lines.append("")
         if local_exec:
             lines.append("#### 3.2.2 本地模型（Ollama 本地推理）🔧🏠")
             lines.append("")
-            lines += _build_model_block("md", local_exec, "本地模型维度明细", is_exec=True, timed_free_map=tf_map, compact=True)
-            chart3 = build_model_cost_chart_md([m for m in local_exec if m.get("configured")])
+            lines += _build_model_block("md", local_exec, "本地模型维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, compact=True)
+            chart3 = build_model_cost_chart_md([m for m in local_exec if m.get("configured")], low_conf_map=lc_map)
             if chart3:
                 lines.append(chart3)
                 lines.append("")
         if external_exec:
             lines.append("#### 3.2.3 外部 API 接口接入模型 🔧")
             lines.append("")
-            lines += _build_model_block("md", external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map)
-            chart4 = build_model_cost_chart_md([m for m in external_exec if m.get("configured")])
+            lines += _build_model_block("md", external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map)
+            chart4 = build_model_cost_chart_md([m for m in external_exec if m.get("configured")], low_conf_map=lc_map)
             if chart4:
                 lines.append(chart4)
                 lines.append("")
@@ -810,9 +892,10 @@ def build_tier_section(fmt, data):
     return out
 
 
-def _build_model_block_html(model_stats, is_exec=False, timed_free_map=None, compact=False):
+def _build_model_block_html(model_stats, is_exec=False, timed_free_map=None, compact=False, low_conf_map=None):
     """MD / HTML 合并实现见 _build_model_block(fmt, ...)；本函数仅作 HTML 入口薄封装。"""
-    return _build_model_block("html", model_stats, is_exec=is_exec, timed_free_map=timed_free_map, compact=compact)
+    return _build_model_block("html", model_stats, is_exec=is_exec, timed_free_map=timed_free_map,
+                              compact=compact, low_conf_map=low_conf_map)
 
 
 def build_model_section_html(data):
@@ -823,6 +906,7 @@ def build_model_section_html(data):
     if not model_stats and not exec_stats:
         return []
     tf_map = meta.get("timed_free", {}) or {}
+    lc_map = meta.get("low_confidence", {}) or {}
     lines = []
     lines.append('    <div class="section">')
     lines.append('        <h2 class="section-title">三、模型使用与成本对比</h2>')
@@ -837,7 +921,7 @@ def build_model_section_html(data):
     lines.append('        <h3>3.1 按实际计费模型（账单口径）</h3>')
     lines.append('        <p class="disclaimer">备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 <code>glm-5.2</code> 的花费中。</p>')
     model_stats = merge_glm52_family(model_stats)
-    lines += _build_model_block_html(model_stats, timed_free_map=tf_map)
+    lines += _build_model_block_html(model_stats, timed_free_map=tf_map, low_conf_map=lc_map)
     lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。'
                  '3.1 各模型花费合计 = 报告概览「实际成本（计费等效）」总额。</p>')
     lines.append('        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>')
@@ -851,13 +935,13 @@ def build_model_section_html(data):
         external_exec = [m for m in exec_stats if m.get("is_custom") and not m.get("is_local")]
         if official_exec:
             lines.append('        <h4>3.2.1 官方 / 网关入口模型</h4>')
-            lines += _build_model_block_html(official_exec, is_exec=True, timed_free_map=tf_map)
+            lines += _build_model_block_html(official_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map)
         if local_exec:
             lines.append('        <h4>3.2.2 本地模型（Ollama 本地推理）🔧🏠</h4>')
-            lines += _build_model_block_html(local_exec, is_exec=True, timed_free_map=tf_map, compact=True)
+            lines += _build_model_block_html(local_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, compact=True)
         if external_exec:
             lines.append('        <h4>3.2.3 外部 API 接口接入模型 🔧</h4>')
-            lines += _build_model_block_html(external_exec, is_exec=True, timed_free_map=tf_map)
+            lines += _build_model_block_html(external_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map)
     else:
         lines.append('        <p>（本期无模型调用数据）</p>')
     lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>')
@@ -995,6 +1079,7 @@ def generate_markdown_report(data):
     lines.append(f"> **生成时间**：{_fmt_generated_at()}")
     lines.append(f"> **数据来源**：WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置")
     lines.append("")
+    lines += _cost_confidence_banner_md(data)
 
     # 一、概览统计
     lines.append("## 一、概览统计")
@@ -1779,6 +1864,91 @@ def _free_period_disclaimer(fmt, data):
     ]
 
 
+# —— 成本置信度（v1.5.2）——
+# 背景：静态价表（pricing.json）在数学上无法表达「服务端时段减免 / 用户免费额度」，
+# 导致部分模型（如 hy4-preview 夜间免费）的估算严重高于实际账单。
+# 对策不是让价表变准（做不到），而是让报告**明确告诉用户你在看哪一级**：
+#   L1 真值 —— 导入官方用量导出后的「积分」字段
+#   L2 估算 —— 未导入（默认路径），静态价表推算，仅供参考
+_COST_SOURCE_LABEL = {
+    "official": ("L1 真值", "✅"),
+    "estimate": ("L2 估算", "⚠️"),
+}
+
+
+def _low_conf_map(data):
+    """本期 meta 里的成本置信度配置：模型名 -> 偏差原因。"""
+    return (data.get("meta", {}) or {}).get("low_confidence", {}) or {}
+
+
+def _low_conf_hits(data):
+    """本期实际出现、且被标为低置信度的模型 -> 原因（按模型名排序）。"""
+    lc = _low_conf_map(data)
+    if not lc:
+        return {}
+    hits = {}
+    for m in (data.get("model_stats") or []) + (data.get("model_exec_stats") or []):
+        name = (m.get("model") or "").strip()
+        if not name or (m.get("calls", 0) or 0) <= 0:
+            continue
+        reason = lc.get(name) or lc.get(name.lower())
+        if reason:
+            hits.setdefault(name, reason)
+    return dict(sorted(hits.items()))
+
+
+def _cost_confidence_banner(fmt, data):
+    """成本口径横幅（v1.5.2）：默认 L2 估算；导入官方导出后自动切 L1 真值。"""
+    meta = data.get("meta", {}) or {}
+    src = str(meta.get("cost_source") or "estimate").lower()
+    label, icon = _COST_SOURCE_LABEL.get(src, _COST_SOURCE_LABEL["estimate"])
+    is_est = src != "official"
+    hits = _low_conf_hits(data)
+
+    if fmt == "md":
+        lines = [f"> {icon} **成本口径：{label}**"
+                 + ("（未导入官方用量导出）" if is_est else "（已导入官方用量导出，成本取「积分」字段）")]
+        if is_est:
+            lines += [
+                ">",
+                "> 成本 = `pricing.json` 静态单价 × token 量**估算**，不含服务端时段减免 / 用户免费额度；"
+                "图像模型等本地 trace 盲区也无法覆盖（实测漏记约 8.7%）。**请勿据此做预算或账单对账。**",
+            ]
+        if hits:
+            lines.append(">")
+            lines.append("> **低置信度模型（估算偏差已知较大，不参与成本结论）**：")
+            for name, reason in hits.items():
+                lines.append(f"> - `{name}` —— {reason}")
+            if is_est:
+                lines.append(">")
+                lines.append("> 取真值：导入官方用量导出后本横幅自动切换为 L1（v1.6.0 起支持）。")
+        lines.append("")
+        return lines
+
+    rows = [f'            <b>{icon} 成本口径：{label}</b>'
+            + ("（未导入官方用量导出）" if is_est else "（已导入官方用量导出，成本取「积分」字段）")]
+    if is_est:
+        rows.append('<p>成本 = <code>pricing.json</code> 静态单价 × token 量<b>估算</b>，'
+                    '不含服务端时段减免 / 用户免费额度；图像模型等本地 trace 盲区也无法覆盖'
+                    '（实测漏记约 8.7%）。<b>请勿据此做预算或账单对账。</b></p>')
+    if hits:
+        rows.append('<p><b>低置信度模型（估算偏差已知较大，不参与成本结论）：</b></p><ul>')
+        for name, reason in hits.items():
+            rows.append(f'            <li><code>{_esc(name)}</code> —— {_esc(reason)}</li>')
+        rows.append('        </ul>')
+        if is_est:
+            rows.append('<p>取真值：导入官方用量导出后本横幅自动切换为 L1（v1.6.0 起支持）。</p>')
+    return ['        <div class="disclaimer-box">'] + rows + ['        </div>']
+
+
+def _cost_confidence_banner_md(data):
+    return _cost_confidence_banner("md", data)
+
+
+def _cost_confidence_banner_html(data):
+    return _cost_confidence_banner("html", data)
+
+
 def _free_period_disclaimer_md(data):
     return _free_period_disclaimer("md", data)
 
@@ -2134,6 +2304,12 @@ def generate_html_report(data):
         .warn-box { color: var(--disclaimer-fg); background: var(--disclaimer-bg); border: 1px solid var(--disclaimer-border); border-left: 4px solid var(--disclaimer-border); padding: 10px 14px; border-radius: 6px; margin: 12px 0; font-size: 13px; }
         .disclaimer-box { color: var(--disclaimer-fg); background: var(--disclaimer-bg); border: 1px solid var(--disclaimer-border); border-left: 4px solid var(--disclaimer-border); padding: 10px 14px; border-radius: 6px; margin: 12px 0; font-size: 13px; }
         .disclaimer-box p { margin: 6px 0 0; }
+        .disclaimer-box ul { margin: 6px 0 0; padding-left: 20px; }
+        .disclaimer-box li { margin: 4px 0; }
+        /* v1.5.2 成本置信度：低置信度估算标记 */
+        .lc-flag { margin-right: 4px; cursor: help; }
+        .lc-note { color: var(--disclaimer-fg); font-size: 12px; }
+        .chart-bars .lc-note { margin: 8px 0 0; }
         a { color: var(--link); }
         /* 主题切换控件 */
         .theme-toggle { display: inline-flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
@@ -2175,6 +2351,7 @@ def generate_html_report(data):
     lines.append('            <button type="button" data-set-theme="system">🖥 系统</button>')
     lines.append('        </div>')
     lines.append("    </div>")
+    lines += _cost_confidence_banner_html(data)
 
     # 一、概览统计
     lines.append('    <div class="section">')

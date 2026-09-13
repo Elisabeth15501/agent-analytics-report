@@ -6,6 +6,8 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.5.2** | 2026-09-14 | 成本置信度（L1 真值 / L2 估算）· 低置信度模型标注 | [tag/v1.5.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.2) |
+| **v1.5.1** | 2026-09-12 | 定价数据刷新（DeepSeek V4.1-Flash 峰谷双档 · V4-Flash 下架 · Hy4 限免新规） | [tag/v1.5.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.1) |
 | **v1.5.0** | 2026-09-07 | 任务分类加权评分（P2-3）· 定价自动更新（P2-2）· P0 数据完整性修复 | [tag/v1.5.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.0) |
 | **v1.4.0** | 2026-09-06 | 多 Agent 数据源（Claude Code 适配器 MVP，P2-1） | [tag/v1.4.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.4.0) |
 | **v1.3.0** | 2026-09-02 | 档位维度分析 · 模块拆分重构 · 孤儿 trace 修复 | [tag/v1.3.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.3.0) |
@@ -15,6 +17,27 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.1.2** | 2026-08-12 | SkillHub 重新发布修正 | [tag/v1.1.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.2) |
 | **v1.1.1** | 2026-08-11 | 日历对齐周期 · XSS 防护 | [tag/v1.1.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.1) |
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
+
+---
+
+## v1.5.2 — 2026-09-14
+
+**成本置信度：让报告明确告诉用户「你在看哪一级成本」**
+
+用官方用量导出对标后发现：静态价表无法表达「服务端时段减免 / 用户免费额度」。
+最典型的是 `hy4-preview` —— 实测 2026-09-12~09-14 的 12 次调用中，**11 次夜间调用积分为 0、
+仅 1 次白天收 43.40**，而静态价表会把 12 次全部计成收费。
+
+- 🏷️ **成本两级制**：`L1 真值`（导入官方导出取「积分」）/ `L2 估算`（默认，静态价表）。报告顶部新增**成本口径横幅**。
+- 📋 **新增 `pricing.json` 的 `low_confidence` 段**：登记估算偏差已知较大的模型及原因（首版含 `hy4-preview`、`hy4-preview-x`、`deepseek-v4.1-flash`、`glm-5.3`、`glm-5.3-flash`），可直接编辑或用 `pricing.local.json` 覆盖。
+- ⚠️ **低置信度标注**：模型表与成本图表标 ⚠ 并说明原因；这些模型不进「最贵模型」结论，
+  但**被剔除者逐条列出金额**——不允许用一个误导替换另一个误导。
+- 🔇 **零噪音**：未配置或本期未命中时不新增任何标记；不传 `low_conf_map` 时行为与 v1.5.1 完全一致。
+- 🧪 **450 用例全绿**（新增 `tests/test_cost_confidence.py` 9 用例）。
+- 🔗 [GitHub Release v1.5.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.2)
+
+> 下一步（v1.6.0）：F17 双源对账正式落地 —— `--import-official <xlsx>` 只读导入官方导出，
+> 届时本横幅自动切换为 L1 真值。
 
 ---
 

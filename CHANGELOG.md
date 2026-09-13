@@ -2,6 +2,43 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.5.2] — 2026-09-14
+
+### ⚠️ 成本置信度（核心：修正**默认路径**的可信度）
+
+**背景**：用官方用量导出对标后发现，静态价表（`pricing.json`）在数学上**无法表达**「服务端时段减免 / 用户免费额度」，
+导致部分模型的估算严重偏离真实账单。最典型的是 `hy4-preview`：实测 2026-09-12~09-14 共 12 次调用中
+**11 次夜间调用积分为 0、仅 1 次白天收 43.40**，而静态价表会把 12 次全部计成收费。
+
+**对策不是让价表变准（做不到），而是让报告明确告诉用户「你在看哪一级」**：
+
+- **成本两级制**：`L1 真值`（导入官方用量导出后取「积分」字段）/ `L2 估算`（默认路径，静态价表推算）。
+  报告顶部新增**成本口径横幅**，L2 下显式警告「不含服务端时段减免 / 用户免费额度，请勿据此做预算或账单对账」。
+- **新增 `pricing.json` 的 `low_confidence` 段**：登记「估算与实际计费存在已知系统性偏差」的模型及原因
+  （首版含 `hy4-preview`、`hy4-preview-x`、`deepseek-v4.1-flash`、`glm-5.3`、`glm-5.3-flash`）。
+  用户可直接编辑，无需改 Python；也可用 `pricing.local.json` 覆盖。
+- **低置信度标记**：命中的模型在模型表与成本图表里标 ⚠，并附原因说明。
+- **不进「最贵模型」结论**：低置信度模型被剔除，但**被剔除者必须逐条列出金额**
+  （避免出现「用一个新的误导替换旧的误导」——若直接删掉，图上最大的成本项会悄悄消失）。
+- 无 `low_confidence` 配置（或本期未命中）时**零噪音**：不新增任何标记。
+
+### 🔧 工程
+
+- `ca_core.py`：新增 `LOW_CONFIDENCE` + `low_confidence_reason()`；`_load_pricing_config()` 支持从
+  `pricing.json` / `pricing.local.json` 加载与覆盖。
+- `collect_usage_data.py`：`meta.low_confidence` 透传（渲染层不硬编码）。
+- `generate_report.py`：新增 `_cost_confidence_banner()` / `_lc_reason()`，MD 与 HTML 同步渲染；
+  补 `.lc-flag` / `.lc-note` 样式。
+- 版本 1.5.1 → 1.5.2（同步 5 处：SKILL.md / config.json / metadata.json / CHANGELOG.md / releases.md）。
+
+### 🧪 测试
+
+- 新增 `tests/test_cost_confidence.py`（9 用例）：定价段加载、采集层透传、MD/HTML 横幅、
+  L1 切换契约、图表 ⚠ 标记、**剔除项必须披露**、无配置零噪音、不传 map 时行为不变。
+- 测试规模：**450 用例全绿**（441 → 450）。
+
+---
+
 ## [1.5.1] — 2026-09-12
 
 ### 🔄 定价数据刷新（DeepSeek 换代 + Hy4 限免新规）

@@ -23,11 +23,18 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
-__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'load_task_rules', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
+__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'load_task_rules', 'low_confidence_reason', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
 TIMED_FREE = {
     # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
     # 以 pricing.json 的 timed_free 段为准（权威源）。
     "hy3": "2026-09-30",
+}
+
+LOW_CONFIDENCE = {
+    # 兜底种子值（通常为空）；运行时由 pricing.json 的 low_confidence 段覆盖（权威源）。
+    # 语义：该模型的「静态单价 × token」估算与实际计费存在**已知系统性偏差**
+    # （服务端时段减免 / 用户配额，静态价表无法表达），报告应标为低置信度、不参与成本结论。
+    # 键为模型名，值为给用户看的原因说明。
 }
 
 MODEL_PRICING = {
@@ -246,6 +253,7 @@ def _load_pricing_config():
     cfg = {
         "models": dict(MODEL_PRICING),
         "timed_free": dict(TIMED_FREE),
+        "low_confidence": dict(LOW_CONFIDENCE),
         "custom_local": dict(CUSTOM_LOCAL_PRICING),
         "default_model": DEFAULT_MODEL,
         "delisted_models": set(),
@@ -262,6 +270,12 @@ def _load_pricing_config():
                 cfg["models"].update(data["models"])
             if isinstance(data.get("timed_free"), dict):
                 cfg["timed_free"].update(data["timed_free"])
+            if isinstance(data.get("low_confidence"), dict):
+                # 成本置信度（v1.5.2）：模型名 -> 偏差原因说明；跳过 _comment 等元数据键
+                cfg["low_confidence"].update(
+                    {normalize_model(k): str(v) for k, v in data["low_confidence"].items()
+                     if not str(k).startswith("_")}
+                )
             if isinstance(data.get("delisted"), dict):
                 # 已下架的官方模型：仍并入 models 以便历史调用计价，并记录到下架集合供报告标注
                 cfg["models"].update(data["delisted"])
@@ -302,6 +316,11 @@ def _load_pricing_config():
                 cfg["user_custom_models"].update(normalize_model(x) for x in local["user_custom_models"])
             if isinstance(local.get("timed_free"), dict):
                 cfg["timed_free"].update(local["timed_free"])
+            if isinstance(local.get("low_confidence"), dict):
+                cfg["low_confidence"].update(
+                    {normalize_model(k): str(v) for k, v in local["low_confidence"].items()
+                     if not str(k).startswith("_")}
+                )
             if isinstance(local.get("display_merge"), dict):
                 cfg["display_merge"].update(
                     {normalize_model(k): str(v) for k, v in local["display_merge"].items()
@@ -349,6 +368,9 @@ _PRICING, _PRICING_LOCAL_LOADED = _load_pricing_config()
 MODEL_PRICING = _PRICING["models"]
 
 TIMED_FREE = _PRICING["timed_free"]
+
+# 成本置信度（v1.5.2）：模型名 -> 偏差原因说明。为空表示该模型估算可信。
+LOW_CONFIDENCE = _PRICING["low_confidence"]
 
 CUSTOM_LOCAL_PRICING = _PRICING["custom_local"]
 
@@ -470,6 +492,17 @@ def is_timed_free(model_name, as_of_date):
         return False
     deadline = TIMED_FREE.get(normalize_model(model_name))
     return bool(deadline) and as_of_date <= deadline
+
+def low_confidence_reason(model_name):
+    """返回该模型「成本估算不可信」的原因说明；可信则返回空字符串。
+
+    v1.5.2：用于报告把受服务端时段 / 配额减免影响的模型标为「低置信度」，
+    并提示用户不要据此做预算。数据源为 pricing.json 的 low_confidence 段
+    （可用 pricing.local.json 覆盖）。
+    """
+    if not model_name:
+        return ""
+    return LOW_CONFIDENCE.get(normalize_model(model_name), "") or ""
 
 def price_of(model_name, channel=None, as_of_date=None):
     """返回 (input_per_million, output_per_million) 元；未配置 / 未知返回 (None, None)。
