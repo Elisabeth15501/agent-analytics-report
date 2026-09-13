@@ -13,8 +13,17 @@
 | Claude Code | `claude-code` | ✅ | `~/.claude/projects/**/*.jsonl` |
 | Trae / 千问办公 | — | ⬜ 未实现 | — |
 
+**对账源**（叠加在 WorkBuddy 之上，把成本从估算升级为真值）：
+
+| 对账源 | 参数 | 状态 | 读取位置 |
+|---|---|---|---|
+| 官方用量导出 | `--import-official <xlsx>` | ✅ v1.6.0 | 官网下载的 `request-usage-*.xlsx`（纯本地只读解析） |
+
 - **WorkBuddy**：完整能力，含技能调用、自动化运行、任务分类；
 - **Claude Code**：解析会话日志的 token / 成本 / 任务类型 / 每日趋势，无技能与自动化维度（JSONL 里没有这两类数据）。
+- **官方用量导出**：本地 trace 的成本是**估算**（静态价表无法表达服务端时段减免，且漏记图像模型 / minimax-m3 约 8.7%）。
+  导入官方导出后成本取「积分」字段，升为 **L1 真值**，报告新增 §3.5 双源对账。详见
+  [ADAPTERS.md](ADAPTERS.md) §二 / §四。
 - 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含 GLM-5.3 / GLM-5.3-Flash / Hy4 preview 等），以及 Claude 系列模型的**人民币折算估算价**（以 Anthropic 美元刊例价为准，可用 `pricing.local.json` 覆盖）；
 - 升级机制依赖 `skillhub upgrade`。
 
@@ -85,6 +94,7 @@ CLAUDE_PROJECTS_DIR=/path/to/projects \
 | **L3 CLI 端到端** | `test_e2e_cli.py` | 黑盒 subprocess 跑通报告生成三格式、CLI 参数校验、恶意模型名 XSS 回归 |
 | **L4 发布一致性** | `test_publish_parity.py` | `config.json` / `metadata.json` 版本对齐、交付物齐全、`.gitignore` 闸门（敏感产物不进包） |
 | **L0 适配器** | `test_claude_code_adapter.py` | Claude Code JSONL 解析、日期窗口过滤、缓存折扣与成本、坏行健壮性、会话派生与任务分类、`--source claude-code` CLI 黑盒（fixture 走 `CLAUDE_PROJECTS_DIR`，不读真实目录） |
+| **L0 官方导出** | `test_official_usage.py` | xlsx 纯标准库解析（明文/共享串/inlineStr/日期序列）、**按表头名映射（新版 6 列不取 Prompt 的回归门禁）**、缺列报错、聚合与免费判定、双源对账、`--import-official` CLI 端到端（USERPROFILE 隔离）、零回归、L1/L2 渲染与脏数据回落 |
 | **L0 任务分类** | `test_task_classification.py` | 加权评分取代首匹配、词边界（fix≠prefix）、信号密度取胜、置信度、task_rules.json 外置与回退、LLM 分类器 mock 全路径、collect_task_types 独立可调用（v1.3.0 拆分漏导入回归） |
 | **L0 定价更新** | `test_fetch_pricing.py` | 条目校验（schema/负数/倍率）、候选与 diff 产出、--apply 备份落盘、过期检查退出码、`FETCH_PRICING_ROOT` 隔离黑盒 |
 | 既有 | `test_channel_attribution.py` · `test_session_labeling.py` | 通道归因、跨窗口会话补全、孤儿 trace 合并、任务类型标签正确性 |

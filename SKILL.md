@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.5.2
+version: 1.6.0
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy 与 Claude Code 两种数据源（--source 切换）。
@@ -93,6 +93,7 @@ python scripts/generate_report.py data.json --output ClaudeCode_周报.html --fo
 
 - 三个脚本（`collect_usage_data.py` / `generate_report.py` / `analyze_tokens.py`）均支持上述参数；优先级：**绝对日期 > `--days` > `--period`**。
 - `--task-classifier heuristic|llm`：任务分类器切换（见「任务类型判定」节）。LLM 模式需自备 OpenAI 兼容端点，如 `--task-llm-endpoint http://localhost:11434/v1 --task-llm-model qwen2.5:7b`。
+- `--import-official <xlsx>`（v1.6.0 / F17）：导入官方用量导出作为**成本真值**。详见「成本口径（L1 真值 / L2 估算）」节。纯本地只读解析，不联网、不上传；仅 `--source workbuddy` 可用。
 - 报告内所有"本期/下期"措辞仍随周期自适应（日报→当日/次日，周报→本周/下周，月报→本月/下月，年报→本年/明年）。
 - 想生成「某年 / 某月的年报 / 月报」但用 `--period` 是**滚动窗口**（会跨年 / 跨月）：推荐改用 `--start/--end` 绝对日期，采集器会自动识别为对应周期类型——例如 `--start 2026-01-01 --end 2026-08-03` → `年报 · 2026年`（年初至今）；`--start 2026-07-01 --end 2026-07-31` → `月报 · 2026年7月`。整年（1/1~12/31）也同样识别为年报。
 - 原有 `--days`（仅滚动天数）仍完全兼容。
@@ -180,6 +181,46 @@ python scripts/generate_report.py data.json --output ClaudeCode_周报.html --fo
 > 数据校验：`totalTokens ≈ input + output`（cached 是 input 子集）在 150+ 条 trace 中稳定成立（仅个别四舍五入误差），故上述折算可靠。
 
 字段映射（`traces` / `summary` / `task_token_stats` / `top_tasks` 均含）：`total_tokens`（原始）、`effective_tokens`（实际消耗）、`cached_tokens`、`effective_cost`（实际成本）、`cache_rate`（总体缓存占比）。
+
+## 成本口径：L1 真值 / L2 估算（v1.6.0 / F17）
+
+报告的成本数字有**两个可信度级别**，报告顶部横幅会明确标注当前是哪一级：
+
+| 级别 | 触发条件 | 成本来源 | 横幅 |
+|---|---|---|---|
+| **L1 真值** | 传入 `--import-official <xlsx>` | 官方用量导出的「积分消耗」字段（服务端实际计费结果） | ✅ 显示官方请求数 / 积分 / 免费次数 |
+| **L2 估算** | 未传（**默认**） | `pricing.json` 静态单价 × token 量 | ⚠️ 警告「不含服务端时段减免，请勿据此做预算或账单对账」 |
+
+**为什么默认路径的钱不可信**：静态价表在数学上**无法表达**「服务端时段减免 / 用户免费额度」。
+实测 `hy4-preview` 在 2026-09-12~09-14 的 12 次调用中，**11 次夜间调用积分 = 0、仅 1 次白天收 43.40**，
+而静态价表会把 12 次全部计成收费。另有一类**盲区**——图像模型（`hunyuan-image-*`）与 `minimax-m3`
+根本不进本地 trace，30 日窗口实测漏记 ¥251.74（8.7%）。
+
+**怎么办**：
+
+```bash
+# 官网下载用量导出后，加一个参数即可把成本升级为真值
+python scripts/collect_usage_data.py --start 2026-09-12 --end 2026-09-14 \
+  --import-official ~/Downloads/request-usage-2026-09-13.xlsx -o data.json
+python scripts/generate_report.py data.json --output report.html --format html
+```
+
+导入后报告新增 **§3.5 双源对账**：逐模型列出「官方有 / trace 无（成本被低估）」、
+「trace 有 / 官方无（本地 / 免费 / 路由，不是漏记）」与粒度倍数。
+
+**两点必须记住**：
+
+1. 「调用次数」是 **generation 粒度**（一次请求内部可含多轮生成），**不等于**官方「请求数」——
+   实测差约 11.9 倍。这是统计粒度不同，**不是用量暴涨**。
+2. 模型名**不体现是否免费**：`hy4-preview` 白天夜间都叫 `hy4-preview`。是否免费只能看官方积分。
+   `hy4-preview-x` 是「免费额度用尽后的收费变体」，夜间也照常计费，单价不得置 0。
+
+**L2 下的降级处理**：受时段减免影响的模型已写入 `pricing.json` 的 `low_confidence` 段
+（`hy4-preview` / `hy4-preview-x` / `deepseek-v4.1-flash` / `glm-5.3` / `glm-5.3-flash`），
+报告中标 ⚠、不进「最贵模型」结论，但**被剔除者会逐条列出金额**（不让最大成本项悄悄消失）。
+可用 `pricing.local.json` 覆盖。
+
+已知偏差的完整清单（trace 盲区 / trace 独有 / 实证表格）见 `ADAPTERS.md` §四「数据来源与已知偏差」。
 
 ## 任务类型分类规则
 

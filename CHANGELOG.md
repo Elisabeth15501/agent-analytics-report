@@ -2,6 +2,61 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.6.0] — 2026-09-14
+
+### 🎯 F17 双源对账：官方用量导出接入（P0 全部落地）
+
+把「本地 trace」与「官方用量导出」两个从未对过账的数据源接起来，成本从**估算**升级为**真值**。
+
+- **新增适配器 `adapters/official_usage.py`**
+  - 纯标准库解析 xlsx（`zipfile` + `xml.etree`），**不引入 openpyxl**，技能零新增依赖。
+  - **按表头名映射，禁止硬编码列位**：官方导出 2026-09-13 起新增 `User Prompt` 列，
+    按列位解析会把 Prompt 当成模型名（调试脚本已踩过）。缺任一必需列（模型 / 积分 / 时间）直接报错。
+  - 兼容 5 列旧版与 6 列新版；同时支持共享字符串（`t="s"`）、`inlineStr` 与日期序列值还原。
+  - `credits <= 0` 判为**免费请求**（官方对时段减免 / 免费额度的实际结果）。
+- **`--import-official <xlsx>`**：导入后 `meta.cost_source = "official"`，成本口径切 **L1 真值**；
+  导出按报告窗口过滤，窗口外行数记入 `meta.official_import.rows_out_of_window` 并在 stderr 提示。
+  仅 `--source workbuddy` 可用（其它 Agent 无官方积分账单），混用退出码 2。
+- **报告新增 §3.5 双源对账**（MD / HTML 同步）：
+  - 官方请求数 vs trace generation 数 + 粒度倍数（实测约 11.9x，标注「不是用量暴涨」）
+  - **官方有 / trace 无** → 判为 trace 盲区并汇总漏记积分（实测图像模型 + minimax-m3 = ¥251.74 / 8.7%）
+  - **trace 有 / 官方无** → 判为本地模型 / 免费额度 / 路由别名，明确「不是漏记」
+  - 两边都有 → 逐模型给官方积分 vs trace 估算
+- **L1 横幅**：显示官方请求数 / 积分 / 免费次数与导出窗口；并声明 §3 模型成本表仍是 L2 估算、仅供结构参考。
+- **P0-3 口径标注**：概览「调用次数」加注 `(generation 粒度)`，L1 下同时展示官方请求数，
+  避免把 11.9x 粒度差读成「用量暴涨」。
+
+### 📖 治理（P0-4）
+
+- `ADAPTERS.md` 新增 **§二 官方用量导出适配器** 与 **§四 数据来源与已知偏差**
+  （trace 盲区清单、trace 独有清单、hy4 免费/收费同标签实证表、怎么办三步）。
+- `SKILL.md` 新增「**成本口径：L1 真值 / L2 估算**」章节与 `--import-official` 参数说明。
+
+### 🔧 工程
+
+- `_is_l1()` 以「**是否真拿到官方数据**」为准而非 `meta.cost_source` 标记：
+  标记是 official 但数据缺失时回落 L2，避免渲染出「L1 真值（未导入）」这种自相矛盾的横幅。
+- `collect_usage_data.py`：`meta.cost_source` 恒写入（默认 `estimate`），新增 `official_usage` /
+  `reconciliation` / `summary.total_cost_official` 等字段。
+- `generate_report.py`：`build_reconciliation_section(fmt, data)`（未导入时返回 `[]`）；
+  新增 `.note` 样式；概览卡片在 L1 下增补「官方请求数」「官方积分合计」。
+- 版本 1.5.2 → 1.6.0（同步 5 处：SKILL.md / config.json / metadata.json / CHANGELOG.md / releases.md）。
+
+### 🧪 测试
+
+- 新增 `tests/test_official_usage.py`（24 用例）：xlsx 解析（明文 / 共享串 / inlineStr / 日期序列 / 坏文件 / 缺表）、
+  表头映射（**新版 6 列模型不取 Prompt 的回归门禁** / 别名 / 缺列报错）、聚合与免费判定、日期过滤、
+  双源对账、CLI 端到端（**USERPROFILE 隔离，绝不读真实 ~/.workbuddy**）、零回归、L1/L2 渲染与脏数据回落。
+- 收紧 `test_cost_confidence.py` 的 L1 契约（v1.5.2 预留）：光有 `cost_source` 标记不够，须真有 official 数据。
+- 测试规模：**474 用例全绿**（450 → 474）。
+
+### ✅ 零回归
+
+不传 `--import-official` 时，采集 JSON 无 `official_usage` / `reconciliation` 键，
+报告不渲染 §3.5，其余输出与 v1.5.2 完全一致。
+
+---
+
 ## [1.5.2] — 2026-09-14
 
 ### ⚠️ 成本置信度（核心：修正**默认路径**的可信度）

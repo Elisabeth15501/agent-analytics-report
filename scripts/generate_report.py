@@ -951,6 +951,130 @@ def build_model_section_html(data):
     return lines
 
 
+def build_reconciliation_section(fmt, data):
+    """§3.5 双源对账（官方导出 L1 × 本地 trace L2）。
+
+    仅在传入 `--import-official` 时渲染；未导入时返回 []，保证零回归。
+
+    要回答的问题不是「谁数字大」，而是「**差在哪、差的是不是钱**」：
+      - 官方有 / trace 无 → 真实计费但被 trace 漏记 → **成本被低估**（图像模型、minimax-m3）
+      - trace 有 / 官方无 → 本地模型 / 免费额度 / 路由别名 → 通常不计费，不是漏记
+      - 两边都有 → 给倍数，说明「一次请求 → 多次 generation」的粒度差，不是用量暴涨
+    """
+    rec = data.get("reconciliation")
+    if not isinstance(rec, dict) or not rec.get("official_requests"):
+        return []
+    off = _official_import(data)
+    if off is None:
+        return []
+
+    w = off.get("meta", {}).get("window", {})
+    ratio = rec.get("ratio", 0.0)
+    missing = rec.get("missing_in_trace", []) or []
+    trace_only = rec.get("trace_only", []) or []
+    both = rec.get("both", []) or []
+
+    if fmt == "md":
+        lines = ["### 3.5 双源对账（官方导出 × 本地 Trace）", "",
+                 f"> 官方导出窗口 **{w.get('first', '')} ~ {w.get('last', '')}**（北京时间）；"
+                 f"本地 trace 已归一到同一时区后再比对，不存在 ±8h 错位。", "",
+                 "| 口径 | 数值 | 说明 |", "|------|------|------|",
+                 f"| 官方导出「请求数」 | {rec.get('official_requests', 0)} 次 | 一次用户提问 = 1 请求（账单口径）|",
+                 f"| 本地 trace「generation 数」 | {rec.get('trace_generations', 0)} 次 | 一次请求内部可含多轮生成（含工具调用续写）|",
+                 f"| 粒度倍数 | {ratio}x | **不是**用量暴涨，是统计粒度不同 |",
+                 f"| 官方积分合计 | {off.get('totals', {}).get('credits', 0):.2f} | L1 真值 |", ""]
+
+        if missing:
+            lines += [f"**⚠️ 官方有、trace 无（{len(missing)} 项，共 {rec.get('missing_credits', 0):.2f} 积分）"
+                      f"—— 真实计费但被 trace 漏记，纯 trace 成本会低估**：", "",
+                      "| 模型 | 官方请求 | 官方积分 |", "|------|--------:|--------:|"]
+            for m in missing:
+                lines.append(f"| `{m['model']}` | {m['official_requests']} | {m['official_credits']:.2f} |")
+            lines.append("")
+
+        if trace_only:
+            lines += [f"**trace 有、官方无（{len(trace_only)} 项）—— 本地模型 / 免费额度 / 路由别名，"
+                      f"不进官方账单，不是漏记**：", "",
+                      "| 模型 | trace generation | trace 估算成本 |", "|------|----------------:|--------------:|"]
+            for m in trace_only[:15]:
+                lines.append(f"| `{m['model']}` | {m['trace_generations']} | ¥{m['trace_est_cost']:.2f} |")
+            if len(trace_only) > 15:
+                lines.append(f"| … 其余 {len(trace_only) - 15} 项 | | |")
+            lines.append("")
+
+        if both:
+            lines += ["**两边都有（按官方积分降序）**：", "",
+                      "| 模型 | 官方请求 | trace generation | 官方积分 | trace 估算 |",
+                      "|------|--------:|-----------------:|--------:|-----------:|"]
+            for m in both[:15]:
+                lines.append(f"| `{m['model']}` | {m['official_requests']} | {m['trace_generations']} | "
+                             f"{m['official_credits']:.2f} | ¥{m['trace_est_cost']:.2f} |")
+            if len(both) > 15:
+                lines.append(f"| … 其余 {len(both) - 15} 项 | | | | |")
+            lines.append("")
+
+        lines += ["> 读法：**官方积分 = 真金白银**；trace 估算只用来看结构（哪个模型在跑、跑了多少轮）。"
+                  "两者不可直接相加，也不该互相替换。", ""]
+        return lines
+
+    out = ['        <h3>3.5 双源对账（官方导出 × 本地 Trace）</h3>',
+           f'        <p>官方导出窗口 <b>{_esc(w.get("first", ""))} ~ {_esc(w.get("last", ""))}</b>'
+           f'（北京时间）；本地 trace 已归一到同一时区后再比对，不存在 ±8h 错位。</p>',
+           '        <table><thead><tr><th>口径</th><th>数值</th><th>说明</th></tr></thead><tbody>',
+           f'        <tr><td>官方导出「请求数」</td><td>{rec.get("official_requests", 0)} 次</td>'
+           f'<td>一次用户提问 = 1 请求（账单口径）</td></tr>',
+           f'        <tr><td>本地 trace「generation 数」</td><td>{rec.get("trace_generations", 0)} 次</td>'
+           f'<td>一次请求内部可含多轮生成（含工具调用续写）</td></tr>',
+           f'        <tr><td>粒度倍数</td><td>{ratio}x</td><td><b>不是</b>用量暴涨，是统计粒度不同</td></tr>',
+           f'        <tr><td>官方积分合计</td><td>{off.get("totals", {}).get("credits", 0):.2f}</td>'
+           f'<td>L1 真值</td></tr>',
+           '        </tbody></table>']
+
+    if missing:
+        out.append(f'        <p><b>⚠️ 官方有、trace 无（{len(missing)} 项，共 '
+                   f'{rec.get("missing_credits", 0):.2f} 积分）—— 真实计费但被 trace 漏记，'
+                   f'纯 trace 成本会低估</b></p>')
+        out.append('        <table><thead><tr><th>模型</th><th>官方请求</th><th>官方积分</th></tr></thead><tbody>')
+        for m in missing:
+            out.append(f'        <tr><td><code>{_esc(m["model"])}</code></td>'
+                       f'<td>{m["official_requests"]}</td><td>{m["official_credits"]:.2f}</td></tr>')
+        out.append('        </tbody></table>')
+
+    if trace_only:
+        out.append(f'        <p><b>trace 有、官方无（{len(trace_only)} 项）—— 本地模型 / 免费额度 / '
+                   f'路由别名，不进官方账单，不是漏记</b></p>')
+        out.append('        <table><thead><tr><th>模型</th><th>trace generation</th>'
+                   '<th>trace 估算成本</th></tr></thead><tbody>')
+        for m in trace_only[:15]:
+            out.append(f'        <tr><td><code>{_esc(m["model"])}</code></td>'
+                       f'<td>{m["trace_generations"]}</td><td>¥{m["trace_est_cost"]:.2f}</td></tr>')
+        out.append('        </tbody></table>')
+
+    if both:
+        out.append('        <p><b>两边都有（按官方积分降序）</b></p>')
+        out.append('        <table><thead><tr><th>模型</th><th>官方请求</th><th>trace generation</th>'
+                   '<th>官方积分</th><th>trace 估算</th></tr></thead><tbody>')
+        for m in both[:15]:
+            out.append(f'        <tr><td><code>{_esc(m["model"])}</code></td>'
+                       f'<td>{m["official_requests"]}</td><td>{m["trace_generations"]}</td>'
+                       f'<td>{m["official_credits"]:.2f}</td><td>¥{m["trace_est_cost"]:.2f}</td></tr>')
+        out.append('        </tbody></table>')
+
+    out.append('        <p class="note">读法：<b>官方积分 = 真金白银</b>；trace 估算只用来看结构'
+               '（哪个模型在跑、跑了多少轮）。两者不可直接相加，也不该互相替换。</p>')
+    return out
+
+
+def build_reconciliation_section_md(data):
+    """Markdown 入口薄封装（实现见 build_reconciliation_section）。"""
+    return build_reconciliation_section("md", data)
+
+
+def build_reconciliation_section_html(data):
+    """HTML 入口薄封装（实现见 build_reconciliation_section）。"""
+    return build_reconciliation_section("html", data)
+
+
 def _auto_is_active(run):
     """该运行所属自动化是否处于执行中（ACTIVE）。PAUSED/DELETED/UNKNOWN 均视为已停止。"""
     return (run.get("auto_status") or "UNKNOWN") == "ACTIVE"
@@ -1077,7 +1201,10 @@ def generate_markdown_report(data):
     lines.append(f"> **报告类型**：{_calendar_period(meta)}")
     lines.append(f"> **报告周期**：{meta.get('start_date', '')} 至 {meta.get('end_date', '')}")
     lines.append(f"> **生成时间**：{_fmt_generated_at()}")
-    lines.append(f"> **数据来源**：WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置")
+    _src_list = "WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置"
+    if _is_l1(data):
+        _src_list += "、**官方用量导出（成本真值 L1，本地只读解析）**"
+    lines.append(f"> **数据来源**：{_src_list}")
     lines.append("")
     lines += _cost_confidence_banner_md(data)
 
@@ -1093,13 +1220,23 @@ def generate_markdown_report(data):
                             if (t.get("exec_model") or t.get("raw_model") or "") == "default"
                             or ((t.get("input_tokens", 0) or 0) + (t.get("output_tokens", 0) or 0)) == 0)
     _billable_calls = len(_gt) - _unresolved_calls
-    lines.append(f"| 调用次数 | {_billable_calls} 次（{_unresolved_calls} 次未解析/幽灵，不计费）|")
+    # F17 · P0-3 口径标注：trace 数是 generation 粒度，与官方「请求数」差一个量级，
+    # 不标注会被读成「用量暴涨」。
+    _calls_note = f"（{_unresolved_calls} 次未解析/幽灵不计费；**generation 粒度**："
+    _calls_note += "一次请求内部可含多轮生成，**不等于**官方「请求数」）"
+    if _is_l1(data):
+        _calls_note += f"；官方导出同期 **{summary.get('official_requests', 0)} 次请求**"
+    lines.append(f"| 调用次数 | {_billable_calls} 次{_calls_note} |")
     lines.append(f"| 使用技能 | {summary.get('skills_used', 0)} 个 |")
     lines.append(f"| 自动化任务运行 | {summary.get('total_automation_runs', 0)} 次（成功 {summary.get('successful_automation_runs', 0)} 次）|")
     lines.append(f"| 产出文件 | {summary.get('total_outputs', 0)} 个 |")
     lines.append(f"| 实际消耗 Token（计费等效） | {format_number(summary.get('total_effective_tokens', 0))}（原始 {format_number(summary.get('total_tokens', 0))}）|")
     lines.append(f"| 缓存占比 | {cache_rate:.1f}%（缓存命中 token 占输入 token 的比例）|")
     lines.append(f"| 实际成本（计费等效） | ¥{summary.get('total_effective_cost', 0):.2f}（原始口径 ¥{summary.get('total_cost', 0):.2f}）|")
+    if _is_l1(data):
+        lines.append(f"| 官方账单（L1 真值） | {summary.get('official_requests', 0)} 次请求 / "
+                     f"**{summary.get('total_cost_official', 0):.2f} 积分**"
+                     f"（其中 {summary.get('official_free_requests', 0)} 次免费）|")
     if any(m.get("timed_free") for m in data.get("model_stats", []) + data.get("model_exec_stats", [])):
         tf_map = meta.get("timed_free", {}) or {}
         if tf_map:
@@ -1164,6 +1301,7 @@ def generate_markdown_report(data):
 
     # （新增）三、模型使用与成本对比
     lines.extend(build_model_section_md(data))
+    lines.extend(build_reconciliation_section_md(data))
     lines.extend(build_tier_section_md(data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）
@@ -1897,47 +2035,81 @@ def _low_conf_hits(data):
     return dict(sorted(hits.items()))
 
 
-def _cost_confidence_banner(fmt, data):
-    """成本口径横幅（v1.5.2）：默认 L2 估算；导入官方导出后自动切 L1 真值。"""
+def _official_import(data):
+    """本期导入的官方用量导出（未导入返回 None）。"""
+    off = data.get("official_usage")
+    return off if isinstance(off, dict) and off.get("by_model") is not None else None
+
+
+def _is_l1(data):
+    """成本是否为 L1 真值（已导入官方用量导出）。"""
     meta = data.get("meta", {}) or {}
-    src = str(meta.get("cost_source") or "estimate").lower()
+    return str(meta.get("cost_source") or "estimate").lower() == "official" and bool(_official_import(data))
+
+
+def _cost_confidence_banner(fmt, data):
+    """成本口径横幅（v1.5.2 引入，v1.6.0 接 L1）：默认 L2 估算；导入官方导出后自动切 L1 真值。"""
+    meta = data.get("meta", {}) or {}
+    # 口径级别以「是否真拿到了官方数据」为准，而不是 meta 里的标记：
+    # 若 meta 标了 official 但数据缺失（脏数据 / 手工编辑的 JSON），必须回落 L2，
+    # 否则会渲染出「L1 真值（未导入官方用量导出）」这种自相矛盾的横幅。
+    is_est = not _is_l1(data)
+    src = "official" if not is_est else "estimate"
     label, icon = _COST_SOURCE_LABEL.get(src, _COST_SOURCE_LABEL["estimate"])
-    is_est = src != "official"
     hits = _low_conf_hits(data)
+    off = _official_import(data)
 
     if fmt == "md":
-        lines = [f"> {icon} **成本口径：{label}**"
-                 + ("（未导入官方用量导出）" if is_est else "（已导入官方用量导出，成本取「积分」字段）")]
         if is_est:
-            lines += [
-                ">",
-                "> 成本 = `pricing.json` 静态单价 × token 量**估算**，不含服务端时段减免 / 用户免费额度；"
-                "图像模型等本地 trace 盲区也无法覆盖（实测漏记约 8.7%）。**请勿据此做预算或账单对账。**",
-            ]
-        if hits:
-            lines.append(">")
-            lines.append("> **低置信度模型（估算偏差已知较大，不参与成本结论）**：")
-            for name, reason in hits.items():
-                lines.append(f"> - `{name}` —— {reason}")
-            if is_est:
+            lines = [f"> {icon} **成本口径：{label}**（未导入官方用量导出）", ">",
+                     "> 成本 = `pricing.json` 静态单价 × token 量**估算**，不含服务端时段减免 / 用户免费额度；"
+                     "图像模型等本地 trace 盲区也无法覆盖（实测漏记约 8.7%）。**请勿据此做预算或账单对账。**"]
+            if hits:
                 lines.append(">")
-                lines.append("> 取真值：导入官方用量导出后本横幅自动切换为 L1（v1.6.0 起支持）。")
+                lines.append("> **低置信度模型（估算偏差已知较大，不参与成本结论）**：")
+                for name, reason in hits.items():
+                    lines.append(f"> - `{name}` —— {reason}")
+                lines.append(">")
+                lines.append("> 取真值：加 `--import-official <官方用量导出.xlsx>` 重跑，本横幅自动切换为 L1。")
+            lines.append("")
+            return lines
+
+        # ── L1 真值 ──
+        t = off.get("totals", {})
+        w = off.get("meta", {}).get("window", {})
+        lines = [f"> {icon} **成本口径：{label}**（已导入官方用量导出，成本取「积分」字段）", ">",
+                 f"> 本期官方账单：**{t.get('requests', 0)} 次请求 / {t.get('credits', 0):.2f} 积分**"
+                 f"（窗口 {w.get('first', '')} ~ {w.get('last', '')}，北京时间）。"
+                 f"其中 {t.get('free_requests', 0)} 次免费、{t.get('paid_requests', 0)} 次计费。",
+                 ">",
+                 "> §3 模型成本表仍是 trace 静态估算（L2），**仅供结构参考**；"
+                 "真实账单以本节积分与 §3.5 双源对账为准。"]
         lines.append("")
         return lines
 
-    rows = [f'            <b>{icon} 成本口径：{label}</b>'
-            + ("（未导入官方用量导出）" if is_est else "（已导入官方用量导出，成本取「积分」字段）")]
     if is_est:
-        rows.append('<p>成本 = <code>pricing.json</code> 静态单价 × token 量<b>估算</b>，'
-                    '不含服务端时段减免 / 用户免费额度；图像模型等本地 trace 盲区也无法覆盖'
-                    '（实测漏记约 8.7%）。<b>请勿据此做预算或账单对账。</b></p>')
-    if hits:
-        rows.append('<p><b>低置信度模型（估算偏差已知较大，不参与成本结论）：</b></p><ul>')
-        for name, reason in hits.items():
-            rows.append(f'            <li><code>{_esc(name)}</code> —— {_esc(reason)}</li>')
-        rows.append('        </ul>')
-        if is_est:
-            rows.append('<p>取真值：导入官方用量导出后本横幅自动切换为 L1（v1.6.0 起支持）。</p>')
+        rows = [f'            <b>{icon} 成本口径：{label}</b>（未导入官方用量导出）',
+                '<p>成本 = <code>pricing.json</code> 静态单价 × token 量<b>估算</b>，'
+                '不含服务端时段减免 / 用户免费额度；图像模型等本地 trace 盲区也无法覆盖'
+                '（实测漏记约 8.7%）。<b>请勿据此做预算或账单对账。</b></p>']
+        if hits:
+            rows.append('<p><b>低置信度模型（估算偏差已知较大，不参与成本结论）：</b></p><ul>')
+            for name, reason in hits.items():
+                rows.append(f'            <li><code>{_esc(name)}</code> —— {_esc(reason)}</li>')
+            rows.append('        </ul>')
+            rows.append('<p>取真值：加 <code>--import-official &lt;官方用量导出.xlsx&gt;</code> 重跑，'
+                        '本横幅自动切换为 L1。</p>')
+        return ['        <div class="disclaimer-box">'] + rows + ['        </div>']
+
+    t = off.get("totals", {})
+    w = off.get("meta", {}).get("window", {})
+    rows = [f'            <b>{icon} 成本口径：{label}</b>（已导入官方用量导出，成本取「积分」字段）',
+            f'<p>本期官方账单：<b>{t.get("requests", 0)} 次请求 / '
+            f'{t.get("credits", 0):.2f} 积分</b>（窗口 {_esc(w.get("first", ""))} ~ '
+            f'{_esc(w.get("last", ""))}，北京时间）。其中 {t.get("free_requests", 0)} 次免费、'
+            f'{t.get("paid_requests", 0)} 次计费。</p>',
+            '<p>§3 模型成本表仍是 trace 静态估算（L2），<b>仅供结构参考</b>；'
+            '真实账单以本节积分与 §3.5 双源对账为准。</p>']
     return ['        <div class="disclaimer-box">'] + rows + ['        </div>']
 
 
@@ -2310,6 +2482,8 @@ def generate_html_report(data):
         .lc-flag { margin-right: 4px; cursor: help; }
         .lc-note { color: var(--disclaimer-fg); font-size: 12px; }
         .chart-bars .lc-note { margin: 8px 0 0; }
+        /* v1.6.0 双源对账（§3.5） */
+        .note { color: var(--disclaimer-fg); font-size: 13px; background: var(--disclaimer-bg); border-left: 4px solid var(--disclaimer-border); padding: 8px 12px; border-radius: 4px; margin: 12px 0; }
         a { color: var(--link); }
         /* 主题切换控件 */
         .theme-toggle { display: inline-flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
@@ -2344,7 +2518,10 @@ def generate_html_report(data):
     lines.append(f"        <p><strong>报告类型</strong>：{_calendar_period(meta)}</p>")
     lines.append(f"        <p><strong>报告周期</strong>：{meta.get('start_date', '')} 至 {meta.get('end_date', '')}</p>")
     lines.append(f"        <p><strong>生成时间</strong>：{_fmt_generated_at()}</p>")
-    lines.append("        <p><strong>数据来源</strong>：WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置</p>")
+    _src_list_h = "WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置"
+    if _is_l1(data):
+        _src_list_h += "、<strong>官方用量导出（成本真值 L1，本地只读解析）</strong>"
+    lines.append(f"        <p><strong>数据来源</strong>：{_src_list_h}</p>")
     lines.append('        <div class="theme-toggle" role="group" aria-label="主题切换">')
     lines.append('            <button type="button" data-set-theme="light">☀ 浅色</button>')
     lines.append('            <button type="button" data-set-theme="dark">🌙 深色</button>')
@@ -2362,15 +2539,20 @@ def generate_html_report(data):
                                if (t.get("exec_model") or t.get("raw_model") or "") == "default"
                                or ((t.get("input_tokens", 0) or 0) + (t.get("output_tokens", 0) or 0)) == 0)
     _billable_calls_h = len(_gt_h) - _unresolved_calls_h
+    # F17 · P0-3 口径标注：generation 粒度 ≠ 官方请求数
+    _calls_label_h = f"调用次数·generation 粒度（{_unresolved_calls_h} 未解析）"
     stat_cards = [
         (summary.get("active_day_count", 0), "活跃天数"),
         (summary.get("total_sessions", 0), "会话总数"),
-        (_billable_calls_h, f"调用次数（{_unresolved_calls_h} 未解析）"),
+        (_billable_calls_h, _calls_label_h),
         (summary.get("skills_used", 0), "使用技能"),
         (summary.get("total_automation_runs", 0), "自动化任务运行"),
         (format_number(summary.get("total_effective_tokens", 0)), "实际消耗 Token"),
-        (f"¥{summary.get('total_effective_cost', 0):.2f}", "实际成本"),
+        (f"¥{summary.get('total_effective_cost', 0):.2f}", "实际成本（估算）"),
     ]
+    if _is_l1(data):
+        stat_cards.insert(3, (summary.get("official_requests", 0), "官方请求数（L1）"))
+        stat_cards.append((f"{summary.get('total_cost_official', 0):.2f}", "官方积分合计（L1 真值）"))
     for val, label in stat_cards:
         lines.append('            <div class="stat-card">')
         lines.append(f"                <div class=\"stat-value\">{val}</div>")
@@ -2422,6 +2604,7 @@ def generate_html_report(data):
 
     # （新增）三、模型使用与成本对比
     lines.extend(build_model_section_html(data))
+    lines.extend(build_reconciliation_section_html(data))
     lines.extend(build_tier_section_html(data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）

@@ -100,7 +100,19 @@ def main():
                         help="LLM 分类器使用的模型名（如本地 Ollama 的 qwen2.5:7b）")
     parser.add_argument("--task-llm-api-key", type=str, default=None,
                         help="LLM 端点的 API Key（本地端点可省略）")
+    parser.add_argument("--import-official", type=str, default=None, metavar="XLSX",
+                        help="导入官方用量导出（官网下载的 request-usage-*.xlsx），作为**成本真值（L1）**对账源。"
+                             "纯本地只读解析，不联网、不上传（F17）。不传时成本为静态价表估算（L2）。"
+                             "仅支持 --source workbuddy")
+    parser.add_argument("--official-sheet", type=str, default=None,
+                        help="官方导出工作表名（默认取第一个工作表；官方固定为 'Usage Details'）")
     args = parser.parse_args()
+
+    # 官方导出只对 WorkBuddy 源有意义：claude-code / codex 没有官方积分账单可对
+    if args.import_official and args.source != "workbuddy":
+        print(f"[ERROR] --import-official 仅支持 --source workbuddy（当前 --source {args.source}）",
+              file=sys.stderr)
+        sys.exit(2)
 
     if args.realtime:
         # 实时模式：立即采集最新数据（今天）
@@ -243,6 +255,9 @@ def main():
             "generated_at": datetime.now(TZ).isoformat(),
             "is_realtime": args.realtime,
             "source": args.source,
+            # 成本口径（F17 · v1.6.0）："estimate"=静态价表估算（L2，默认）；
+            # 传入 --import-official 后置为 "official"（L1 真值，取官方导出「积分」字段）。
+            "cost_source": "estimate",
         },
         "traces": traces,
         "sessions": db_data["sessions"],
@@ -318,6 +333,54 @@ def main():
     result["model_exec_stats"] = aggregate_by_model(traces)
     # 按档位（路由三档）聚合（v1.3.0 分析维度）→ §3.4
     result["tier_stats"] = aggregate_by_tier(traces)
+
+    # ── F17：官方用量导出（成本真值 L1）──
+    # 本地 trace 的静态价表估算（L2）在数学上无法表达「服务端时段减免 / 用户免费额度」，
+    # 且存在图像模型 / minimax-m3 等盲区；导入官方导出后，报告切 L1 并以「积分」字段为成本真值。
+    # 未导入时保持 L2，输出与 v1.5.x 完全一致（零回归）。
+    if args.import_official:
+        try:
+            from adapters.official_usage import (
+                OfficialUsageError, collect_official_usage, reconcile_with_trace,
+            )
+            official = collect_official_usage(
+                args.import_official, start_date=start_date, end_date=end_date,
+                sheet=args.official_sheet,
+            )
+        except (OfficialUsageError, ImportError) as e:
+            print(f"[ERROR] 官方用量导出导入失败：{e}", file=sys.stderr)
+            sys.exit(2)
+
+        # 被报告窗口过滤掉的行数（导出通常是「最近30日」，报告窗口可能只有 7 天）
+        _all_rows = official["meta"].get("parsed_rows", 0) or 0
+        official["meta"]["rows_in_window"] = official["totals"]["requests"]
+        official["meta"]["rows_out_of_window"] = max(0, _all_rows - official["totals"]["requests"])
+
+        result["official_usage"] = official
+        result["reconciliation"] = reconcile_with_trace(official, result["model_stats"])
+        result["meta"]["cost_source"] = "official"
+        result["meta"]["official_import"] = {
+            "file": official["meta"]["file"],
+            "sheet": official["meta"]["sheet"],
+            "window": official["meta"]["window"],
+            "rows_total": _all_rows,
+            "rows_in_window": official["totals"]["requests"],
+            "rows_out_of_window": official["meta"]["rows_out_of_window"],
+            "columns": sorted(official["meta"]["columns"]),
+        }
+        result["summary"]["total_cost_official"] = official["totals"]["credits"]
+        result["summary"]["official_requests"] = official["totals"]["requests"]
+        result["summary"]["official_free_requests"] = official["totals"]["free_requests"]
+        print(f"[INFO] 官方导出已导入：{official['totals']['requests']} 请求 / "
+              f"{official['totals']['credits']:.2f} 积分（窗口 {official['meta']['window']['first']}"
+              f" ~ {official['meta']['window']['last']}）→ 成本口径 L1 真值", file=sys.stderr)
+        if official["meta"]["rows_out_of_window"]:
+            print(f"[WARN] 官方导出共 {_all_rows} 行，其中 "
+                  f"{official['meta']['rows_out_of_window']} 行不在报告窗口 "
+                  f"{start_date}~{end_date} 内，已排除", file=sys.stderr)
+        if official["totals"]["requests"] == 0:
+            print(f"[WARN] 官方导出在窗口 {start_date}~{end_date} 内没有记录，"
+                  f"对账章节可能为空", file=sys.stderr)
 
     # 收集本期「未配置单价」的模型名（排除路由别名 auto，其本就无单一单价），供报告给出可补写片段
     unconfigured = set()

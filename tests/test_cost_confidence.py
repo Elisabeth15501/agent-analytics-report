@@ -122,9 +122,21 @@ def test_html_banner_shows_l2_estimate(report_module):
 @allure.feature("成本置信度")
 @allure.story("L1 真值切换")
 def test_banner_switches_to_l1_when_official(report_module):
-    """meta.cost_source='official' 时横幅应切换为 L1 真值（为 v1.6.0 预留渲染契约）。"""
+    """meta.cost_source='official' **且**确有官方数据时，横幅切换为 L1 真值。
+
+    v1.6.0 收紧了 v1.5.2 预留的契约：光有 cost_source 标记不够，必须真的拿到
+    official_usage 数据。否则会渲染出「L1 真值（未导入官方用量导出）」这种自相
+    矛盾的横幅——宁可回落 L2 的诚实估算，也不要一个假的真值。
+    """
     data = _data_with_lc(LC_MAP)
     data["meta"]["cost_source"] = "official"
+    data["official_usage"] = {
+        "by_model": [{"name": "hy4-preview", "requests": 2, "credits": 43.4,
+                      "free_requests": 1, "paid_requests": 1, "avg_credits": 21.7}],
+        "totals": {"requests": 2, "credits": 43.4, "free_requests": 1,
+                   "paid_requests": 1, "models": 1, "clients": 1},
+        "meta": {"window": {"first": "2026-09-12", "last": "2026-09-14"}},
+    }
     out = report_module.generate_markdown_report(data)
     assert "成本口径：L1 真值" in out
     assert "L2 估算" not in out

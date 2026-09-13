@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.6.0** | 2026-09-14 | F17 双源对账：官方用量导出接入（`--import-official`）· 成本 L1 真值 | [tag/v1.6.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.0) |
 | **v1.5.2** | 2026-09-14 | 成本置信度（L1 真值 / L2 估算）· 低置信度模型标注 | [tag/v1.5.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.2) |
 | **v1.5.1** | 2026-09-12 | 定价数据刷新（DeepSeek V4.1-Flash 峰谷双档 · V4-Flash 下架 · Hy4 限免新规） | [tag/v1.5.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.1) |
 | **v1.5.0** | 2026-09-07 | 任务分类加权评分（P2-3）· 定价自动更新（P2-2）· P0 数据完整性修复 | [tag/v1.5.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.0) |
@@ -17,6 +18,30 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.1.2** | 2026-08-12 | SkillHub 重新发布修正 | [tag/v1.1.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.2) |
 | **v1.1.1** | 2026-08-11 | 日历对齐周期 · XSS 防护 | [tag/v1.1.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.1) |
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
+
+---
+
+## v1.6.0 — 2026-09-14
+
+**F17 双源对账：把官方用量导出接进来，成本从估算升级为真值**
+
+v1.5.2 只解决了「告诉用户这是估算」；v1.6.0 解决「怎么拿到真值」。
+本地 trace 与官方用量导出这两个数据源**从未对过账**——本次把它们接起来。
+
+- 📥 **`--import-official <xlsx>`**：导入官网下载的用量导出，成本口径自动切 **L1 真值**（取「积分」字段）。
+  纯本地只读解析，不联网不上传（符合 ADR-4 / ADR-6）；仅 `--source workbuddy` 可用，混用退出码 2。
+- 🔧 **新增 `adapters/official_usage.py`**：纯标准库解析 xlsx（zip + XML，**不引入 openpyxl**）。
+  **按表头名映射、禁止硬编码列位** —— 官方 09-13 新增 `User Prompt` 列，按列位解析会把 Prompt 当模型名。
+- 📊 **报告新增 §3.5 双源对账**：
+  - 官方请求数 vs trace generation 数 + 粒度倍数（实测约 11.9x，明确标注「不是用量暴涨」）
+  - **官方有 / trace 无** → trace 盲区，汇总漏记积分（实测图像模型 + minimax-m3 = ¥251.74 / 8.7%）
+  - **trace 有 / 官方无** → 本地模型 / 免费额度 / 路由别名，明确「不是漏记」
+- 🏷️ **P0-3 口径标注**：概览「调用次数」加注 `(generation 粒度)`，不再与官方「请求数」混淆。
+- 📖 **治理**：`ADAPTERS.md` 新增「官方导出适配器」与「数据来源与已知偏差」两章；
+  `SKILL.md` 新增「成本口径：L1 / L2」章节。
+- 🧪 **474 用例全绿**（新增 `tests/test_official_usage.py` 24 用例）。
+- ✅ **零回归**：不传 `--import-official` 时输出与 v1.5.2 完全一致。
+- 🔗 [GitHub Release v1.6.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.0)
 
 ---
 
