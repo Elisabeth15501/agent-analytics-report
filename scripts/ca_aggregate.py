@@ -485,7 +485,11 @@ def build_savings_insights(exec_stats):
     仅当存在已知更便宜替代且单价可解析时给出建议。
     """
     paid = [m for m in exec_stats
-            if m.get("configured") and m.get("effective_cost", 0) > 0 and not m.get("is_router")]
+            if m.get("configured") and m.get("effective_cost", 0) > 0
+            and not m.get("is_router")
+            # v1.7.0 · A1：低置信度模型（夜间免费 / 促销 / 峰谷，L2 数字不可信）
+            # 不参与省钱建议，避免「建议从折扣模型迁走」反而让用户多花钱。
+            and not low_confidence_reason(m["model"])]
     total_paid = sum(m["effective_cost"] for m in paid) or 1
     items = []
     total_save = 0.0

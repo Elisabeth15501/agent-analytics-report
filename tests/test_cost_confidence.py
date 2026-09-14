@@ -184,3 +184,220 @@ def test_cost_chart_without_map_is_unchanged(report_module):
     chart = report_module.build_model_cost_chart_md(stats)
     assert "⚠" not in chart
     assert "低置信度" not in chart
+
+
+# ---------------------------------------------------------------------------
+# v1.7.0 · A2 机读偏差方向（low_confidence_bias → ⚠↑ / ⚠↓）
+# ---------------------------------------------------------------------------
+
+BIAS_MAP = {"hy4-preview": "over", "glm-5.3-flash": "over", "deepseek-v4.1-flash": "under"}
+
+
+def _data_with_bias(low_confidence=None, bias=None):
+    """在 _data_with_lc 基础上额外注入 low_confidence_bias（A2 机读方向）。"""
+    data = _data_with_lc(low_confidence)
+    if bias is not None:
+        data["meta"]["low_confidence_bias"] = bias
+    return data
+
+
+@allure.feature("成本置信度")
+@allure.story("偏差方向")
+def test_pricing_json_has_low_confidence_bias_section():
+    """pricing.json 必须含 low_confidence_bias 段（A2），且取值属于 over/under/mixed。"""
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "scripts" / "pricing.json"
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert "low_confidence_bias" in data, "pricing.json 缺少 low_confidence_bias 段（v1.7.0 A2）"
+    bias = data["low_confidence_bias"]
+    # 与 low_confidence 同键（除 _comment 外）
+    lc_keys = {k for k in data["low_confidence"] if not k.startswith("_")}
+    bias_keys = {k for k in bias if not k.startswith("_")}
+    assert bias_keys == lc_keys, f"low_confidence_bias 键应与 low_confidence 对齐，差异：{bias_keys ^ lc_keys}"
+    for k, v in bias.items():
+        if k.startswith("_"):
+            continue
+        assert v in ("over", "under", "mixed"), f"{k} 的偏差方向 {v!r} 不合法"
+    # 实测已知方向
+    assert bias["hy4-preview"] == "over", "hy4-preview 夜间免费 → 静态价表高估"
+    assert bias["deepseek-v4.1-flash"] == "under", "deepseek-v4.1-flash 峰谷 → 低估"
+
+
+@allure.feature("成本置信度")
+@allure.story("偏差方向")
+def test_collector_exposes_low_confidence_bias(collector_module):
+    """采集器把 low_confidence_bias 透传到 meta（渲染层不硬编码方向）。"""
+    assert hasattr(collector_module, "LOW_CONFIDENCE_BIAS"), "ca_core 未导出 LOW_CONFIDENCE_BIAS"
+    assert collector_module.LOW_CONFIDENCE_BIAS.get("hy4-preview") == "over"
+
+
+@allure.feature("成本置信度")
+@allure.story("偏差方向")
+def test_bias_arrow_in_cost_chart(report_module):
+    """A2：高估模型渲染 ⚠↑，低估模型渲染 ⚠↓。"""
+    stats = _data_with_lc(LC_MAP)["model_stats"]
+    chart = report_module.build_model_cost_chart_md(stats, low_conf_map=LC_MAP, low_conf_bias_map=BIAS_MAP)
+    assert "⚠↑ glm-5.3-flash" in chart, "高估模型应带 ⚠↑"
+    assert "⚠↑ hy4-preview" in chart, "高估模型应带 ⚠↑"
+    assert "箭头表示偏差方向" in chart, "图表脚注须解释箭头含义"
+
+
+@allure.feature("成本置信度")
+@allure.story("偏差方向")
+def test_under_bias_renders_down_arrow(report_module):
+    """A2：低估模型命中 ⚠↓（deepseek-v4.1-flash 峰谷低估）。"""
+    data = _data_with_bias({"deepseek-v4.1-flash": "峰谷计价，静态价表低估"}, BIAS_MAP)
+    data["model_stats"] = [
+        {"model": "deepseek-v4.1-flash", "calls": 32, "effective_tokens": 30000,
+         "input_tokens": 20000, "output_tokens": 10000,
+         "unit_price_input": 0.8, "unit_price_output": 2.8,
+         "effective_cost": 9.9, "configured": True},
+    ]
+    out = report_module.generate_markdown_report(data)
+    assert "⚠↓" in out, "低估模型应渲染 ⚠↓"
+
+
+@allure.feature("成本置信度")
+@allure.story("偏差方向")
+def test_no_bias_map_falls_back_to_plain_warn(report_module):
+    """A2 零回归：未提供 bias 映射时，图表行内退回纯 ⚠（不画箭头）。"""
+    stats = _data_with_lc(LC_MAP)["model_stats"]
+    chart = report_module.build_model_cost_chart_md(stats, low_conf_map=LC_MAP)
+    # 行首标记仍是纯 ⚠（无方向箭头），与 v1.6.2 行为一致
+    assert "⚠ hy4-preview" in chart
+    assert "⚠ glm-5.3-flash" in chart
+    assert "⚠↑ " not in chart and "⚠↓ " not in chart, "无 bias 映射时行内不应出现方向箭头"
+    # 但低置信度脚注本身仍应出现（那是 v1.5.2 的既有行为）
+    assert "低置信度估算" in chart
+
+
+# ---------------------------------------------------------------------------
+# v1.7.0 · A3 低置信度最贵模型高位告警
+# ---------------------------------------------------------------------------
+
+@allure.feature("成本置信度")
+@allure.story("高位告警")
+def test_md_high_alert_when_low_conf_is_most_expensive(report_module):
+    """A3：低置信度模型恰为最贵（Top-3）时，§3 顶部必须给出高位告警横幅。"""
+    # fixture 中 glm-5.3-flash(¥15.86) 是最贵，且为低置信度
+    out = report_module.generate_markdown_report(_data_with_bias(LC_MAP, BIAS_MAP))
+    assert "高位告警" in out, "低置信度模型为最贵时必须出现高位告警"
+    assert "不要据此切换模型" in out, "告警须明确劝阻据此切换模型"
+    alert_line = next(ln for ln in out.splitlines() if "高位告警" in ln)
+    assert "glm-5.3-flash" in alert_line
+    assert "⚠↑" in alert_line, "告警须带偏差方向"
+
+
+@allure.feature("成本置信度")
+@allure.story("高位告警")
+def test_html_high_alert_when_low_conf_is_most_expensive(report_module):
+    """A3：HTML 版同样给出高位告警（warn-box 容器）。"""
+    out = report_module.generate_html_report(_data_with_bias(LC_MAP, BIAS_MAP))
+    assert "高位告警" in out
+    assert "warn-box" in out
+
+
+@allure.feature("成本置信度")
+@allure.story("高位告警")
+def test_no_high_alert_when_low_conf_is_insignificant(report_module):
+    """A3 零回归：低置信度模型占比微不足道（<5%）时，不弹高位告警（避免噪音）。
+
+    即便它排到「第 2 贵」，¥0.01 vs ¥99.00 也毫无告警价值。
+    """
+    data = _data_with_bias(LC_MAP, BIAS_MAP)
+    data["model_stats"] = [
+        {"model": "glm-5.3-flash", "calls": 1, "effective_tokens": 1000,
+         "input_tokens": 800, "output_tokens": 200,
+         "unit_price_input": 0.8, "unit_price_output": 2.8,
+         "effective_cost": 0.01, "configured": True},
+        {"model": "hy3", "calls": 900, "effective_tokens": 400000,
+         "input_tokens": 300000, "output_tokens": 100000,
+         "unit_price_input": 1.0, "unit_price_output": 4.0,
+         "effective_cost": 99.0, "configured": True},
+    ]
+    alert = report_module._lc_top_alert(data)
+    assert alert is None, f"占比 0.01% 的低置信度模型不应触发高位告警，实际：{alert}"
+
+
+@allure.feature("成本置信度")
+@allure.story("高位告警")
+def test_no_high_alert_when_low_conf_is_cheap_but_meaningful(report_module):
+    """A3 边界：低置信度模型有分量但排名掉到 Top-3 之外时，同样不告警。"""
+    data = _data_with_bias(LC_MAP, BIAS_MAP)
+    data["model_stats"] = [
+        # 3 个可信模型都比低置信度模型贵 → 低置信度掉到第 4 名
+        {"model": "hy3", "calls": 900, "effective_tokens": 400000,
+         "input_tokens": 300000, "output_tokens": 100000,
+         "unit_price_input": 1.0, "unit_price_output": 4.0,
+         "effective_cost": 99.0, "configured": True},
+        {"model": "claude-sonnet-4-20250514", "calls": 100, "effective_tokens": 50000,
+         "input_tokens": 40000, "output_tokens": 10000,
+         "unit_price_input": 3.0, "unit_price_output": 15.0,
+         "effective_cost": 60.0, "configured": True},
+        {"model": "gpt-5", "calls": 80, "effective_tokens": 40000,
+         "input_tokens": 30000, "output_tokens": 10000,
+         "unit_price_input": 2.0, "unit_price_output": 8.0,
+         "effective_cost": 40.0, "configured": True},
+        {"model": "glm-5.3-flash", "calls": 31, "effective_tokens": 40000,
+         "input_tokens": 30000, "output_tokens": 10000,
+         "unit_price_input": 0.8, "unit_price_output": 2.8,
+         "effective_cost": 10.0, "configured": True},
+    ]
+    alert = report_module._lc_top_alert(data)
+    assert alert is None, f"第 4 贵的低置信度模型不在 Top-3，不应告警，实际：{alert}"
+
+
+# ---------------------------------------------------------------------------
+# v1.7.0 · A1 省钱杠杆过滤低置信度模型
+# ---------------------------------------------------------------------------
+
+@allure.feature("成本置信度")
+@allure.story("省钱杠杆")
+def test_savings_insights_excludes_low_confidence(collector_module):
+    """A1：低置信度模型不得进入「可省钱」杠杆（否则会诱导用户从折扣模型迁走）。
+
+    build_savings_insights 读的是 model_exec_stats（执行维度）且依赖模块级
+    LOW_CONFIDENCE，因此用 collector_module 里导出的同一份配置构造输入。
+    """
+    assert hasattr(collector_module, "build_savings_insights"), "ca_aggregate 未导出 build_savings_insights"
+    exec_stats = [
+        # 低置信度：促销模型，单价高到会命中「换更便宜模型」
+        {"model": "glm-5.3-flash", "calls": 31, "effective_tokens": 40000,
+         "input_tokens": 30000, "output_tokens": 10000,
+         "unit_price_input": 0.8, "unit_price_output": 2.8,
+         "effective_cost": 15.86, "configured": True},
+        # 低置信度：时段免费模型
+        {"model": "hy4-preview", "calls": 12, "effective_tokens": 50000,
+         "input_tokens": 40000, "output_tokens": 10000,
+         "unit_price_input": 6.0, "unit_price_output": 18.0,
+         "effective_cost": 7.68, "configured": True},
+        # 可信对照组
+        {"model": "hy3", "calls": 90, "effective_tokens": 10000,
+         "input_tokens": 8000, "output_tokens": 2000,
+         "unit_price_input": 1.0, "unit_price_output": 4.0,
+         "effective_cost": 1.52, "configured": True},
+    ]
+    insights = collector_module.build_savings_insights(exec_stats)
+    blob = json.dumps(insights, ensure_ascii=False) if not isinstance(insights, str) else insights
+    assert "hy4-preview" not in blob, "hy4-preview 为时段免费低置信度模型，不应出现在省钱建议里"
+    assert "glm-5.3-flash" not in blob, "glm-5.3-flash 为促销低置信度模型，不应出现在省钱建议里"
+
+
+@allure.feature("成本置信度")
+@allure.story("省钱杠杆")
+def test_savings_section_mentions_discount_hint(report_module):
+    """A1：§4.4 顶部提示折扣/时段模型，替代原来的「迁走」建议。
+
+    注：§4.4 由 build_cost_analysis_section 渲染，该函数在 session_stats.rows 为空时
+    直接 return []（无会话就不渲染成本深剖章节），所以 fixture 必须带上会话数据。
+    """
+    data = _data_with_bias(LC_MAP, BIAS_MAP)
+    data["session_stats"] = {
+        "rows": [{"title": "生成周报", "task_type": "文档写作", "effective_cost": 15.87,
+                  "effective_tokens": 100000, "calls": 133, "models": ["glm-5.3-flash", "hy3"]}],
+        "buckets": [{"label": "¥10-20", "count": 1, "cost": 15.87}],
+    }
+    data["savings_insights"] = {"items": [], "total_estimated_monthly_save": 0.0}
+    out = report_module.generate_markdown_report(data)
+    assert "折扣 / 时段模型提示" in out, "省钱章节须提示折扣/时段模型"
+    assert "不就此给出「迁走」建议" in out, "须明确不推荐迁走"

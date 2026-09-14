@@ -2,6 +2,29 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.7.0] — 2026-09-15
+
+### 🎯 F17 双源对账 P1 / P2 + 低置信度最贵模型告警（A1 / A2 / A3）
+
+**F17 · P1 请求数反推（估算）**
+- trace 是 generation 粒度，与官方「请求数」差一个量级（实测约 11.9x）。新增按 `session_id` + 时间窗（默认 15 分钟）聚类的启发式反推「估算请求数」，写入 `summary.estimated_request_count`，报告 §1 概览新增「估算请求数（generation 反推）」行，并在 L1 下展示「估算请求数 ↔ 官方请求数」倍率，消除「11.9x = 用量暴涨」的误读。
+- 解析同时兼容 WorkBuddy trace 的 Unix 毫秒时间戳与 claude-code / codex 适配器的 ISO 8601 字符串（`_parse_started_at`）。
+- **明确不做**：模型名归一化（剥离 `custom-local:` 前缀）——那是 WorkBuddy 自建 vs 外部 API 的唯一来源标识（2026-09-14 已决策 ❌）。
+
+**F17 · P2 路由别名解析**
+- `auto` / `fast-model` / `balanced-model` / `extreme-model` 等路由别名执行时**不记录落地底层模型**，报告显式列出这些别名「未解析具体模型、单独成组、不计入最贵模型与省钱建议等成本结论」，其单价/花费为所有计费模型均价估算值，仅供横向对比。
+
+**A1 · 省钱杠杆过滤低置信度模型**
+- `build_savings_insights` 的「付费模型」集合排除低置信度模型（`low_confidence_reason`），不推荐从折扣/时段模型迁走；改在 §4.4 顶部提示折扣/时段模型，避免把官方减免当成「可省的钱」。
+
+**A2 · 机读偏差方向**
+- `pricing.json` 新增 `low_confidence_bias` 段（`over`/`under`/`mixed`）；报告渲染 `⚠↑`（高估）/ `⚠↓`（低估）箭头，并在模型表、成本条形图、成本横幅、脚注统一说明方向。
+
+**A3 · 低置信度最贵模型高位告警**
+- 当低置信度模型恰好是本期最贵（或 Top-3）时，在 §3 顶部 + §4.4 顶部加醒目告警横幅：**真实花费以官方账单为准，不要据此切换模型**。
+
+- 回归：修复 `_cluster_requests` 对 `started_at` 格式的假设（原误用 `ts_to_dt` 处理 ISO 字符串 → `NameError` / `TypeError`），claude-code / codex 端到端采集恢复绿。
+
 ## [1.6.2] — 2026-09-14
 
 ### 🐛 修复：低置信度模型标记改为纯 ⚠（去 span 包裹）

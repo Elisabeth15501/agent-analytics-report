@@ -273,6 +273,14 @@
     "glm-5.3": "发布期 5 折促销已于 2026-09-09 24:00 到期；若报告窗口跨越该日期，促销期内的成本被高估约 2 倍。",
     "glm-5.3-flash": "同 glm-5.3：5 折促销 2026-09-09 到期，跨期报告会高估促销期成本。该模型无夜间免费，是实测成本大头（2026-09-12~14 占 72%）。"
   },
+  "low_confidence_bias": {
+    "_comment": "偏差方向（v1.7.0 新增，机读）：与 low_confidence 同键。over=静态估算高于实际（如夜间免费被全时段计费）；under=静态估算低于实际（如峰谷双档取空闲价，高峰被低估）；mixed=方向不明。报告据此渲染 ⚠↑/⚠↓，让用户一眼看出 L2 数字是虚高还是虚低。",
+    "hy4-preview": "over",
+    "hy4-preview-x": "over",
+    "deepseek-v4.1-flash": "under",
+    "glm-5.3": "over",
+    "glm-5.3-flash": "over"
+  },
   "display_merge": {
     "hy4-preview-x": "hy4-preview",
     "hy3-x": "hy3",

@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.7.0** | 2026-09-15 | F17 P1 请求数反推 + P2 路由别名解析；低置信度最贵模型 A1/A2/A3 告警 | [tag/v1.7.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.0) |
 | **v1.6.1** | 2026-09-14 | 修复 §3.5 误报盲区（官方侧补 display_merge 归拢，虚报 410.95 积分） | [tag/v1.6.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.1) |
 | **v1.6.0** | 2026-09-14 | F17 双源对账：官方用量导出接入（`--import-official`）· 成本 L1 真值 | [tag/v1.6.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.0) |
 | **v1.5.2** | 2026-09-14 | 成本置信度（L1 真值 / L2 估算）· 低置信度模型标注 | [tag/v1.5.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.2) |
@@ -19,6 +20,20 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.1.2** | 2026-08-12 | SkillHub 重新发布修正 | [tag/v1.1.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.2) |
 | **v1.1.1** | 2026-08-11 | 日历对齐周期 · XSS 防护 | [tag/v1.1.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.1) |
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
+
+---
+
+## v1.7.0 — 2026-09-15
+
+**F17 双源对账 P1/P2 + 低置信度最贵模型告警（A1/A2/A3）**
+
+- **F17 · P1 请求数反推**：消除「11.9x 粒度差 = 用量暴涨」误读。按 `session_id` + 15 分钟时间窗聚类反推「估算请求数」（`summary.estimated_request_count`），§1 概览新增该行，L1 下展示估算 ↔ 官方请求数倍率。解析兼容毫秒时间戳与 ISO 字符串。
+- **F17 · P2 路由别名解析**：`auto` / `fast-model` / `balanced-model` / `extreme-model` 不记录落地底层模型，报告显式「单独成组、不计入最贵模型与省钱建议」，单价为计费模型均价估算。
+- **A1 省钱杠杆过滤**：`build_savings_insights` 排除低置信度模型，§4.4 顶部改提示折扣/时段模型。
+- **A2 机读偏差方向**：`pricing.json` 新增 `low_confidence_bias`，报告渲染 `⚠↑`（高估）/ `⚠↓`（低估）。
+- **A3 高位告警**：低置信度模型恰为最贵（或 Top-3）时，§3 + §4.4 顶部加醒目横幅「真实花费以官方账单为准，不要据此切换模型」。
+
+- 🔗 [GitHub Release v1.7.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.0)
 
 ---
 

@@ -287,6 +287,51 @@ def main():
     total_input_cost = sum(t["input_cost"] for t in traces)
     total_output_cost = sum(t["output_cost"] for t in traces)
     total_effective_cost = round(sum(t.get("effective_cost", 0.0) for t in traces), 2)
+    # F17 · P1 请求数反推（估算）：trace 是 generation 粒度，与官方「请求数」差一个量级
+    # （实测约 11.9x）。按 session_id + 时间窗聚类启发式反推「估算请求数」：同一会话内
+    # 两次 trace 间隔超过阈值（默认 15 分钟）视为新的用户请求；无 session_id 的 trace
+    # 每条算 1 次。这是估算值，口径与官方「请求数」不同，仅用于对照，不等同请求数。
+    def _parse_started_at(v):
+        """started_at 在多层数据源里格式不统一：WorkBuddy trace 是 Unix 毫秒时间戳，
+        claude-code / codex 等适配器是 ISO 8601 字符串。统一解析为带时区 datetime。"""
+        if v is None or v == "":
+            return None
+        if isinstance(v, (int, float)):
+            return ts_to_dt(v)
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            try:
+                return ts_to_dt(int(s))          # 数值毫秒时间戳
+            except ValueError:
+                pass
+            try:
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=8)))
+            except ValueError:
+                return None
+        return None
+
+    def _cluster_requests(trs, gap_min=15):
+        by_sid = {}
+        solo = 0
+        for t in trs:
+            sid = (t.get("session_id") or "").strip()
+            dt = _parse_started_at(t.get("started_at"))
+            if not sid or dt is None:
+                solo += 1
+                continue
+            by_sid.setdefault(sid, []).append(dt)
+        req = solo
+        for dts in by_sid.values():
+            dts.sort()
+            prev = None
+            for d in dts:
+                if prev is None or (d - prev).total_seconds() > gap_min * 60:
+                    req += 1
+                prev = d
+        return req
+    estimated_request_count = _cluster_requests(traces, gap_min=15)
     # 缓存占比：缓存命中 token 占输入 token 的比例（越高说明越多重复上下文被廉价复用）
     cache_rate = (total_cached / total_input * 100) if total_input else 0
 
@@ -311,6 +356,9 @@ def main():
         "total_input_cost": total_input_cost,
         "total_output_cost": total_output_cost,
         "total_effective_cost": round(total_effective_cost, 2),
+        # F17 · P1：generation 聚类反推的「估算请求数」（口径与官方请求数不同，仅对照用）
+        "estimated_request_count": estimated_request_count,
+        "request_estimate_gap_minutes": 15,
     }
 
     # 任务类型分布（D5：仅统计本期有 trace 的会话，避免历史空会话虚高 §5）
@@ -400,6 +448,8 @@ def main():
     # 供报告把受服务端时段 / 配额减免影响的模型标为低置信度、不参与成本结论。
     # 同样来自 pricing.json（可用 pricing.local.json 覆盖），渲染层不硬编码。
     result["meta"]["low_confidence"] = dict(LOW_CONFIDENCE)
+    # 成本置信度偏差方向（v1.7.0，机读）：模型名 -> over/under/mixed，供报告渲染 ⚠↑/⚠↓。
+    result["meta"]["low_confidence_bias"] = dict(LOW_CONFIDENCE_BIAS)
     # 是否加载了本地定价覆盖（pricing.local.json），供报告透明提示。
     result["meta"]["pricing_local_loaded"] = bool(_PRICING_LOCAL_LOADED)
     # 档位维度元信息（v1.3.0）：档位估算标记、官方倍率缓存是否生效、最终档位单价表。

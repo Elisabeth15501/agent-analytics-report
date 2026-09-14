@@ -23,7 +23,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
-__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'load_task_rules', 'low_confidence_reason', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
+__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'LOW_CONFIDENCE_BIAS', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'load_task_rules', 'low_confidence_reason', 'low_confidence_bias', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
 TIMED_FREE = {
     # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
     # 以 pricing.json 的 timed_free 段为准（权威源）。
@@ -35,6 +35,14 @@ LOW_CONFIDENCE = {
     # 语义：该模型的「静态单价 × token」估算与实际计费存在**已知系统性偏差**
     # （服务端时段减免 / 用户配额，静态价表无法表达），报告应标为低置信度、不参与成本结论。
     # 键为模型名，值为给用户看的原因说明。
+}
+
+LOW_CONFIDENCE_BIAS = {
+    # 兜底种子值（通常为空）；运行时由 pricing.json 的 low_confidence_bias 段覆盖（权威源）。
+    # 语义：与 low_confidence 同键，值为偏差方向 —— over=估算高于实际 / under=估算低于实际 /
+    # mixed=方向不明。渲染层据此画 ⚠↑ / ⚠↓。
+    # ⚠️ 必须先在此处定义：_load_pricing_config() 在模块加载早期（下方）就会读取它来
+    # 初始化 cfg，若只在 _PRICING 生成后再赋值会触发 NameError。
 }
 
 MODEL_PRICING = {
@@ -254,6 +262,7 @@ def _load_pricing_config():
         "models": dict(MODEL_PRICING),
         "timed_free": dict(TIMED_FREE),
         "low_confidence": dict(LOW_CONFIDENCE),
+        "low_confidence_bias": dict(LOW_CONFIDENCE_BIAS),
         "custom_local": dict(CUSTOM_LOCAL_PRICING),
         "default_model": DEFAULT_MODEL,
         "delisted_models": set(),
@@ -274,6 +283,13 @@ def _load_pricing_config():
                 # 成本置信度（v1.5.2）：模型名 -> 偏差原因说明；跳过 _comment 等元数据键
                 cfg["low_confidence"].update(
                     {normalize_model(k): str(v) for k, v in data["low_confidence"].items()
+                     if not str(k).startswith("_")}
+                )
+            if isinstance(data.get("low_confidence_bias"), dict):
+                # 偏差方向（v1.7.0 · A2）：模型名 -> over/under/mixed；与 low_confidence 同键。
+                # 渲染层据此画 ⚠↑/⚠↓，让用户一眼看出 L2 数字是虚高还是虚低。
+                cfg["low_confidence_bias"].update(
+                    {normalize_model(k): str(v).strip().lower() for k, v in data["low_confidence_bias"].items()
                      if not str(k).startswith("_")}
                 )
             if isinstance(data.get("delisted"), dict):
@@ -319,6 +335,12 @@ def _load_pricing_config():
             if isinstance(local.get("low_confidence"), dict):
                 cfg["low_confidence"].update(
                     {normalize_model(k): str(v) for k, v in local["low_confidence"].items()
+                     if not str(k).startswith("_")}
+                )
+            if isinstance(local.get("low_confidence_bias"), dict):
+                # 本地覆盖也允许改偏差方向（v1.7.0 · A2）
+                cfg["low_confidence_bias"].update(
+                    {normalize_model(k): str(v).strip().lower() for k, v in local["low_confidence_bias"].items()
                      if not str(k).startswith("_")}
                 )
             if isinstance(local.get("display_merge"), dict):
@@ -371,6 +393,9 @@ TIMED_FREE = _PRICING["timed_free"]
 
 # 成本置信度（v1.5.2）：模型名 -> 偏差原因说明。为空表示该模型估算可信。
 LOW_CONFIDENCE = _PRICING["low_confidence"]
+
+# 成本置信度偏差方向（v1.7.0）：与 LOW_CONFIDENCE 同键，值为 over/under/mixed（机读）。
+LOW_CONFIDENCE_BIAS = _PRICING.get("low_confidence_bias", {})
 
 CUSTOM_LOCAL_PRICING = _PRICING["custom_local"]
 
@@ -503,6 +528,18 @@ def low_confidence_reason(model_name):
     if not model_name:
         return ""
     return LOW_CONFIDENCE.get(normalize_model(model_name), "") or ""
+
+
+def low_confidence_bias(model_name):
+    """返回该模型低置信度偏差方向（机读）：'over' / 'under' / 'mixed' / ''（空=可信）。
+
+    v1.7.0 新增：与 low_confidence_reason 配套，供报告渲染方向箭头
+    （⚠↑ 高估 / ⚠↓ 低估 / ⚠ 方向不明），让用户一眼看出 L2 静态估算
+    是虚高还是虚低。数据源为 pricing.json 的 low_confidence_bias 段。
+    """
+    if not model_name:
+        return ""
+    return LOW_CONFIDENCE_BIAS.get(normalize_model(model_name), "") or ""
 
 def price_of(model_name, channel=None, as_of_date=None):
     """返回 (input_per_million, output_per_million) 元；未配置 / 未知返回 (None, None)。
