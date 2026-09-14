@@ -99,9 +99,25 @@ python scripts/generate_report.py data.json --output report.html --format html
 
 `credits <= 0` 判为**免费请求**（官方对时段减免 / 免费额度的实际结果）。
 
-`reconcile_with_trace(official, model_stats)` 产出对账结果，报告渲染为 **§3.5 双源对账**：
-`missing_in_trace`（官方有 / trace 无 → 成本被低估）、`trace_only`（本地 / 免费 / 路由，不是漏记）、
-`both`（给粒度倍数）。
+`reconcile_with_trace(official, model_stats, alias_map=DISPLAY_MERGE)` 产出对账结果，
+报告渲染为 **§3.5 双源对账**：`missing_in_trace`（官方有 / trace 无 → 成本被低估）、
+`trace_only`（本地 / 免费 / 路由，不是漏记）、`both`（给粒度倍数）。
+
+#### 2.3.1 变体归拢（`collapse_display_aliases`，v1.6.1）
+
+trace 侧早已按 `display_merge` 把收费版变体归并显示为基名（`hy3-x` → `hy3`、
+`hy4-preview-x` → `hy4-preview`，见 `ca_core.merge_display_key`）。**官方侧必须过同一层映射**，
+否则精确匹配会对不上，把变体误报成盲区。
+
+实测（30 日 / 802 请求）：不归拢时 `hy3-x`(97 / 397.43) 与 `hy4-preview-x`(1 / 13.52) 被误报，
+虚报 410.95 积分 = `missing_credits` 的 75.7%；真实盲区只有 131.62。归拢后
+`missing_credits` **542.57 → 131.62**，被归并的变体写进 `variants`，报告显示为 `hy3（含 hy3-x）`。
+
+> ⚠️ **不做模型名归一化（v1.6.1 明确边界）**：这里只做 `display_merge` 里**显式配置**的
+> 「同模型收费版变体」归拢，**不剥离 `custom-local:` 之类的来源前缀**。该前缀是
+> 「WorkBuddy 自建 vs 外部 API」的唯一可辨识标识，剥掉就无法判断 token 归属；
+> 来源信息另由 `is_local` / `is_custom` 通道标记承载，报告 §3.2 据此拆成
+> 官方/网关 · 本地模型(🏠) · 外部 API(🔧) 三节。
 
 ### 2.4 成本两级制
 

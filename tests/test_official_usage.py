@@ -28,6 +28,7 @@ if str(SKILL_DIR) not in sys.path:
 
 from adapters.official_usage import (  # noqa: E402
     OfficialUsageError,
+    collapse_display_aliases,
     collect_official_usage,
     load_official_usage,
     map_headers,
@@ -370,6 +371,59 @@ def test_reconcile_trace_only():
     assert rec["missing_in_trace"] == []
 
 
+@allure.feature("F17 官方导出")
+@allure.story("双源对账")
+@allure.title("display_merge 归拢：官方侧变体名合并到基础名并保留 variants")
+def test_collapse_display_aliases_merges_variants():
+    by_model = [{"name": "hy3", "requests": 444, "credits": 0.0},
+                {"name": "hy3-x", "requests": 97, "credits": 397.43}]
+    merged, alias_of = collapse_display_aliases(
+        by_model, {"hy3-x": "hy3", "hy4-preview-x": "hy4-preview"})
+    assert alias_of == {"hy3": "hy3", "hy3-x": "hy3"}
+    assert merged["hy3"]["requests"] == 541
+    assert merged["hy3"]["credits"] == 397.43
+    assert merged["hy3"]["variants"] == ["hy3-x"]
+    # 无 alias_map 时行为不变（保持旧契约）
+    plain, _ = collapse_display_aliases(by_model, None)
+    assert set(plain) == {"hy3", "hy3-x"}
+    assert all(v["variants"] == [] for v in plain.values())
+
+
+@allure.feature("F17 官方导出")
+@allure.story("双源对账")
+@allure.title("回归：官方 hy3-x 不被误判为 trace 盲区（2026-08-13~09-12 实测 410.95 积分虚报）")
+def test_reconcile_display_alias_no_false_blindspot():
+    off = _official_stub([("hy3", 444, 0.0), ("hy3-x", 97, 397.43),
+                          ("hy4-preview", 62, 43.4), ("hy4-preview-x", 1, 13.52),
+                          ("hunyuan-image-alpha", 21, 119.91)])
+    trace = [{"model": "hy3", "calls": 559, "total_cost": 92.26},
+             {"model": "hy4-preview", "calls": 54, "total_cost": 17.85}]
+    rec = reconcile_with_trace(off, trace, alias_map={"hy3-x": "hy3",
+                                                      "hy4-preview-x": "hy4-preview"})
+    assert [m["model"] for m in rec["missing_in_trace"]] == ["hunyuan-image-alpha"]
+    assert rec["missing_credits"] == 119.91
+    both = {m["model"]: m for m in rec["both"]}
+    assert both["hy3"]["official_requests"] == 541
+    assert both["hy3"]["official_credits"] == 397.43
+    assert both["hy3"]["variants"] == ["hy3-x"]
+    assert both["hy4-preview"]["variants"] == ["hy4-preview-x"]
+    # 对照：不传 alias_map 时会误报（保留该断言以防修复被回退）
+    bad = reconcile_with_trace(off, trace)
+    assert set(m["model"] for m in bad["missing_in_trace"]) >= {"hy3-x", "hy4-preview-x"}
+
+
+@allure.feature("F17 官方导出")
+@allure.story("双源对账")
+@allure.title("变体归拢不得剥离 custom-local: 前缀（保留自建/外部来源可辨识性）")
+def test_reconcile_alias_keeps_custom_local_prefix():
+    off = _official_stub([("hy3", 2, 0.0)])
+    trace = [{"model": "custom-local:hy3", "calls": 7, "total_cost": 0.0},
+             {"model": "hy3", "calls": 4, "total_cost": 0.0}]
+    rec = reconcile_with_trace(off, trace, alias_map={"hy3-x": "hy3"})
+    names = [m["model"] for m in rec["trace_only"]]
+    assert "custom-local:hy3" in names  # 前缀未被归一化掉
+
+
 # ──────────────────────────────────────────────────────────────
 # 5. CLI 端到端（USERPROFILE 隔离，不碰真实数据）
 # ──────────────────────────────────────────────────────────────
@@ -510,6 +564,24 @@ def test_report_l1_rendering(report_module):
     assert "3.5 双源对账" in html
     assert "官方积分合计（L1 真值）" in html
     assert "调用次数·generation 粒度" in html
+
+
+@allure.feature("F17 官方导出")
+@allure.story("报告渲染")
+@allure.title("§3.5 标出被归并的收费版变体（hy3 含 hy3-x），不显示为独立盲区")
+def test_report_reconciliation_shows_merged_variants(report_module):
+    data = _report_data_with_official()
+    data["reconciliation"] = {
+        "official_requests": 82, "trace_generations": 101, "ratio": 1.2,
+        "missing_in_trace": [], "missing_credits": 0.0, "trace_only": [],
+        "both": [{"model": "hy3", "official_requests": 541, "trace_generations": 559,
+                  "official_credits": 397.43, "trace_est_cost": 92.26,
+                  "variants": ["hy3-x"]}],
+    }
+    md = report_module.generate_markdown_report(data)
+    assert "hy3（含 hy3-x）" in md
+    html = report_module.generate_html_report(data)
+    assert "hy3（含 hy3-x）" in html
 
 
 @allure.feature("F17 官方导出")

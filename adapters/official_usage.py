@@ -462,12 +462,48 @@ def _group(rows, keyfn):
 # 4. 双源对账
 # ──────────────────────────────────────────────────────────────
 
-def reconcile_with_trace(official, trace_model_stats, trace_total_calls=0):
+def collapse_display_aliases(by_model, alias_map):
+    """把官方模型名按 `display_merge` 归拢到基础名，与 trace 侧的显示口径对齐。
+
+    为什么必须做：trace 侧已把「收费版变体」合并显示为基名（如 `hy3-x` → `hy3`，
+    见 `ca_core.merge_display_key`）。若官方侧不过同一层映射，`hy3-x` 会因精确匹配
+    不上而被**误判成 trace 盲区**。
+
+    实测（2026-08-13~09-12，30 日）：不归拢时 `hy3-x`(97 请求 / 397.43 积分) 与
+    `hy4-preview-x`(1 / 13.52) 被误报为盲区，虚报 410.95 积分 —— 占 missing_credits
+    的 75.7%，而真实盲区（图像模型）只有 131.35。
+
+    :return: ({基础名: {requests, credits, variants}}, {变体名: 基础名})
+    """
+    if not alias_map:
+        return ({m["name"]: dict(m, variants=[]) for m in by_model}, {})
+
+    # 键按小写索引（与 ca_core.merge_display_key 的 normalize_model 口径一致），
+    # 官方导出里的大小写差异不影响归并；值是**原始写法**的基础名，保证显示一致。
+    lookup = {str(k).strip().lower(): v for k, v in alias_map.items()}
+
+    merged = {}
+    alias_of = {}
+    for m in by_model:
+        base = lookup.get(m["name"].strip().lower(), m["name"])
+        alias_of[m["name"]] = base
+        slot = merged.setdefault(base, {"name": base, "requests": 0, "credits": 0.0,
+                                        "variants": []})
+        slot["requests"] += m["requests"]
+        slot["credits"] = round(slot["credits"] + m["credits"], 2)
+        if base != m["name"]:
+            slot["variants"].append(m["name"])
+    return merged, alias_of
+
+
+def reconcile_with_trace(official, trace_model_stats, trace_total_calls=0, alias_map=None):
     """官方导出（请求/积分真值）与本地 trace（generation 粒度）对账。
 
     :param official: collect_official_usage() 的产物
     :param trace_model_stats: model_stats（aggregate_by_exec_model 输出，含 model/calls/total_cost）
     :param trace_total_calls: trace generation 总数
+    :param alias_map: `display_merge` 映射（变体名 -> 基础名）。传入后官方侧先归拢，
+        与 trace 侧显示口径对齐，避免把 `hy3-x` 这类变体误判成 trace 盲区。
     :return: {
         official_requests, trace_generations, ratio,
         missing_in_trace: [...],   # 官方有、trace 无 → 成本被低估
@@ -475,7 +511,8 @@ def reconcile_with_trace(official, trace_model_stats, trace_total_calls=0):
         both: [...],               # 两边都有，给倍数
     }
     """
-    off_by_model = {m["name"]: m for m in (official or {}).get("by_model", [])}
+    off_by_model, _ = collapse_display_aliases(
+        (official or {}).get("by_model", []), alias_map)
     trace_by_model = {}
     for m in trace_model_stats or []:
         name = (m.get("model") or "").strip()
@@ -496,6 +533,7 @@ def reconcile_with_trace(official, trace_model_stats, trace_total_calls=0):
             missing.append({
                 "model": name, "official_requests": o["requests"],
                 "official_credits": o["credits"],
+                "variants": o.get("variants") or [],
             })
         elif t and not o:
             trace_only.append({
@@ -508,6 +546,7 @@ def reconcile_with_trace(official, trace_model_stats, trace_total_calls=0):
                 "trace_generations": t["calls"],
                 "official_credits": o["credits"],
                 "trace_est_cost": round(t["cost"], 2),
+                "variants": o.get("variants") or [],
             })
 
     missing.sort(key=lambda x: -x["official_credits"])

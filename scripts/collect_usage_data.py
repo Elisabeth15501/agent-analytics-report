@@ -357,7 +357,10 @@ def main():
         official["meta"]["rows_out_of_window"] = max(0, _all_rows - official["totals"]["requests"])
 
         result["official_usage"] = official
-        result["reconciliation"] = reconcile_with_trace(official, result["model_stats"])
+        # 官方侧先按 display_merge 归拢（hy3-x → hy3 等），与 trace 侧显示口径对齐。
+        # 否则变体会因精确匹配不上而被误判成「trace 盲区」——实测 30 日会虚报 410.95 积分。
+        result["reconciliation"] = reconcile_with_trace(
+            official, result["model_stats"], alias_map=dict(DISPLAY_MERGE))
         result["meta"]["cost_source"] = "official"
         result["meta"]["official_import"] = {
             "file": official["meta"]["file"],

@@ -968,6 +968,15 @@ def build_reconciliation_section(fmt, data):
     if off is None:
         return []
 
+    def _label(m):
+        """基础模型名 + 已归并的收费版变体（如 hy3 ← hy3-x）。
+
+        官方侧 `hy3-x` 会被 display_merge 归并到 `hy3`（与 trace 侧显示口径一致），
+        这里把被归并掉的变体显式标出来，避免读者以为「官方有个 trace 没有的模型」。
+        """
+        vs = m.get("variants") or []
+        return f"{m['model']}（含 {'、'.join(vs)}）" if vs else m["model"]
+
     w = off.get("meta", {}).get("window", {})
     ratio = rec.get("ratio", 0.0)
     missing = rec.get("missing_in_trace", []) or []
@@ -989,7 +998,7 @@ def build_reconciliation_section(fmt, data):
                       f"—— 真实计费但被 trace 漏记，纯 trace 成本会低估**：", "",
                       "| 模型 | 官方请求 | 官方积分 |", "|------|--------:|--------:|"]
             for m in missing:
-                lines.append(f"| `{m['model']}` | {m['official_requests']} | {m['official_credits']:.2f} |")
+                lines.append(f"| `{_label(m)}` | {m['official_requests']} | {m['official_credits']:.2f} |")
             lines.append("")
 
         if trace_only:
@@ -1007,7 +1016,7 @@ def build_reconciliation_section(fmt, data):
                       "| 模型 | 官方请求 | trace generation | 官方积分 | trace 估算 |",
                       "|------|--------:|-----------------:|--------:|-----------:|"]
             for m in both[:15]:
-                lines.append(f"| `{m['model']}` | {m['official_requests']} | {m['trace_generations']} | "
+                lines.append(f"| `{_label(m)}` | {m['official_requests']} | {m['trace_generations']} | "
                              f"{m['official_credits']:.2f} | ¥{m['trace_est_cost']:.2f} |")
             if len(both) > 15:
                 lines.append(f"| … 其余 {len(both) - 15} 项 | | | | |")
@@ -1036,7 +1045,7 @@ def build_reconciliation_section(fmt, data):
                    f'纯 trace 成本会低估</b></p>')
         out.append('        <table><thead><tr><th>模型</th><th>官方请求</th><th>官方积分</th></tr></thead><tbody>')
         for m in missing:
-            out.append(f'        <tr><td><code>{_esc(m["model"])}</code></td>'
+            out.append(f'        <tr><td><code>{_esc(_label(m))}</code></td>'
                        f'<td>{m["official_requests"]}</td><td>{m["official_credits"]:.2f}</td></tr>')
         out.append('        </tbody></table>')
 
@@ -1055,7 +1064,7 @@ def build_reconciliation_section(fmt, data):
         out.append('        <table><thead><tr><th>模型</th><th>官方请求</th><th>trace generation</th>'
                    '<th>官方积分</th><th>trace 估算</th></tr></thead><tbody>')
         for m in both[:15]:
-            out.append(f'        <tr><td><code>{_esc(m["model"])}</code></td>'
+            out.append(f'        <tr><td><code>{_esc(_label(m))}</code></td>'
                        f'<td>{m["official_requests"]}</td><td>{m["trace_generations"]}</td>'
                        f'<td>{m["official_credits"]:.2f}</td><td>¥{m["trace_est_cost"]:.2f}</td></tr>')
         out.append('        </tbody></table>')

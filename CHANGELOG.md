@@ -2,6 +2,28 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.6.1] — 2026-09-14
+
+### 🐛 修复：§3.5 双源对账把「收费版变体」误报成 trace 盲区
+
+- **根因**：trace 侧早已按 `display_merge` 把收费版变体归并显示（`hy3-x` → `hy3`、
+  `hy4-preview-x` → `hy4-preview`），但官方侧**没有过同一层映射**，对账用精确模型名匹配，
+  于是 `hy3-x` / `hy4-preview-x` 匹配不上 trace 的 `hy3` / `hy4-preview`，被判成
+  「官方有、trace 无」的盲区。
+- **实测影响**（2026-08-13 ~ 09-12，30 日导出 802 请求 / 2902.39 积分）：
+  虚报盲区 410.95 积分，占 `missing_credits` 的 **75.7%**；真实盲区只有 131.35。
+- **修复**：新增 `collapse_display_aliases()`，官方侧先按 `display_merge` 归拢到基础名
+  （键按小写索引，与 `ca_core.merge_display_key` 口径一致），再与 trace 比对；
+  被归并的变体写进 `variants` 字段。报告里渲染为 `hy3（含 hy3-x）`，
+  让读者一眼看出「这是同一模型的收费版，不是官方独有的模型」。
+- **明确不做**：不做模型名归一化（不剥离 `custom-local:` 前缀）——
+  那是「WorkBuddy 自建 vs 外部 API」的唯一来源标识，剥掉就无法判断 token 归属。
+  §3.2 已用 `is_local` / `is_custom` 通道标记把用量拆成 官方/网关 · 本地模型 · 外部 API 三节。
+- 回归用例 3 + 1 个：变体归拢、不再误判盲区（含「不传 alias_map 会误报」的反向断言）、
+  前缀不被剥离、§3.5 渲染 `hy3（含 hy3-x）`。
+- 修复后：30 日导出 `missing_credits` 542.57 → **131.62**，盲区仅剩
+  `hunyuan-image-alpha` / `hunyuan-image-v3.0-art` / `deepseek-v4-pro`（真实漏记）。
+
 ## [1.6.0] — 2026-09-14
 
 ### 🎯 F17 双源对账：官方用量导出接入（P0 全部落地）

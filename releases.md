@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.6.1** | 2026-09-14 | 修复 §3.5 误报盲区（官方侧补 display_merge 归拢，虚报 410.95 积分） | [tag/v1.6.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.1) |
 | **v1.6.0** | 2026-09-14 | F17 双源对账：官方用量导出接入（`--import-official`）· 成本 L1 真值 | [tag/v1.6.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.0) |
 | **v1.5.2** | 2026-09-14 | 成本置信度（L1 真值 / L2 估算）· 低置信度模型标注 | [tag/v1.5.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.2) |
 | **v1.5.1** | 2026-09-12 | 定价数据刷新（DeepSeek V4.1-Flash 峰谷双档 · V4-Flash 下架 · Hy4 限免新规） | [tag/v1.5.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.1) |
@@ -18,6 +19,27 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.1.2** | 2026-08-12 | SkillHub 重新发布修正 | [tag/v1.1.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.2) |
 | **v1.1.1** | 2026-08-11 | 日历对齐周期 · XSS 防护 | [tag/v1.1.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.1) |
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
+
+---
+
+## v1.6.1 — 2026-09-14
+
+**修复：§3.5 把「收费版变体」误报成 trace 盲区（虚报 75.7% 的漏记积分）**
+
+v1.6.0 上线后，用 30 天官方导出（802 请求 / 2902.39 积分）实测发现 §3.5 的
+「官方有、trace 无」里混进了 `hy3-x`（97 请求 / 397.43 积分）和 `hy4-preview-x`（1 / 13.52）——
+它们不是盲区，而是 `hy3` / `hy4-preview` 的**收费版变体**，trace 侧早已按 `display_merge`
+归并显示为基名，官方侧却没过同一层映射，精确匹配自然对不上。
+
+修复后：官方侧先按 `display_merge` 归拢，报告里标成 `hy3（含 hy3-x）`。
+`missing_credits` **542.57 → 131.62**，剩下的盲区才是真的（图像模型 + VSCode 客户端的
+`deepseek-v4-pro`）。
+
+顺带明确一条边界：**不做模型名归一化**。`custom-local:` 这类前缀是「WorkBuddy 自建 vs
+外部 API」的唯一来源标识，剥掉就没法判断 token 归属了。§3.2 已用 `is_local` / `is_custom`
+通道标记把用量拆成 官方/网关 · 本地模型(🏠) · 外部 API(🔧) 三节，来源信息不依赖模型名。
+
+- 🔗 [GitHub Release v1.6.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.1)
 
 ---
 
