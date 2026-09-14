@@ -399,8 +399,7 @@ def build_model_cost_chart(model_stats, title="各模型估算实际花费对比
         reason = _lc_reason(m.get("model"), low_conf_map)
         if reason:
             n_lc += 1
-        tip = _esc(reason or str(m["model"]))
-        mark = f'<span class="lc-flag" title="{tip}">⚠</span>' if reason else ""
+        mark = "⚠" if reason else ""
         rows.append(
             f'        <div class="bar-row"><span class="bar-label" title="{m["model"]}">{mark}{m["model"]}</span>'
             f'<span class="bar-track"><span class="bar-fill" style="width:{w}px"></span></span>'
@@ -496,7 +495,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
         # v1.5.2：低置信度（估算与实际计费存在已知系统性偏差）——与限免标记可共存
         _lc = _lc_reason(m["model"], low_conf_map)
         if _lc:
-            _lc_mark = ' <span class="lc-flag" title="低置信度估算">⚠</span>' if fmt == "html" else " ⚠"
+            _lc_mark = " ⚠"
             mname = f"{mname}{_lc_mark}"
         eff = m.get("effective_cost", 0) or 0.0
         is_free = cfg and m.get("unit_price_input") == 0 and m.get("unit_price_output") == 0
@@ -2488,7 +2487,6 @@ def generate_html_report(data):
         .disclaimer-box ul { margin: 6px 0 0; padding-left: 20px; }
         .disclaimer-box li { margin: 4px 0; }
         /* v1.5.2 成本置信度：低置信度估算标记 */
-        .lc-flag { margin-right: 4px; cursor: help; }
         .lc-note { color: var(--disclaimer-fg); font-size: 12px; }
         .chart-bars .lc-note { margin: 8px 0 0; }
         /* v1.6.0 双源对账（§3.5） */

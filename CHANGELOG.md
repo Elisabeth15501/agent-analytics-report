@@ -2,6 +2,15 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.6.2] — 2026-09-14
+
+### 🐛 修复：低置信度模型标记改为纯 ⚠（去 span 包裹）
+
+- 模型表与成本条形图的低置信度标记原为 `<span class="lc-flag" title="低置信度估算">⚠</span>`，
+  HTML 中多了一层 span 包裹，与 Markdown 版的纯 `⚠` 不一致。改为纯 `⚠` 字符，
+  并删除不再使用的 `.lc-flag` CSS 规则。
+- 验证：生成报告 HTML 中 `lc-flag` 零匹配；`test_cost_confidence.py` 9 passed。
+
 ## [1.6.1] — 2026-09-14
 
 ### 🐛 修复：§3.5 双源对账把「收费版变体」误报成 trace 盲区
