@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.7.1** | 2026-09-16 | Phase B 按调用时刻应用时段定价：B4 夜间免费 / B5 峰谷双档 / B6 促销跨期 | [tag/v1.7.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.1) |
 | **v1.7.0** | 2026-09-15 | F17 P1 请求数反推 + P2 路由别名解析；低置信度最贵模型 A1/A2/A3 告警 | [tag/v1.7.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.0) |
 | **v1.6.1** | 2026-09-14 | 修复 §3.5 误报盲区（官方侧补 display_merge 归拢，虚报 410.95 积分） | [tag/v1.6.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.1) |
 | **v1.6.0** | 2026-09-14 | F17 双源对账：官方用量导出接入（`--import-official`）· 成本 L1 真值 | [tag/v1.6.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.0) |
@@ -20,6 +21,21 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.1.2** | 2026-08-12 | SkillHub 重新发布修正 | [tag/v1.1.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.2) |
 | **v1.1.1** | 2026-08-11 | 日历对齐周期 · XSS 防护 | [tag/v1.1.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.1) |
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
+
+---
+
+## v1.7.1 — 2026-09-16
+
+**Phase B · 按调用时刻应用时段定价（B4 / B5 / B6）**
+
+- **根因**：过去 `price_of(m)` 只传 `as_of_date`，夜间调用与白天同价，是 hy4-preview「严重高估」、deepseek-v4.1-flash「低估」的根因。模型刊例价是静态的，但服务端按「时刻」生效的减免/加价规则从未进 L2 成本路径。
+- **B4 夜间免费**：`call_time_of` 解析 `{as_of_date, as_of_hour, as_of_dow}`；`pricing.json` 新增 `scheduled_pricing` 段（支持 `from/until` + `hours` 跨午夜 + `dow`）。hy4-preview 夜间 23:00–08:00 免费（2026-09-11 起），夜间调用 cost→0，自动退出「高估」区间。缺小时时保守不套用。
+- **B5 峰谷双档**：deepseek-v4.1-flash 周一至周五 09:00–12:00 / 14:00–18:00 用 `peak_input/peak_output`（2.0/8.0），其余 + 周末用空闲价（1.0/4.0）。
+- **B6 促销跨期**：glm-5.3 / glm-5.3-flash 发布期 5 折（至 2026-09-09）写成 `effect=discount, factor=0.5`，跨期报告按调用日期自动选全价/5 折。
+- 接入 `ca_sources.py` / `ca_aggregate.py` / `adapters/claude_code.py` / `adapters/codex.py` 四处 trace 级计价。
+- 回归：`tests/test_v1_7_1_scheduled.py`（16 用例）；全量 **570 passed / 0 failed**。
+
+- 🔗 [GitHub Release v1.7.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.1)
 
 ---
 

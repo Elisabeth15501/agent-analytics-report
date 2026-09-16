@@ -83,6 +83,10 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_
             "configured": configured,
             "unit_price_input": ip if configured else None,
             "unit_price_output": op if configured else None,
+            # v1.7.1：本行是否配置了时段定价规则（夜间免费 / 峰谷双档 / 限期促销）——
+            # 只是「有规则」的静态标记（供报告打 ⏱），真实是否命中按每次调用时刻判定。
+            "scheduled": bool(SCHEDULED_PRICING.get(normalize_model(m))
+                              or SCHEDULED_PRICING.get(normalize_model(bm))),
             "free_calls": 0,
         })
         a["calls"] += 1
@@ -107,7 +111,8 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_
             # 入口/使用视图：按本模型在本 trace 日期的真实单价重算（免费入口记 0）
             # ⚠️ 用计费键 bm：合并行内各 trace 按「自己实际执行的模型」计价，
             # 否则 hy4-preview-x 的用量会被 hy4-preview 的限免价算成 ¥0，花费凭空消失。
-            tip, top = price_of(bm, as_of_date=t.get("date"))
+            # v1.7.1：传入调用时刻（日期 + 小时 + 星期）→ 夜间免费 / 峰谷双档 / 限期促销生效。
+            tip, top = price_of(bm, **call_time_of(t.get("started_at"), t.get("date")))
             if tip is not None and top is not None:
                 inp = t.get("input_tokens", 0)
                 out = t.get("output_tokens", 0)

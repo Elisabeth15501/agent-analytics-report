@@ -2,6 +2,43 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.7.1] — 2026-09-16
+
+### ⏱️ Phase B · 按调用时刻应用时段定价（B4 / B5 / B6）
+
+**根因**：`ca_aggregate.py` 过去的 `price_of(m)` 只传 `as_of_date`（日期级），
+夜间调用与白天同价 —— 是 hy4-preview 被「严重高估 ¥6.95」、deepseek-v4.1-flash 被「低估」
+的根因。模型刊例价是**静态**的，但服务端按「时刻」生效的减免/加价规则（夜间免费、峰谷双档、
+限期促销）从未进过 L2 成本路径。
+
+**B4 · 按时间戳应用 `timed_free`（夜间免费）**
+- 新增时段定价基础设施：`call_time_of(started_at, date)` 把一次调用解析成
+  `{as_of_date, as_of_hour, as_of_dow}`；`pricing.json` 新增 `scheduled_pricing` 段，
+  支持 `from`/`until`（日期区间）、`hours`（跨午夜时段，如 `23-8`）、`dow`（星期）三种维度组合。
+- `price_of` 增加 `as_of_hour` / `as_of_dow` 参数；命中 `effect=free` 的规则返回 `(0.0, 0.0)`。
+- hy4-preview 夜间 23:00–08:00 免费（2026-09-11 起）生效：夜间调用 cost→0，
+  自动退出「严重高估」低置信度区间（或保留 flag 但数字正确）。
+- **保守策略**：规则声明了 `hours` 但拿不到小时（只有日期）时不套用，宁可白天价也不乱免。
+
+**B5 · 按时间戳应用 `mode_rates` 峰谷双档**
+- deepseek-v4.1-flash 周一至周五 09:00–12:00、14:00–18:00（北京时间）用 `peak_input/peak_output`
+  （2.0 / 8.0），其余时段用空闲价（1.0 / 4.0）；周末全天空闲价。消除「低估」。
+
+**B6 · 促销跨期（手动段）**
+- glm-5.3 / glm-5.3-flash 发布期 5 折（至 2026-09-09）写成 `effect=discount, factor=0.5`，
+  跨期报告自动按调用日期选全价或 5 折，不再把促销期成本整体高估。
+
+**接入范围**：`ca_sources.py`（WorkBuddy 主通道）、`ca_aggregate.py`（入口/使用视图）、
+`adapters/claude_code.py`、`adapters/codex.py` 四处 trace 级计价均改为传 `**call_time_of(...)`。
+所有 trace 已带 `started_at`，无需改采集层。
+
+**架构约束**：新增顶层段 `scheduled_pricing` 严格遵守 v1.7.0 用崩溃换来的规则——
+必须在 `ca_core.py` 文件头部与 `LOW_CONFIDENCE = {}` 并列加同名兜底种子值，
+否则 `_load_pricing_config()` 早期读取会 `NameError`。
+
+- 回归：`tests/test_v1_7_1_scheduled.py`（16 用例，覆盖 B4 夜间/边界、B5 峰谷/周末、
+  B6 促销期前后、缺小时保守、不受影响模型）；全量 **570 passed / 0 failed**。
+
 ## [1.7.0] — 2026-09-15
 
 ### 🎯 F17 双源对账 P1 / P2 + 低置信度最贵模型告警（A1 / A2 / A3）

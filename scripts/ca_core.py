@@ -23,7 +23,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
-__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'LOW_CONFIDENCE_BIAS', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_timed_free', 'iso_to_date', 'load_task_rules', 'low_confidence_reason', 'low_confidence_bias', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
+__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'LOW_CONFIDENCE_BIAS', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SCHEDULED_PRICING', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'call_time_of', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_scheduled_free', 'is_timed_free', 'iso_to_date', 'iso_to_dt', 'load_task_rules', 'low_confidence_reason', 'low_confidence_bias', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
 TIMED_FREE = {
     # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
     # 以 pricing.json 的 timed_free 段为准（权威源）。
@@ -43,6 +43,22 @@ LOW_CONFIDENCE_BIAS = {
     # mixed=方向不明。渲染层据此画 ⚠↑ / ⚠↓。
     # ⚠️ 必须先在此处定义：_load_pricing_config() 在模块加载早期（下方）就会读取它来
     # 初始化 cfg，若只在 _PRICING 生成后再赋值会触发 NameError。
+}
+
+SCHEDULED_PRICING = {
+    # 兜底种子值（通常为空）；运行时由 pricing.json 的 scheduled_pricing 段覆盖（权威源）。
+    # 语义：模型名 -> 规则列表；按调用的【时刻】（日期 + 小时 + 星期）改写静态单价。
+    # 每条规则字段：
+    #   from/until : 'YYYY-MM-DD'，生效日期区间（含端点）；缺省表示不限
+    #   dow        : 星期列表，1=周一 … 7=周日（也接受 mon/tue/.../sun）；缺省表示不限
+    #   hours      : 'HH:MM-HH:MM' 列表（北京时间，左闭右开）；支持跨午夜 23:00-08:00
+    #   effect     : free=免费 / peak=高峰价 / discount=打折
+    #   factor     : peak / discount 的倍率（缺省 peak=2.0、discount=1.0）
+    #   note       : 给用户看的说明（报告可渲染）
+    # 解决的根本问题：静态价表只能表达「模型 -> 单价」，无法表达「夜间免费 / 峰谷双档 /
+    # 限期促销」这类**按时刻变化**的服务端规则 —— 这正是低置信度偏差的主要来源。
+    # ⚠️ 与 LOW_CONFIDENCE_BIAS 同理：必须先在此处定义，否则 _load_pricing_config() 冷启动
+    # 读它会触发 NameError（v1.7.0 踩过一次，整个技能 import 即崩）。
 }
 
 MODEL_PRICING = {
@@ -263,6 +279,7 @@ def _load_pricing_config():
         "timed_free": dict(TIMED_FREE),
         "low_confidence": dict(LOW_CONFIDENCE),
         "low_confidence_bias": dict(LOW_CONFIDENCE_BIAS),
+        "scheduled_pricing": {k: list(v) for k, v in SCHEDULED_PRICING.items()},
         "custom_local": dict(CUSTOM_LOCAL_PRICING),
         "default_model": DEFAULT_MODEL,
         "delisted_models": set(),
@@ -290,6 +307,14 @@ def _load_pricing_config():
                 # 渲染层据此画 ⚠↑/⚠↓，让用户一眼看出 L2 数字是虚高还是虚低。
                 cfg["low_confidence_bias"].update(
                     {normalize_model(k): str(v).strip().lower() for k, v in data["low_confidence_bias"].items()
+                     if not str(k).startswith("_")}
+                )
+            if isinstance(data.get("scheduled_pricing"), dict):
+                # 时段定价（v1.7.1）：模型名 -> 规则列表（effect: free / peak / discount）。
+                # 按调用时刻改写静态单价；未命中任何规则时完全不影响既有行为（零回归）。
+                cfg["scheduled_pricing"].update(
+                    {normalize_model(k): list(v) if isinstance(v, (list, tuple)) else [v]
+                     for k, v in data["scheduled_pricing"].items()
                      if not str(k).startswith("_")}
                 )
             if isinstance(data.get("delisted"), dict):
@@ -348,6 +373,13 @@ def _load_pricing_config():
                     {normalize_model(k): str(v) for k, v in local["display_merge"].items()
                      if not str(k).startswith("_")}
                 )
+            if isinstance(local.get("scheduled_pricing"), dict):
+                # 本地覆盖允许新增 / 改写时段规则（v1.7.1）；同模型名整段替换，不做逐条合并
+                cfg["scheduled_pricing"].update(
+                    {normalize_model(k): list(v) if isinstance(v, (list, tuple)) else [v]
+                     for k, v in local["scheduled_pricing"].items()
+                     if not str(k).startswith("_")}
+                )
             if isinstance(local.get("mode_rates"), dict):
                 # 本地覆盖也允许改档位估算单价（优先级高于发布版 pricing.json）
                 cfg["mode_rates"].update(local["mode_rates"])
@@ -396,6 +428,9 @@ LOW_CONFIDENCE = _PRICING["low_confidence"]
 
 # 成本置信度偏差方向（v1.7.0）：与 LOW_CONFIDENCE 同键，值为 over/under/mixed（机读）。
 LOW_CONFIDENCE_BIAS = _PRICING.get("low_confidence_bias", {})
+
+# 时段定价（v1.7.1）：模型名 -> 规则列表，按调用时刻改写静态单价（见 SCHEDULED_PRICING 注释）。
+SCHEDULED_PRICING = _PRICING.get("scheduled_pricing", {})
 
 CUSTOM_LOCAL_PRICING = _PRICING["custom_local"]
 
@@ -507,6 +542,173 @@ def parse_channel(raw_model_id):
         return ("custom-local", raw)
     return ("gateway", raw)
 
+_HOUR_RANGE_RE = re.compile(r"^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$")
+
+# 星期别名：1=周一 … 7=周日（与 datetime.isoweekday() 一致，便于直接比对）
+_DOW_ALIASES = {"mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6, "sun": 7}
+
+
+def iso_to_dt(iso_str, tz=TZ):
+    """ISO 8601 字符串 → datetime（tz 感知，默认北京时间）；解析失败返回 None。
+
+    无时区后缀的朴素时间戳按北京时间解释（官方用量导出即此格式）。
+    """
+    if not iso_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tz)
+    return dt.astimezone(tz)
+
+
+def call_time_of(started_at, date_str=None, tz=TZ):
+    """把一次调用的 started_at 解析成 price_of 的时段入参字典。
+
+    兼容两种输入：Unix 毫秒时间戳（int/float 或纯数字字符串）与 ISO 8601 字符串
+    （trace 与各适配器的 started_at 两种写法都见过，见 collect_usage_data._parse_started_at）。
+    返回 {'as_of_date', 'as_of_hour', 'as_of_dow'}；解析不到的维度为 None —— 规则判定
+    对缺失维度采取「不套用该维度规则」的保守策略，宁可少打折也不乱打折。
+
+    >>> call_time_of('2026-09-12 11:30:00')['as_of_hour']
+    11
+    """
+    dt = None
+    if isinstance(started_at, bool):
+        dt = None
+    elif isinstance(started_at, (int, float)):
+        dt = ts_to_dt(started_at, tz)
+    elif isinstance(started_at, str) and started_at.strip():
+        s = started_at.strip()
+        try:
+            dt = ts_to_dt(int(s), tz)
+        except ValueError:
+            dt = iso_to_dt(s, tz)
+    if dt is None:
+        return {"as_of_date": date_str or None, "as_of_hour": None, "as_of_dow": None}
+    return {
+        "as_of_date": dt.strftime("%Y-%m-%d"),
+        "as_of_hour": dt.hour,
+        "as_of_dow": dt.isoweekday(),
+    }
+
+
+def _dow_set(raw):
+    """把规则的 dow 字段解析成 {1..7} 集合；无法识别的项丢弃。"""
+    out = set()
+    for x in raw or ():
+        if isinstance(x, bool):
+            continue
+        if isinstance(x, int):
+            if 1 <= x <= 7:
+                out.add(x)
+            continue
+        key = str(x).strip().lower()[:3]
+        if key in _DOW_ALIASES:
+            out.add(_DOW_ALIASES[key])
+    return out
+
+
+def _hour_ranges(raw):
+    """把规则的 hours 字段解析成 [(start_hour, end_hour), ...]；非法项丢弃。"""
+    out = []
+    for item in raw or ():
+        m = _HOUR_RANGE_RE.match(str(item).strip())
+        if not m:
+            continue
+        a, b = int(m.group(1)), int(m.group(3))
+        if 0 <= a <= 23 and 0 <= b <= 23:
+            out.append((a, b))
+    return out
+
+
+def _hour_in(hour, ranges):
+    """判断 hour 是否落在任一时段内（左闭右开；end<=start 视为跨午夜）。"""
+    if hour is None:
+        return False
+    for a, b in ranges:
+        if a <= b:
+            if a <= hour < b:
+                return True
+        elif hour >= a or hour < b:  # 跨午夜，如 23:00-08:00
+            return True
+    return False
+
+
+def _rule_matches(rule, as_of_date=None, as_of_hour=None, as_of_dow=None):
+    """判断一条时段规则是否命中该调用时刻。
+
+    缺失的维度按「不命中」处理：规则声明了 hours 但拿不到 as_of_hour 时不生效，
+    避免把白天的调用误判进夜间免费。
+    """
+    if not isinstance(rule, dict):
+        return False
+    if rule.get("from") and (not as_of_date or as_of_date < str(rule["from"])):
+        return False
+    if rule.get("until") and (not as_of_date or as_of_date > str(rule["until"])):
+        return False
+    dows = _dow_set(rule.get("dow"))
+    if dows and as_of_dow not in dows:
+        return False
+    hrs = _hour_ranges(rule.get("hours"))
+    if hrs and not _hour_in(as_of_hour, hrs):
+        return False
+    return True
+
+
+def scheduled_rule_for(model_name, as_of_date=None, as_of_hour=None, as_of_dow=None):
+    """返回该模型在该时刻命中的**第一条**时段规则（dict）；无命中返回 None。
+
+    规则按配置顺序判定，故更特殊的规则应写在前面。
+    """
+    rules = SCHEDULED_PRICING.get(normalize_model(model_name)) or []
+    if isinstance(rules, dict):  # 容错：允许配置成单条规则而非列表
+        rules = [rules]
+    for rule in rules:
+        if _rule_matches(rule, as_of_date, as_of_hour, as_of_dow):
+            return rule
+    return None
+
+
+def is_scheduled_free(model_name, as_of_date=None, as_of_hour=None, as_of_dow=None):
+    """该模型在该时刻是否被时段规则判为免费（effect=free）。"""
+    rule = scheduled_rule_for(model_name, as_of_date, as_of_hour, as_of_dow)
+    return bool(rule) and str(rule.get("effect") or "").strip().lower() == "free"
+
+
+def resolve_scheduled_price(ip, op, model_name, as_of_date=None, as_of_hour=None,
+                            as_of_dow=None, model_entry=None):
+    """按命中规则改写静态单价，返回 (ip, op, rule)；未命中/单价缺失时原样返回 (ip, op, None)。
+
+    effect 语义：
+      free     → (0.0, 0.0)
+      peak     → 优先取 model_entry 的 peak_input/peak_output；否则基础价 × factor（缺省 2.0）
+      discount → 基础价 × factor（缺省 1.0，即不变）
+    未识别的 effect 视为不生效，返回 (ip, op, None)。
+    """
+    rule = scheduled_rule_for(model_name, as_of_date, as_of_hour, as_of_dow)
+    if not rule or ip is None or op is None:
+        return ip, op, None
+    effect = str(rule.get("effect") or "").strip().lower()
+    try:
+        factor = float(rule.get("factor")) if rule.get("factor") is not None else None
+    except (TypeError, ValueError):
+        factor = None
+    if effect == "free":
+        return 0.0, 0.0, rule
+    if effect == "peak":
+        entry = model_entry if isinstance(model_entry, dict) else {}
+        pip, pop = entry.get("peak_input"), entry.get("peak_output")
+        if pip is not None and pop is not None:
+            return float(pip), float(pop), rule
+        return ip * (factor if factor is not None else 2.0), op * (factor if factor is not None else 2.0), rule
+    if effect == "discount":
+        return ip * (factor if factor is not None else 1.0), op * (factor if factor is not None else 1.0), rule
+    return ip, op, None
+
+
 def is_timed_free(model_name, as_of_date):
     """判断模型在 as_of_date('YYYY-MM-DD') 是否处于限时免费期内（含截止当天）。
 
@@ -541,11 +743,15 @@ def low_confidence_bias(model_name):
         return ""
     return LOW_CONFIDENCE_BIAS.get(normalize_model(model_name), "") or ""
 
-def price_of(model_name, channel=None, as_of_date=None):
+def price_of(model_name, channel=None, as_of_date=None, as_of_hour=None, as_of_dow=None):
     """返回 (input_per_million, output_per_million) 元；未配置 / 未知返回 (None, None)。
 
     channel 为空时自动从 model_name 解析（支持 custom-local:/:free/auto 等编码）。
     as_of_date('YYYY-MM-DD') 用于限时免费判定：若模型在该日期处于 TIMED_FREE 期内，返回 (0.0, 0.0)。
+
+    v1.7.1 · 时段定价：as_of_hour(0-23) 与 as_of_dow(1=周一…7=周日) 让「夜间免费 /
+    峰谷双档 / 限期促销」这类**按时刻变化**的服务端规则得以生效（见 SCHEDULED_PRICING）。
+    三者可只传部分；缺失维度按「不套用该维度规则」处理（见 _rule_matches）。
     """
     model_name = resolve_model(model_name)
     if channel is None:
@@ -562,44 +768,39 @@ def price_of(model_name, channel=None, as_of_date=None):
     # 限时免费：在截止日（含）之前的调用免费（与通道无关，gateway / custom-local 均适用）
     if as_of_date and is_timed_free(model_name, as_of_date):
         return (0.0, 0.0)
+    # —— 取静态基础单价 ——
+    entry = None
     if channel == "custom-local":
         # 优先用用户覆盖表；否则默认对齐默认网关下同名模型的单价
-        ov = CUSTOM_LOCAL_PRICING.get(normalize_model(model_name))
-        if ov:
-            return (ov.get("input"), ov.get("output"))
-        p = MODEL_PRICING.get(normalize_model(model_name))
-        if p:
-            return (p.get("input"), p.get("output"))
+        entry = CUSTOM_LOCAL_PRICING.get(normalize_model(model_name)) or None
+    if entry is None:
+        # Claude Code / Codex 外部入口与 gateway 同源：均按裸模型名查官方刊例价
+        # （通道前缀已在 parse_channel 去掉；OpenAI 模型单价见 pricing.json 的 codex 估算段）。
+        entry = MODEL_PRICING.get(normalize_model(model_name))
+    if entry is None:
         return (None, None)
-    # Claude Code 外部入口：claude-code 通道直接按裸模型名查官方刊例价（与 gateway 同源）
-    if channel == "claude-code":
-        p = MODEL_PRICING.get(normalize_model(model_name))
-        if not p:
-            return (None, None)
-        return (p.get("input"), p.get("output"))
-    # Codex CLI 外部入口：codex 通道直接按裸模型名查 OpenAI 刊例价（与 claude-code 同源，
-    # 均命中 MODEL_PRICING；OpenAI 模型单价见 pricing.json 的 codex 估算段）。
-    if channel == "codex":
-        p = MODEL_PRICING.get(normalize_model(model_name))
-        if not p:
-            return (None, None)
-        return (p.get("input"), p.get("output"))
-    # gateway（默认网关）
-    p = MODEL_PRICING.get(normalize_model(model_name))
-    if not p:
-        return (None, None)
-    return (p.get("input"), p.get("output"))
+    ip, op = entry.get("input"), entry.get("output")
+    if ip is None or op is None:
+        return (ip, op)
+    # —— v1.7.1 时段定价：夜间免费 / 峰谷双档 / 限期促销 ——
+    ip, op, _rule = resolve_scheduled_price(
+        ip, op, model_name, as_of_date, as_of_hour, as_of_dow, model_entry=entry)
+    return (ip, op)
 
-def compute_cost(input_tokens, output_tokens, model_name, channel=None):
+def compute_cost(input_tokens, output_tokens, model_name, channel=None,
+                 as_of_date=None, as_of_hour=None, as_of_dow=None):
     """按输入/输出单价精确计算成本（元）。未配置单价返回 None。"""
-    ip, op = price_of(model_name, channel)
+    ip, op = price_of(model_name, channel, as_of_date=as_of_date,
+                      as_of_hour=as_of_hour, as_of_dow=as_of_dow)
     if ip is None or op is None:
         return None
     return round((input_tokens / 1_000_000) * ip + (output_tokens / 1_000_000) * op, 4)
 
-def trace_cost(input_tokens, output_tokens, model_name, channel=None):
+def trace_cost(input_tokens, output_tokens, model_name, channel=None,
+               as_of_date=None, as_of_hour=None, as_of_dow=None):
     """用于既有表格的成本：配置了单价用精确值；未配置回退历史 blended 估算，保持现有显示不破。"""
-    c = compute_cost(input_tokens, output_tokens, model_name, channel)
+    c = compute_cost(input_tokens, output_tokens, model_name, channel,
+                     as_of_date=as_of_date, as_of_hour=as_of_hour, as_of_dow=as_of_dow)
     if c is None:
         return round((input_tokens + output_tokens) / 1_000_000 * DEFAULT_BLENDED_PER_MILLION, 4)
     return c

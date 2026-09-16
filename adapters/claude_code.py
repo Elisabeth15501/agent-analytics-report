@@ -49,7 +49,9 @@ if str(_SCRIPTS) not in sys.path:
 
 from ca_core import (
     CACHE_DISCOUNT,
+    call_time_of,
     effective_tokens_of,
+    is_scheduled_free,
     is_timed_free,
     iso_to_date,
     normalize_model,
@@ -240,7 +242,9 @@ def _parse_claude_file(path, start_date, end_date):
             bare = normalize_model(model)
             model_key = f"{CLAUDE_CHANNEL}:{bare}"
             pricing_model = resolve_model(bare)
-            ip, op = price_of(pricing_model, as_of_date=date)
+            # v1.7.1：传调用时刻（日期 + 小时 + 星期），让时段定价规则（夜间免费 / 峰谷 / 促销）生效
+            _when = call_time_of(ts, date)
+            ip, op = price_of(pricing_model, **_when)
             if ip is not None and op is not None:
                 input_cost = (in_tok / 1_000_000) * ip
                 output_cost = (out_tok / 1_000_000) * op
@@ -250,7 +254,7 @@ def _parse_claude_file(path, start_date, end_date):
             else:
                 input_cost = output_cost = cost = eff_cost = 0.0
             eff_tokens = effective_tokens_of(total, cached)
-            is_free = is_timed_free(pricing_model, date)
+            is_free = is_timed_free(pricing_model, date) or is_scheduled_free(pricing_model, **_when)
             traces.append({
                 "trace_id": f"{session_id}:{obj.get('uuid', len(traces))}",
                 "pid": _stable_pid(cwd or session_id),

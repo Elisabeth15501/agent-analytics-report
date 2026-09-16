@@ -185,14 +185,18 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
         cached_tokens = p["cached_tokens"]
 
         # 选定本 trace 的单价：路由别名用均价；限时免费模型按 trace 日期判 0；否则用模型真实单价
+        # v1.7.1：把调用【时刻】（日期 + 小时 + 星期）一并传进 price_of，让「夜间免费 /
+        # 峰谷双档 / 限期促销」这类按时段生效的服务端规则真正生效 —— 此前只传日期，
+        # 夜间调用被当成白天计费，是低置信度模型被高估的根因。
         pricing_model = resolve_model(p.get("exec_model") or p.get("raw_model"))
+        _when = call_time_of(p.get("started_at"), p.get("date"))
         use_router_avg = (channel == "router" and router_avg_ip is not None)
         if use_router_avg:
             ip, op = router_avg_ip, router_avg_op
         elif is_timed_free(pricing_model, p.get("date")):
             ip, op = 0.0, 0.0
         else:
-            ip, op = price_of(pricing_model, as_of_date=p.get("date"))
+            ip, op = price_of(pricing_model, **_when)
 
         if ip is not None and op is not None:
             input_cost = (input_tokens / 1_000_000) * ip
@@ -215,7 +219,9 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
             "output_cost": round(output_cost, 4),
             "effective_tokens": eff_tokens,
             "effective_cost": round(eff_cost, 4),
-            "is_free": is_timed_free(pricing_model, p.get("date")),
+            # v1.7.1：时段规则（夜间免费等）同样算「本次调用免费」
+            "is_free": is_timed_free(pricing_model, p.get("date"))
+                       or is_scheduled_free(pricing_model, **_when),
         })
         traces.append(p)
 
