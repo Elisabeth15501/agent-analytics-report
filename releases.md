@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.7.2** | 2026-09-22 | Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）；L1 不再渲染低置信度噪音 | [tag/v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2) |
 | **v1.7.1** | 2026-09-16 | Phase B 按调用时刻应用时段定价：B4 夜间免费 / B5 峰谷双档 / B6 促销跨期 | [tag/v1.7.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.1) |
 | **v1.7.0** | 2026-09-15 | F17 P1 请求数反推 + P2 路由别名解析；低置信度最贵模型 A1/A2/A3 告警 | [tag/v1.7.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.0) |
 | **v1.6.1** | 2026-09-14 | 修复 §3.5 误报盲区（官方侧补 display_merge 归拢，虚报 410.95 积分） | [tag/v1.6.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.1) |
@@ -21,6 +22,24 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.1.2** | 2026-08-12 | SkillHub 重新发布修正 | [tag/v1.1.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.2) |
 | **v1.1.1** | 2026-08-11 | 日历对齐周期 · XSS 防护 | [tag/v1.1.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.1) |
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
+
+---
+
+## v1.7.2 — 2026-09-22
+
+**Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）**
+
+v1.7.0 · A1 的「省钱杠杆过滤低置信度模型 + §4.4 顶部提示折扣/时段模型」是写给 L2 估算的——
+因为 L2 用的是静态价表推算的 `effective_cost`，折扣/时段模型估算不可信。但导入官方用量导出
+（L1 真值）后，§4.4 仍走 L2 估算路径，于是成本基准错用 trace 估算、还渲染 L2 专属噪音，与 L1 横幅自相矛盾。
+
+- 🎯 **`build_savings_insights_from_official`**：读 `official_usage.by_model` 真实积分，按 `DISPLAY_MERGE`
+  归并收费版变体（如 `hy3-x → hy3`），复用同款算法构造省钱建议；官方积分已是成本真值，故跳过低置信度过滤。
+- 🔇 **L1 不再渲染低置信度噪音**：§4.4 引导语切换为「基于官方用量导出（成本真值 L1）」，
+  低置信度标记加 `not _is_l1(data)` 守卫——L1 下官方积分是真值，不再需要 L2 专属的折扣提示。
+- 🧪 **527 用例全绿**（新增 `tests/test_c7_l1_savings.py` 7 用例：L1 成本基准 = 官方 credits、
+  L1 不过滤低置信度、变体归并、L2 默认仍过滤、L1/L2 §4.4 渲染差异 MD/HTML）。
+- 🔗 [GitHub Release v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2)
 
 ---
 

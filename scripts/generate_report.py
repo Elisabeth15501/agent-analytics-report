@@ -2434,8 +2434,12 @@ def build_cost_analysis_section(fmt, data):
         lines.append("")
         items = si.get("items", [])
         if items:
-            lines.append("基于「实际执行模型」维度分析，以下高占比付费模型存在更便宜的替代方案"
-                         "（假设 30% 的简单任务可迁移，估算口径，仅供参考）：")
+            if _is_l1(data):
+                lines.append("基于官方用量导出（成本真值 L1）按模型分析，以下高占比付费模型存在更便宜的替代方案"
+                             "（假设 30% 的简单任务可迁移，真值口径，仅供参考）：")
+            else:
+                lines.append("基于「实际执行模型」维度分析，以下高占比付费模型存在更便宜的替代方案"
+                             "（假设 30% 的简单任务可迁移，估算口径，仅供参考）：")
             lines.append("")
             for it in items:
                 lines.append(
@@ -2451,9 +2455,10 @@ def build_cost_analysis_section(fmt, data):
                          "后续若引入更便宜模型或提升缓存复用率，可进一步降本。")
         # A1 · v1.7.0：省钱杠杆已排除低置信度模型；此处显式提示折扣/时段模型，避免用户自行「迁走」
         # A3 · v1.7.0：低置信度模型恰好是最贵（Top-3）时，在省钱章节顶部也给出高位告警
+        # C7 · L1 真值模式：官方积分已是真值，不再渲染低置信度标记（折扣/时段模型在 L1 不构成误导）
         _lc_models = sorted({m["model"] for m in (data.get("model_stats", []) + data.get("model_exec_stats", []))
                               if _lc_reason(m["model"], _low_conf_map(data)) and (m.get("effective_cost", 0) or 0) > 0})
-        if _lc_models:
+        if _lc_models and not _is_l1(data):
             _lc_txt = "、".join(f"`{n} {_lc_arrow(_lc_bias(n, _low_conf_bias_map(data)))}`" for n in _lc_models)
             lines.append(f"> ℹ️ **折扣 / 时段模型提示**：{_lc_txt} 在 L2 被高估（夜间免费 / 促销 / 峰谷），"
                          f"真实花费请以官方账单为准；本报告不就此给出「迁走」建议，避免你反而多花钱。")
@@ -2529,8 +2534,12 @@ def build_cost_analysis_section(fmt, data):
     L.append('        <h3>4.4 省钱杠杆（自动洞察）</h3>')
     items = si.get("items", [])
     if items:
-        L.append("        <p>基于「实际执行模型」维度分析，以下高占比付费模型存在更便宜的替代方案"
-                 "（假设 30% 的简单任务可迁移，估算口径，仅供参考）：</p><ul>")
+        if _is_l1(data):
+            L.append("        <p>基于官方用量导出（成本真值 L1）按模型分析，以下高占比付费模型存在更便宜的替代方案"
+                     "（假设 30% 的简单任务可迁移，真值口径，仅供参考）：</p><ul>")
+        else:
+            L.append("        <p>基于「实际执行模型」维度分析，以下高占比付费模型存在更便宜的替代方案"
+                     "（假设 30% 的简单任务可迁移，估算口径，仅供参考）：</p><ul>")
         for it in items:
             L.append(
                 f"            <li><b>{it['model']}</b> 当前花费 ¥{it['cost']:.2f}（占付费成本 {it['cost_share']:.1f}%）；"
@@ -2544,9 +2553,10 @@ def build_cost_analysis_section(fmt, data):
         L.append("        <p>当前付费模型均已是最优性价比，暂无明确可迁移的更便宜替代；"
                  "后续若引入更便宜模型或提升缓存复用率，可进一步降本。</p>")
     # A1 · v1.7.0：折扣/时段模型提示；A3 · v1.7.0：低置信度最贵高位告警（HTML）
+    # C7 · L1 真值模式：官方积分已是真值，不再渲染低置信度标记
     _lc_models_h = sorted({m["model"] for m in (data.get("model_stats", []) + data.get("model_exec_stats", []))
                              if _lc_reason(m["model"], _low_conf_map(data)) and (m.get("effective_cost", 0) or 0) > 0})
-    if _lc_models_h:
+    if _lc_models_h and not _is_l1(data):
         _lc_txt_h = "、".join(f'<code>{_esc(n)} {_lc_arrow(_lc_bias(n, _low_conf_bias_map(data)))}</code>' for n in _lc_models_h)
         L.append(f"        <p>ℹ️ <b>折扣 / 时段模型提示</b>：{_lc_txt_h} 在 L2 被高估（夜间免费 / 促销 / 峰谷），"
                  "真实花费请以官方账单为准；本报告不就此给出「迁走」建议，避免你反而多花钱。</p>")

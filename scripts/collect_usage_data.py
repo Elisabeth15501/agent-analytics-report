@@ -399,6 +399,13 @@ def main():
             print(f"[ERROR] 官方用量导出导入失败：{e}", file=sys.stderr)
             sys.exit(2)
 
+        # C7 · L1 真值模式：§4.4 省钱建议改用官方真实积分（official.by_model），
+        # 而非 trace 估算的 effective_cost。官方积分已是成本真值，折扣 / 时段模型给出
+        # 「迁走」建议不会误导用户多花钱，故不过滤低置信度（low_confidence_filter=False）。
+        # 归并变体（hy3-x→hy3 等）使 §4.4 与 §3.5 对账口径一致。
+        result["savings_insights"] = build_savings_insights_from_official(
+            official["by_model"], alias_map=dict(DISPLAY_MERGE))
+
         # 被报告窗口过滤掉的行数（导出通常是「最近30日」，报告窗口可能只有 7 天）
         _all_rows = official["meta"].get("parsed_rows", 0) or 0
         official["meta"]["rows_in_window"] = official["totals"]["requests"]
@@ -489,8 +496,11 @@ def main():
 
     # P1 成本深度分析：每会话成本 / 省钱杠杆（cost_anomalies 依赖 daily_tokens，在下方构建后计算）
     result["session_stats"] = aggregate_by_session(traces, db_data["sessions"])
-    # 省钱洞察基于计费维度（exec_model）找真实付费贵模型，给出更便宜替代与预计月省
-    result["savings_insights"] = build_savings_insights(result["model_stats"])
+    # 省钱洞察基于计费维度（exec_model）找真实付费贵模型，给出更便宜替代与预计月省。
+    # L1 真值模式已在上方 import-official 块用官方真实积分构造并写入 savings_insights；
+    # 此处仅当尚未构造（L2 估算模式）时补算，避免覆盖 L1 真值版（C7）。
+    if "savings_insights" not in result:
+        result["savings_insights"] = build_savings_insights(result["model_stats"])
 
     # 每日 token 统计
     daily_tokens = {}

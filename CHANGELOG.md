@@ -2,6 +2,44 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+## [1.7.2] — 2026-09-22
+
+### 🎯 Phase C · L1 真值模式下 §4.4 省钱建议改用官方真实积分（C7）
+
+**根因**：v1.7.0 · A1 设计的「省钱杠杆过滤低置信度模型 + §4.4 顶部提示折扣/时段模型」
+是写给 **L2 估算** 的——因为 L2 下 `build_savings_insights` 用的是静态价表推算的 `effective_cost`，
+折扣/时段模型（hy4-preview 夜间免费、deepseek-v4.1-flash 峰谷）的估算数字不可信，必须过滤 + 提示。
+但导入官方用量导出（L1 真值）后，§4.4 仍走 L2 估算路径（`collect_usage_data.py` 无条件调用
+`build_savings_insights`），于是：① 成本基准是 trace 的估算 `effective_cost` 而非官方「积分」真值；
+② 顶部仍渲染「折扣/时段模型提示」这类 L2 噪音，与 L1 横幅自相矛盾。
+
+**C7 · 用官方真实积分算省钱建议**
+- `ca_aggregate.py` 新增 `build_savings_insights_from_official(official_by_model, alias_map)`：
+  读 `official_usage.by_model`（按 credits 降序的 `[{name, requests, credits, ...}]`），按 `alias_map`
+  （即 `DISPLAY_MERGE`，如 `hy3-x → hy3`）先把收费版变体归并到基础名，再复用 `build_savings_insights`
+  同款算法构造建议。**官方「积分」已是成本真值**，故调用时传 `low_confidence_filter=False`——不过滤折扣/时段模型，
+  因为这些积分是服务端实际扣减的真值，不存在「把官方减免当可省的钱」的误导。
+- `build_savings_insights` 增加 `low_confidence_filter=True` 参数（默认 True，保持 L2 既有行为不变），
+  L1 真值路径传 False。
+- `collect_usage_data.py`：在 `--import-official` 块内、拿到 `official` 数据后，直接构造
+  `result["savings_insights"] = build_savings_insights_from_official(official["by_model"], alias_map=dict(DISPLAY_MERGE))`；
+  默认 L2 调用改为条件式 `if "savings_insights" not in result:` 避免覆盖 L1 真值版。
+
+**C7 · L1 下不再出现低置信度噪音**
+- `generate_report.py` 的 `build_cost_analysis_section`（§4.4）MD / HTML 各 2 处改动：
+  - 引导语切换——L1 下用「基于官方用量导出（成本真值 L1）按模型分析…」，L2 下保持「基于『实际执行模型』维度分析…」。
+  - 低置信度标记守卫——`if _lc_models and not _is_l1(data):`（MD）/ `if _lc_models_h and not _is_l1(data):`（HTML）。
+    L1 下官方积分已是真值，不再需要「折扣/时段模型提示」这条 L2 专属免责。
+
+**接入范围 / 约束**：`official_usage.by_model` 字段名（`name` / `credits` / `requests`）与 trace 维度的
+（`model` / `effective_cost`）不同，故新函数负责字段映射 + 变体归并；归并口径与 §3.5 双源对账一致
+（同走 `DISPLAY_MERGE`），避免 L1 下又把 `hy3-x` 当成「官方独有的盲区模型」。
+
+- 回归：新增 `tests/test_c7_l1_savings.py`（7 用例）：L1 成本基准 = 官方 credits（非 trace effective_cost）、
+  L1 不过滤低置信度（对照 L2 默认剔除）、变体归并、L2 默认仍过滤（A1 行为不回归）、
+  L2 §4.4 仍渲染折扣提示、L1 §4.4 隐藏折扣提示 + 引导语切换（MD / HTML 各一）；
+  全量 **527 passed / 0 failed**（521 单元白盒 + 6 e2e CLI）。
+
 ## [1.7.1] — 2026-09-16
 
 ### ⏱️ Phase B · 按调用时刻应用时段定价（B4 / B5 / B6）

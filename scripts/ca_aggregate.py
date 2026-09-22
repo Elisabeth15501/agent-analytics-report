@@ -20,7 +20,7 @@ if _HERE not in sys.path:
 
 from ca_core import *  # 共享常量与纯函数
 
-__all__ = ['_detect_daily_anomalies', '_detect_session_anomalies', '_fmt_anom_val', '_normalize_model_key', '_percentile', 'aggregate_by_exec_model', 'aggregate_by_model', 'aggregate_by_session', 'aggregate_by_tier', 'aggregate_traces_by', 'build_savings_insights', 'detect_cost_anomalies']
+__all__ = ['_detect_daily_anomalies', '_detect_session_anomalies', '_fmt_anom_val', '_normalize_model_key', '_percentile', 'aggregate_by_exec_model', 'aggregate_by_model', 'aggregate_by_session', 'aggregate_by_tier', 'aggregate_traces_by', 'build_savings_insights', 'build_savings_insights_from_official', 'detect_cost_anomalies']
 
 def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_key_fn=None):
     """按 key_field 聚合模型维度。
@@ -480,21 +480,26 @@ def _normalize_model_key(name):
     n = re.sub(r"-(x|flash|air|mini|pro|plus|turbo|preview|lite|ultra)$", "", n)  # 去掉变体后缀
     return n
 
-def build_savings_insights(exec_stats):
+def build_savings_insights(exec_stats, low_confidence_filter=True):
     """基于实际执行维度（model_exec_stats），找出高占比付费模型，给出更便宜替代与预计月省（估算）。
-    
+
     估算口径（保守、透明）：
       - 取该模型 effective_cost 的 30% 作为「可迁移到更便宜模型的简单任务」比例；
       - 用输出单价比 price_alt/price_model 作为替代性价比；
       - 预计月省 = 该模型 effective_cost × 30% × (1 - 价格比)。
     仅当存在已知更便宜替代且单价可解析时给出建议。
+
+    low_confidence_filter（默认 True）：是否剔除低置信度模型（L2 估算不可信，v1.7.0 · A1）。
+      在 L1 真值模式（官方真实积分 by_model）下传 False —— 官方积分已是真值，折扣 / 时段模型
+      给出「迁走」建议不会误导用户多花钱（见 C7）。
     """
     paid = [m for m in exec_stats
             if m.get("configured") and m.get("effective_cost", 0) > 0
             and not m.get("is_router")
             # v1.7.0 · A1：低置信度模型（夜间免费 / 促销 / 峰谷，L2 数字不可信）
             # 不参与省钱建议，避免「建议从折扣模型迁走」反而让用户多花钱。
-            and not low_confidence_reason(m["model"])]
+            # C7 · L1 真值模式（low_confidence_filter=False）下不过滤：官方积分已是真值。
+            and (not low_confidence_filter or not low_confidence_reason(m["model"]))]
     total_paid = sum(m["effective_cost"] for m in paid) or 1
     items = []
     total_save = 0.0
@@ -525,3 +530,40 @@ def build_savings_insights(exec_stats):
         })
     items.sort(key=lambda x: x["estimated_monthly_save"], reverse=True)
     return {"items": items, "total_estimated_monthly_save": round(total_save, 2)}
+
+
+def build_savings_insights_from_official(official_by_model, alias_map=None):
+    """C7 · L1 真值模式：用官方用量导出 by_model 的**真实积分**构造省钱建议。
+
+    与 build_savings_insights 同构，但成本基准取自官方 `credits`（真值），而非 trace 估算的
+    effective_cost。官方积分已是成本真值，故复用同款算法时跳过低置信度过滤（low_confidence_filter=False）——
+    折扣 / 时段模型给出「迁走」建议不会误导用户多花钱（与 v1.7.0 · A1 在 L2 下的处理相反）。
+
+    :param official_by_model: collect_official_usage() 的 by_model 列表
+                              [{name, requests, credits, ...}]（按 credits 降序）
+    :param alias_map: DISPLAY_MERGE 归并映射（hy3-x→hy3 等），使 §4.4 与 §3.5 对账口径一致
+    :return: {"items": [...], "total_estimated_monthly_save": ...}（与 build_savings_insights 同构）
+    """
+    alias_map = alias_map or {}
+    merged = {}
+    for m in official_by_model or []:
+        base = m.get("name")
+        if base is None:
+            continue
+        # 按 alias_map 归并变体（hy4-preview-x→hy4-preview 等），与 §3.5 显示口径对齐
+        key = alias_map.get(normalize_model(base), alias_map.get(base, base))
+        slot = merged.setdefault(key, {"name": key, "requests": 0, "credits": 0.0})
+        slot["requests"] += m.get("requests", 0)
+        slot["credits"] += float(m.get("credits", 0) or 0)
+    exec_stats = []
+    for base, g in merged.items():
+        ip, op = price_of(base)
+        exec_stats.append({
+            "model": base,
+            # 真实积分即成本真值（L1）
+            "effective_cost": g["credits"],
+            "configured": ip is not None and op is not None,
+            "is_router": is_router_like(base),
+        })
+    # 官方真值：跳过低置信度过滤（折扣 / 时段模型的建议不会误导）
+    return build_savings_insights(exec_stats, low_confidence_filter=False)
