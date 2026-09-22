@@ -9,6 +9,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.7.2** | 2026-09-22 | Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）；L1 不再渲染低置信度噪音 | [tag/v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2) |
 | **v1.7.1** | 2026-09-16 | Phase B 按调用时刻应用时段定价：B4 夜间免费 / B5 峰谷双档 / B6 促销跨期 | [tag/v1.7.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.1) |
 | **v1.7.0** | 2026-09-15 | F17 P1 请求数反推 + P2 路由别名解析；低置信度最贵模型 A1/A2/A3 告警 | [tag/v1.7.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.0) |
+| **v1.6.2** | 2026-09-14 | 低置信度模型标记改为纯 ⚠（去 span 包裹，与 MD 一致） | [tag/v1.6.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.2) |
 | **v1.6.1** | 2026-09-14 | 修复 §3.5 误报盲区（官方侧补 display_merge 归拢，虚报 410.95 积分） | [tag/v1.6.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.1) |
 | **v1.6.0** | 2026-09-14 | F17 双源对账：官方用量导出接入（`--import-official`）· 成本 L1 真值 | [tag/v1.6.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.0) |
 | **v1.5.2** | 2026-09-14 | 成本置信度（L1 真值 / L2 估算）· 低置信度模型标注 | [tag/v1.5.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.5.2) |
@@ -78,6 +79,10 @@ v1.7.0 · A1 的「省钱杠杆过滤低置信度模型 + §4.4 顶部提示折�
 
 HTML 里低置信度模型原被 `<span class="lc-flag" ...>⚠</span>` 包裹，与 Markdown 版不一致。
 改为纯 `⚠`，并删除不再使用的 `.lc-flag` CSS 规则；成本横幅、模型表、条形图、脚注口径统一。
+
+- 🔗 [GitHub Release v1.6.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.6.2)
+
+---
 
 ## v1.6.1 — 2026-09-14
 
