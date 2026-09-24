@@ -2,8 +2,10 @@
 """L4 · 发布一致性（Publish Parity）— pytest + Allure 双可视化。
 
 守护「本地 / GitHub / SkillHub」三端发布时的一致性，避免版本漂移与误发布：
-  - metadata.json 版本 == config.json 版本（捕捉已知漂移 1.1.1≠1.1.2）
-  - 两版本均为合法 semver（x.y.z）
+  - 版本号在 **5 处必须一致**（捕捉 2026-09-12 漏同步 config.json 的真实事故）：
+      SKILL.md frontmatter / config.json / metadata.json / CHANGELOG.md /
+      releases.md（表格首行 + 详情小节），以 config.json 为 SkillHub 权威源
+  - 两 JSON 版本文件均为合法 semver（x.y.z）
   - 发布交付物齐全：SKILL.md / metadata.json / config.json / scripts / references /
     examples / LICENSE.md，且 scripts 下含两个核心脚本
   - .gitignore 闸门：测试文件不被忽略（能进 GitHub/SkillHub），
@@ -33,6 +35,38 @@ def _load_json(name):
     return json.loads((SKILL_DIR / name).read_text(encoding="utf-8"))
 
 
+def _read_text(name):
+    return (SKILL_DIR / name).read_text(encoding="utf-8")
+
+
+def _extract_skill_md_version(text):
+    """SKILL.md frontmatter 的 `version: x.y.z`（frontmatter 顶格，description 缩进不匹配）。"""
+    m = re.search(r"^version:\s*(\d+\.\d+\.\d+)\s*$", text, re.M)
+    assert m, "SKILL.md frontmatter 未找到 `version: x.y.z`"
+    return m.group(1)
+
+
+def _extract_changelog_version(text):
+    """CHANGELOG.md 顶部最新条目 `## [x.y.z]`（首个匹配即最新）。"""
+    m = re.search(r"^##\s*\[(\d+\.\d+\.\d+)\]", text, re.M)
+    assert m, "CHANGELOG.md 未找到最新 `## [x.y.z]` 条目"
+    return m.group(1)
+
+
+def _extract_releases_table_version(text):
+    """releases.md 速览表首行 `| **vx.y.z** | ...`（首个匹配即最新）。"""
+    m = re.search(r"^\|\s*\*\*v(\d+\.\d+\.\d+)\*\*", text, re.M)
+    assert m, "releases.md 速览表首行未找到 `**vx.y.z**`"
+    return m.group(1)
+
+
+def _extract_releases_detail_version(text):
+    """releases.md 详情小节标题 `## vx.y.z`（首个匹配即最新）。"""
+    m = re.search(r"^##\s*v(\d+\.\d+\.\d+)", text, re.M)
+    assert m, "releases.md 未找到最新 `## vx.y.z` 小节"
+    return m.group(1)
+
+
 def _is_gitignored(rel_path):
     """用 git check-ignore 判定某相对路径是否被忽略；git 不可用时抛异常由调用方 skip。"""
     proc = subprocess.run(
@@ -50,14 +84,38 @@ def _is_gitignored(rel_path):
 
 @allure.feature("发布一致性（Publish Parity）")
 @allure.story("版本同步")
-@allure.title("metadata.json 版本 == config.json 版本（捕捉 1.1.1≠1.1.2 漂移）")
+@allure.title("版本号在 5 处必须一致：SKILL.md / config.json / metadata.json / CHANGELOG / releases")
 @allure.severity(allure.severity_level.CRITICAL)
 def test_version_parity():
-    meta_v = _load_json("metadata.json")["version"]
+    # config.json 是 SkillHub 升级判定的权威源；其余 4 处必须与之完全一致。
     cfg_v = _load_json("config.json")["version"]
-    assert meta_v == cfg_v, (
-        f"发布版本漂移：metadata.json={meta_v} 但 config.json={cfg_v}，"
-        f"SkillHub upgrade 会据此误判，须同步为同一版本"
+    assert SEMVER.match(cfg_v), f"config.json 版本 {cfg_v!r} 不是合法 semver（x.y.z）"
+
+    meta_v = _load_json("metadata.json")["version"]
+    skill_v = _extract_skill_md_version(_read_text("SKILL.md"))
+    changelog_v = _extract_changelog_version(_read_text("CHANGELOG.md"))
+    releases_table_v = _extract_releases_table_version(_read_text("releases.md"))
+    releases_detail_v = _extract_releases_detail_version(_read_text("releases.md"))
+
+    mismatches = []
+    if meta_v != cfg_v:
+        mismatches.append(f"metadata.json={meta_v}")
+    if skill_v != cfg_v:
+        mismatches.append(f"SKILL.md={skill_v}")
+    if changelog_v != cfg_v:
+        mismatches.append(f"CHANGELOG.md={changelog_v}")
+    if releases_table_v != cfg_v:
+        mismatches.append(f"releases.md(表格)={releases_table_v}")
+    if releases_detail_v != cfg_v:
+        mismatches.append(f"releases.md(小节)={releases_detail_v}")
+    assert not mismatches, (
+        f"版本号未同步（权威源 config.json={cfg_v}）：{mismatches}。"
+        f"发版前须把这几处统一改成 {cfg_v}"
+    )
+
+    # releases.md 内部也要自洽：速览表首行 vs 详情小节标题
+    assert releases_table_v == releases_detail_v, (
+        f"releases.md 内部漂移：表格首行={releases_table_v} 但详情小节={releases_detail_v}"
     )
 
 
