@@ -670,85 +670,130 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
     return out
 
 
-def build_model_section_md(data):
-    """Markdown 章节：模型使用与成本对比（双维度：接口/通道 + 实际执行模型）。"""
+def build_model_section(fmt, data):
+    """章节 §三：模型使用与成本对比（双维度：接口/通道 + 实际执行模型）。
+    MD / HTML 共用数据计算，仅渲染层不同；原 build_model_section_md / _html 合并产物。"""
     meta = data.get("meta", {})
     model_stats = data.get("model_stats", [])
     exec_stats = data.get("model_exec_stats", [])
     if not model_stats and not exec_stats:
         return []
-    lines = []
-    lines.append("## 三、模型使用与成本对比")
-    lines.append("")
-    lines.append("按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
-                 "本章节提供**两个维度**：")
-    lines.append("")
-    lines.append("- **3.1 按实际计费模型（账单口径）**：按 API 实际计费的模型（即 trace 的 `exec_model`，含经 `auto`/限免入口路由到的付费模型）聚合，是费用结算依据；其各模型花费合计 = 报告概览「实际成本（计费等效）」总额。")
-    lines.append("- **3.2 按入口 / 配置模型（使用维度）**：按你配置的入口 / 通道（如 `auto` 路由、`hy3`、`custom-local`）聚合，反映你实际请求 / 配置了哪些入口、各多少次——属「使用分布」而非「账单」；本维度总额不代表真实账单，且不可与 3.1 相加。")
-    lines.append("")
     tf_map = meta.get("timed_free", {}) or {}
     lc_map = meta.get("low_confidence", {}) or {}
     lc_bias_map = meta.get("low_confidence_bias", {}) or {}
+    if fmt == "md":
+        lines = []
+        lines.append("## 三、模型使用与成本对比")
+        lines.append("")
+        lines.append("按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
+                     "本章节提供**两个维度**：")
+        lines.append("")
+        lines.append("- **3.1 按实际计费模型（账单口径）**：按 API 实际计费的模型（即 trace 的 `exec_model`，含经 `auto`/限免入口路由到的付费模型）聚合，是费用结算依据；其各模型花费合计 = 报告概览「实际成本（计费等效）」总额。")
+        lines.append("- **3.2 按入口 / 配置模型（使用维度）**：按你配置的入口 / 通道（如 `auto` 路由、`hy3`、`custom-local`）聚合，反映你实际请求 / 配置了哪些入口、各多少次——属「使用分布」而非「账单」；本维度总额不代表真实账单，且不可与 3.1 相加。")
+        lines.append("")
+        if tf_map:
+            _tf_txt = "、".join(f"`{k}`（至 **{v}**）" for k, v in sorted(tf_map.items()))
+            lines.append(f"> 🎁 **限时免费**：{_tf_txt} 在限免活动期间免费，相关调用花费记为 ¥0.00；"
+                         "表格中以「限时免费」标注，以区别于永久免费模型（`:free` 后缀）。"
+                         "若该模型有公开刊例价，表中仍会显示原单价，方便对比「原价 vs 实付」。")
+            lines.append("")
+        lines.append("> ⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。")
+        lines.append("")
+        # 3.1 接口 / 通道（计费维度）
+        lines.append("### 3.1 按实际计费模型（账单口径）")
+        lines.append("")
+        lines.append("> 备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 `glm-5.2` 的花费中。")
+        lines.append("")
+        model_stats = merge_glm52_family(model_stats)
+        lines += _build_model_block("md", model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+        chart = build_model_cost_chart_md([m for m in model_stats if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+        if chart:
+            lines.append(chart)
+            lines.append("")
+        # 3.2 按入口 / 配置模型（使用维度 · 非计费口径）
+        lines.append("### 3.2 按入口 / 配置模型（使用维度 · 非计费口径）")
+        lines.append("")
+        lines.append("> 本维度按你配置的**入口 / 通道模型名**聚合（如 `auto` 路由、`hy3`、`custom-local`），"
+                     "反映你实际请求 / 配置了哪些入口、各多少次——是「使用分布」而非「账单」。"
+                     "经由 `auto` 路由或限免入口（如 `hy3`）实际执行的底层付费模型，其花费已计入 3.1 对应执行模型行，"
+                     "本表不直接展开；**本维度总额不代表真实账单，且不可与 3.1 相加**；自建接口（custom-local）实际单价请往接口网站查看。")
+        lines.append("")
+        if exec_stats:
+            official_exec = [m for m in exec_stats if not m.get("is_custom")]
+            local_exec = [m for m in exec_stats if m.get("is_local")]
+            external_exec = [m for m in exec_stats if m.get("is_custom") and not m.get("is_local")]
+            if official_exec:
+                lines.append("#### 3.2.1 官方 / 网关入口模型")
+                lines.append("")
+                lines += _build_model_block("md", official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                chart2 = build_model_cost_chart_md([m for m in official_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                if chart2:
+                    lines.append(chart2)
+                    lines.append("")
+            if local_exec:
+                lines.append("#### 3.2.2 本地模型（Ollama 本地推理）🔧🏠")
+                lines.append("")
+                lines += _build_model_block("md", local_exec, "本地模型维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, compact=True)
+                chart3 = build_model_cost_chart_md([m for m in local_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                if chart3:
+                    lines.append(chart3)
+                    lines.append("")
+            if external_exec:
+                lines.append("#### 3.2.3 外部 API 接口接入模型 🔧")
+                lines.append("")
+                lines += _build_model_block("md", external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                chart4 = build_model_cost_chart_md([m for m in external_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                if chart4:
+                    lines.append(chart4)
+                    lines.append("")
+        else:
+            lines.append("（本期无模型调用数据）")
+            lines.append("")
+        # 3.3 缺失单价模型（数据驱动，仅当存在时显示）
+        lines += _build_unconfigured_models_section("md", meta)
+        return lines
+    # HTML 渲染层
+    lines = []
+    lines.append('    <div class="section">')
+    lines.append('        <h2 class="section-title">三、模型使用与成本对比</h2>')
+    lines.append("        <p>按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
+                 "本章节提供<b>两个维度</b>：<b>3.1 按实际计费模型</b>（账单口径，与概览总额一致）与 <b>3.2 按入口 / 配置模型</b>（使用分布）。"
+                 "未配置单价的模型以「未配置」标注——在 <code>scripts/pricing.local.json</code> 的 <code>models</code> 里补上单价即可（无需改 Python 代码；该本地文件升级 Skill 时不丢失）。</p>")
     if tf_map:
-        _tf_txt = "、".join(f"`{k}`（至 **{v}**）" for k, v in sorted(tf_map.items()))
-        lines.append(f"> 🎁 **限时免费**：{_tf_txt} 在限免活动期间免费，相关调用花费记为 ¥0.00；"
-                     "表格中以「限时免费」标注，以区别于永久免费模型（`:free` 后缀）。"
-                     "若该模型有公开刊例价，表中仍会显示原单价，方便对比「原价 vs 实付」。")
-        lines.append("")
-    lines.append("> ⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。")
-    lines.append("")
-    # 3.1 接口 / 通道（计费维度）
-    lines.append("### 3.1 按实际计费模型（账单口径）")
-    lines.append("")
-    lines.append("> 备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 `glm-5.2` 的花费中。")
-    lines.append("")
+        _tf_txt = "、".join(f"<code>{_esc(k)}</code>（至 <b>{_esc(v)}</b>）" for k, v in sorted(tf_map.items()))
+        lines.append(f'        <p class="disclaimer">🎁 <b>限时免费</b>：{_tf_txt} 在限免活动期间免费，'
+                     '相关调用花费记为 ¥0.00，以区别于永久免费模型（<code>:free</code> 后缀）。'
+                     '若该模型有公开刊例价，表中仍显示原单价，方便对比「原价 vs 实付」。</p>')
+    lines.append('        <h3>3.1 按实际计费模型（账单口径）</h3>')
+    lines.append('        <p class="disclaimer">备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 <code>glm-5.2</code> 的花费中。</p>')
     model_stats = merge_glm52_family(model_stats)
-    lines += _build_model_block("md", model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-    chart = build_model_cost_chart_md([m for m in model_stats if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-    if chart:
-        lines.append(chart)
-        lines.append("")
-    # 3.2 按入口 / 配置模型（使用维度 · 非计费口径）
-    lines.append("### 3.2 按入口 / 配置模型（使用维度 · 非计费口径）")
-    lines.append("")
-    lines.append("> 本维度按你配置的**入口 / 通道模型名**聚合（如 `auto` 路由、`hy3`、`custom-local`），"
-                 "反映你实际请求 / 配置了哪些入口、各多少次——是「使用分布」而非「账单」。"
-                 "经由 `auto` 路由或限免入口（如 `hy3`）实际执行的底层付费模型，其花费已计入 3.1 对应执行模型行，"
-                 "本表不直接展开；**本维度总额不代表真实账单，且不可与 3.1 相加**；自建接口（custom-local）实际单价请往接口网站查看。")
-    lines.append("")
+    lines += _build_model_block("html", model_stats, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+    lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。'
+                 '3.1 各模型花费合计 = 报告概览「实际成本（计费等效）」总额。</p>')
+    lines.append('        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>')
+    lines.append('        <p>本维度按你配置的<b>入口 / 通道模型名</b>（如 <code>auto</code> 路由、<code>hy3</code>、<code>custom-local</code>）聚合，'
+                 '反映实际请求 / 配置的入口分布（非账单）。经由 <code>auto</code> 或限免入口实际执行的底层付费模型，'
+                 '其花费已计入 3.1 对应执行模型行，本表不直接展开。'
+                 '<b>本维度总额不代表真实账单，且不可与 3.1 相加</b>。</p>')
     if exec_stats:
         official_exec = [m for m in exec_stats if not m.get("is_custom")]
         local_exec = [m for m in exec_stats if m.get("is_local")]
         external_exec = [m for m in exec_stats if m.get("is_custom") and not m.get("is_local")]
         if official_exec:
-            lines.append("#### 3.2.1 官方 / 网关入口模型")
-            lines.append("")
-            lines += _build_model_block("md", official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-            chart2 = build_model_cost_chart_md([m for m in official_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-            if chart2:
-                lines.append(chart2)
-                lines.append("")
+            lines.append('        <h4>3.2.1 官方 / 网关入口模型</h4>')
+            lines += _build_model_block("html", official_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
         if local_exec:
-            lines.append("#### 3.2.2 本地模型（Ollama 本地推理）🔧🏠")
-            lines.append("")
-            lines += _build_model_block("md", local_exec, "本地模型维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, compact=True)
-            chart3 = build_model_cost_chart_md([m for m in local_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-            if chart3:
-                lines.append(chart3)
-                lines.append("")
+            lines.append('        <h4>3.2.2 本地模型（Ollama 本地推理）🔧🏠</h4>')
+            lines += _build_model_block("html", local_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, compact=True)
         if external_exec:
-            lines.append("#### 3.2.3 外部 API 接口接入模型 🔧")
-            lines.append("")
-            lines += _build_model_block("md", external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-            chart4 = build_model_cost_chart_md([m for m in external_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-            if chart4:
-                lines.append(chart4)
-                lines.append("")
+            lines.append('        <h4>3.2.3 外部 API 接口接入模型 🔧</h4>')
+            lines += _build_model_block("html", external_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
     else:
-        lines.append("（本期无模型调用数据）")
-        lines.append("")
+        lines.append('        <p>（本期无模型调用数据）</p>')
+    lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>')
     # 3.3 缺失单价模型（数据驱动，仅当存在时显示）
-    lines += _build_unconfigured_models_section("md", meta)
+    lines += _build_unconfigured_models_section("html", meta)
+    lines.append("    </div>")
     return lines
 
 
@@ -825,11 +870,6 @@ def _build_unconfigured_models_section(fmt, meta):
     return out
 
 
-def _build_unconfigured_models_section_html(meta):
-    """MD / HTML 合并实现见 _build_unconfigured_models_section(fmt, ...)；本函数仅作 HTML 入口薄封装。"""
-    return _build_unconfigured_models_section("html", meta)
-
-
 def _tier_rates_snippet(meta):
     """生成 mode_rates 的 JSON 片段（供可配置折叠块展示），逐行字符串列表。"""
     rates = meta.get("mode_rates") or {}
@@ -843,16 +883,6 @@ def _tier_rates_snippet(meta):
         )
     lines.append('  }')
     return lines
-
-
-def build_tier_section_html(data):
-    """MD / HTML 合并实现见 build_tier_section(fmt, ...)；本函数仅作 HTML 入口薄封装。"""
-    return build_tier_section("html", data)
-
-
-def build_tier_section_md(data):
-    """MD / HTML 合并实现见 build_tier_section(fmt, ...)；本函数仅作 Markdown 入口薄封装。"""
-    return build_tier_section("md", data)
 
 
 # 档位规范 id → 中文档位名（与 collect_usage_data.TIER_LABELS 同源，报告层展示用）
@@ -925,66 +955,6 @@ def build_tier_section(fmt, data):
     out.append("        </details>")
     out.append('    </div>')
     return out
-
-
-def _build_model_block_html(model_stats, is_exec=False, timed_free_map=None, compact=False, low_conf_map=None, low_conf_bias_map=None):
-    """MD / HTML 合并实现见 _build_model_block(fmt, ...)；本函数仅作 HTML 入口薄封装。"""
-    return _build_model_block("html", model_stats, is_exec=is_exec, timed_free_map=timed_free_map,
-                              compact=compact, low_conf_map=low_conf_map, low_conf_bias_map=low_conf_bias_map)
-
-
-def build_model_section_html(data):
-    """HTML 章节：模型使用与成本对比（双维度：接口/通道 + 实际执行模型）。"""
-    meta = data.get("meta", {})
-    model_stats = data.get("model_stats", [])
-    exec_stats = data.get("model_exec_stats", [])
-    if not model_stats and not exec_stats:
-        return []
-    tf_map = meta.get("timed_free", {}) or {}
-    lc_map = meta.get("low_confidence", {}) or {}
-    lc_bias_map = meta.get("low_confidence_bias", {}) or {}
-    lines = []
-    lines.append('    <div class="section">')
-    lines.append('        <h2 class="section-title">三、模型使用与成本对比</h2>')
-    lines.append("        <p>按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
-                 "本章节提供<b>两个维度</b>：<b>3.1 按实际计费模型</b>（账单口径，与概览总额一致）与 <b>3.2 按入口 / 配置模型</b>（使用分布）。"
-                 "未配置单价的模型以「未配置」标注——在 <code>scripts/pricing.local.json</code> 的 <code>models</code> 里补上单价即可（无需改 Python 代码；该本地文件升级 Skill 时不会被覆盖）。</p>")
-    if tf_map:
-        _tf_txt = "、".join(f"<code>{_esc(k)}</code>（至 <b>{_esc(v)}</b>）" for k, v in sorted(tf_map.items()))
-        lines.append(f'        <p class="disclaimer">🎁 <b>限时免费</b>：{_tf_txt} 在限免活动期间免费，'
-                     '相关调用花费记为 ¥0.00，以区别于永久免费模型（<code>:free</code> 后缀）。'
-                     '若该模型有公开刊例价，表中仍显示原单价，方便对比「原价 vs 实付」。</p>')
-    lines.append('        <h3>3.1 按实际计费模型（账单口径）</h3>')
-    lines.append('        <p class="disclaimer">备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 <code>glm-5.2</code> 的花费中。</p>')
-    model_stats = merge_glm52_family(model_stats)
-    lines += _build_model_block_html(model_stats, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-    lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。'
-                 '3.1 各模型花费合计 = 报告概览「实际成本（计费等效）」总额。</p>')
-    lines.append('        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>')
-    lines.append('        <p>本维度按你配置的<b>入口 / 通道模型名</b>（如 <code>auto</code> 路由、<code>hy3</code>、<code>custom-local</code>）聚合，'
-                 '反映实际请求 / 配置的入口分布（非账单）。经由 <code>auto</code> 或限免入口实际执行的底层付费模型，'
-                 '其花费已计入 3.1 对应执行模型行，本表不直接展开。'
-                 '<b>本维度总额不代表真实账单，且不可与 3.1 相加</b>。</p>')
-    if exec_stats:
-        official_exec = [m for m in exec_stats if not m.get("is_custom")]
-        local_exec = [m for m in exec_stats if m.get("is_local")]
-        external_exec = [m for m in exec_stats if m.get("is_custom") and not m.get("is_local")]
-        if official_exec:
-            lines.append('        <h4>3.2.1 官方 / 网关入口模型</h4>')
-            lines += _build_model_block_html(official_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-        if local_exec:
-            lines.append('        <h4>3.2.2 本地模型（Ollama 本地推理）🔧🏠</h4>')
-            lines += _build_model_block_html(local_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, compact=True)
-        if external_exec:
-            lines.append('        <h4>3.2.3 外部 API 接口接入模型 🔧</h4>')
-            lines += _build_model_block_html(external_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-    else:
-        lines.append('        <p>（本期无模型调用数据）</p>')
-    lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>')
-    # 3.3 缺失单价模型（数据驱动，仅当存在时显示）
-    lines += _build_unconfigured_models_section("html", data.get("meta", {}))
-    lines.append("    </div>")
-    return lines
 
 
 def build_reconciliation_section(fmt, data):
@@ -1108,16 +1078,6 @@ def build_reconciliation_section(fmt, data):
     out.append('        <p class="note">读法：<b>官方积分 = 真金白银</b>；trace 估算只用来看结构'
                '（哪个模型在跑、跑了多少轮）。两者不可直接相加，也不该互相替换。</p>')
     return out
-
-
-def build_reconciliation_section_md(data):
-    """Markdown 入口薄封装（实现见 build_reconciliation_section）。"""
-    return build_reconciliation_section("md", data)
-
-
-def build_reconciliation_section_html(data):
-    """HTML 入口薄封装（实现见 build_reconciliation_section）。"""
-    return build_reconciliation_section("html", data)
 
 
 def _auto_is_active(run):
@@ -1251,7 +1211,7 @@ def generate_markdown_report(data):
         _src_list += "、**官方用量导出（成本真值 L1，本地只读解析）**"
     lines.append(f"> **数据来源**：{_src_list}")
     lines.append("")
-    lines += _cost_confidence_banner_md(data)
+    lines += _cost_confidence_banner("md", data)
 
     # 一、概览统计
     lines.append("## 一、概览统计")
@@ -1357,12 +1317,12 @@ def generate_markdown_report(data):
         lines.append("")
 
     # （新增）三、模型使用与成本对比
-    lines.extend(build_model_section_md(data))
-    lines.extend(build_reconciliation_section_md(data))
-    lines.extend(build_tier_section_md(data))
+    lines.extend(build_model_section("md", data))
+    lines.extend(build_reconciliation_section("md", data))
+    lines.extend(build_tier_section("md", data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）
-    lines.extend(build_cost_analysis_section_md(data))
+    lines.extend(build_cost_analysis_section("md", data))
 
     # 五、任务类型统计
     lines.append("## 五、任务类型统计")
@@ -1745,15 +1705,6 @@ def _render_failed_automation(fmt, items):
     return L
 
 
-def _render_failed_automation_md(items):
-    return _render_failed_automation("md", items)
-
-
-def _render_failed_automation_html(items):
-    return _render_failed_automation("html", items)
-
-
-
 def _compute_session_size_anomalies(rows):
     """会话规模（调用次数）异常检测。纯只读。
 
@@ -1951,15 +1902,6 @@ def _render_cache_untitled(fmt, payload):
                      f"<td>{r['first_date']}</td></tr>")
         L.append('        </table>')
     return L
-
-
-def _render_cache_untitled_md(payload):
-    return _render_cache_untitled("md", payload)
-
-
-def _render_cache_untitled_html(payload):
-    return _render_cache_untitled("html", payload)
-
 
 
 def _unresolved_call_stats(data):
@@ -2248,23 +2190,6 @@ def _cost_confidence_banner(fmt, data):
     return ['        <div class="disclaimer-box">'] + rows + ['        </div>']
 
 
-def _cost_confidence_banner_md(data):
-    return _cost_confidence_banner("md", data)
-
-
-def _cost_confidence_banner_html(data):
-    return _cost_confidence_banner("html", data)
-
-
-def _free_period_disclaimer_md(data):
-    return _free_period_disclaimer("md", data)
-
-
-def _free_period_disclaimer_html(data):
-    return _free_period_disclaimer("html", data)
-
-
-
 def _render_anomaly_block(fmt, title, block, kind):
     """渲染单口径（cost / token）异常块。"""
     thr = block.get("thresholds", {})
@@ -2338,15 +2263,6 @@ def _render_anomaly_block(fmt, title, block, kind):
                          f"调用 {a.get('calls', 0)} 次（主要模型：{models}）</li>")
         L.append("        </ul>")
     return L
-
-
-def _render_anomaly_block_md(title, block, kind):
-    return _render_anomaly_block("md", title, block, kind)
-
-
-def _render_anomaly_block_html(title, block, kind):
-    return _render_anomaly_block("html", title, block, kind)
-
 
 
 def build_cost_analysis_section(fmt, data):
@@ -2573,15 +2489,6 @@ def build_cost_analysis_section(fmt, data):
     return L
 
 
-def build_cost_analysis_section_md(data):
-    return build_cost_analysis_section("md", data)
-
-
-def build_cost_analysis_section_html(data):
-    return build_cost_analysis_section("html", data)
-
-
-
 def generate_html_report(data):
     meta = data.get("meta", {})
     summary = data.get("summary", {})
@@ -2703,7 +2610,7 @@ def generate_html_report(data):
     lines.append('            <button type="button" data-set-theme="system">🖥 系统</button>')
     lines.append('        </div>')
     lines.append("    </div>")
-    lines += _cost_confidence_banner_html(data)
+    lines += _cost_confidence_banner("html", data)
 
     # 一、概览统计
     lines.append('    <div class="section">')
@@ -2782,12 +2689,12 @@ def generate_html_report(data):
         lines.append('    </div>')
 
     # （新增）三、模型使用与成本对比
-    lines.extend(build_model_section_html(data))
-    lines.extend(build_reconciliation_section_html(data))
-    lines.extend(build_tier_section_html(data))
+    lines.extend(build_model_section("html", data))
+    lines.extend(build_reconciliation_section("html", data))
+    lines.extend(build_tier_section("html", data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）
-    lines.extend(build_cost_analysis_section_html(data))
+    lines.extend(build_cost_analysis_section("html", data))
 
     # 五、任务类型统计
     lines.append('    <div class="section">')

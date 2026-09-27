@@ -196,8 +196,8 @@ def test_no_tier_data(collector_module, report_module):
          "total_cost": 0.0, "effective_cost": 0.01, "date": DATE, "call_count": 1},
     ]
     assert collector_module.aggregate_by_tier(plain_traces) == [], "无档位数据应返回空列表"
-    assert report_module.build_tier_section_html({"tier_stats": [], "meta": {}}) == []
-    assert report_module.build_tier_section_md({"tier_stats": [], "meta": {}}) == []
+    assert report_module.build_tier_section("html", {"tier_stats": [], "meta": {}}) == []
+    assert report_module.build_tier_section("md", {"tier_stats": [], "meta": {}}) == []
 
 
 @allure.feature("档位维度 聚合")
@@ -346,8 +346,8 @@ def test_tier_report_section(collector_module, report_module):
             "mode_rates": collector_module.MODE_RATES_META.get("rates", {}),
         },
     }
-    html = report_module.build_tier_section_html(data)
-    md = report_module.build_tier_section_md(data)
+    html = report_module.build_tier_section("html", data)
+    md = report_module.build_tier_section("md", data)
     assert any("3.4" in l for l in html), "HTML 应含 §3.4 标题"
     assert any("估算" in l for l in html), "HTML 应含「估算」免责说明"
     assert any("mode_rates" in l for l in html), "HTML 应含可配置 mode_rates 折叠块"
