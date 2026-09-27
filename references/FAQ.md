@@ -262,7 +262,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 这个文件有近 190 个参数化集成用例，每个参数都要建临时 SQLite 和 traces 目录，本机资源不够时进程会被系统杀掉（表现为无任何输出、退出码 1）。**不是用例失败**。建议用 `-k` 分批跑，例如 `pytest tests/test_channel_attribution.py -k "hy3 or hy4"`。CI 上资源充足时可以全量跑。
 
 **Q35. 我在用另一个类似 WorkBuddy 的工具，想用这个Skill，但目前只支持 WorkBuddy，可以怎样做？**
-请参考 [ADAPTERS.md](ADAPTERS.md) 中的适配器说明。
+请参考 [ADAPTERS.md](../docs/ADAPTERS.md) 中的适配器说明。
 
 ---
 

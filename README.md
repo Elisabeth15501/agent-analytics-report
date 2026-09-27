@@ -23,12 +23,12 @@
 - **Claude Code**：解析会话日志的 token / 成本 / 任务类型 / 每日趋势，无技能与自动化维度（JSONL 里没有这两类数据）。
 - **官方用量导出**：本地 trace 的成本是**估算**（静态价表无法表达服务端时段减免，且漏记图像模型 / minimax-m3 约 8.7%）。
   导入官方导出后成本取「积分」字段，升为 **L1 真值**，报告新增 §3.5 双源对账。详见
-  [ADAPTERS.md](ADAPTERS.md) §二 / §四。
+  [ADAPTERS.md](docs/ADAPTERS.md) §二 / §四。
 - 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含 GLM-5.3 / GLM-5.3-Flash / Hy4 preview 等），以及 Claude 系列模型的**人民币折算估算价**（以 Anthropic 美元刊例价为准，可用 `pricing.local.json` 覆盖）；
 - 升级机制依赖 `skillhub upgrade`。
 
-新增数据源的扩展方式见 [ADAPTERS.md](ADAPTERS.md)。
-- 版本发布与更新日志见 [releases.md](releases.md)（含各版本 GitHub Release 链接与速览）。
+新增数据源的扩展方式见 [ADAPTERS.md](docs/ADAPTERS.md)。
+- 版本发布与更新日志见 [releases.md](docs/releases.md)（含各版本 GitHub Release 链路与速览）。
 
 ---
 
@@ -151,7 +151,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 | `scripts/pricing.local.json` | 用户本地覆盖（gitignore，不发布） |
 | `references/` `examples/` | 操作手册与使用示例 |
 
-多 Agent 扩展方式见 [ADAPTERS.md](ADAPTERS.md)。
+多 Agent 扩展方式见 [ADAPTERS.md](docs/ADAPTERS.md)。
 
 ---
 

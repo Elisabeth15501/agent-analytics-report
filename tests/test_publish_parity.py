@@ -93,9 +93,9 @@ def test_version_parity():
 
     meta_v = _load_json("metadata.json")["version"]
     skill_v = _extract_skill_md_version(_read_text("SKILL.md"))
-    changelog_v = _extract_changelog_version(_read_text("CHANGELOG.md"))
-    releases_table_v = _extract_releases_table_version(_read_text("releases.md"))
-    releases_detail_v = _extract_releases_detail_version(_read_text("releases.md"))
+    changelog_v = _extract_changelog_version(_read_text("docs/CHANGELOG.md"))
+    releases_table_v = _extract_releases_table_version(_read_text("docs/releases.md"))
+    releases_detail_v = _extract_releases_detail_version(_read_text("docs/releases.md"))
 
     mismatches = []
     if meta_v != cfg_v:

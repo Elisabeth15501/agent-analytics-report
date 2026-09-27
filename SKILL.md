@@ -6,7 +6,7 @@ metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy 与 Claude Code 两种数据源（--source 切换）。
 description: |
-  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。数据源用 --source 切换：workbuddy（默认，读 ~/.workbuddy/）/ claude-code（读 ~/.claude/projects/ 的 JSONL 会话日志）；更多 Agent 可扩展（详见 ADAPTERS.md）。
+  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。数据源用 --source 切换：workbuddy（默认，读 ~/.workbuddy/）/ claude-code（读 ~/.claude/projects/ 的 JSONL 会话日志）；更多 Agent 可扩展（详见 docs/ADAPTERS.md）。
 
   触发方式：当用户说「生成周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等时触发，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
@@ -69,7 +69,7 @@ python scripts/generate_report.py data.json --output ClaudeCode_周报.html --fo
 | `workbuddy`（默认） | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） | 完整能力：技能调用、自动化运行、任务分类全部可用 |
 | `claude-code` | `~/.claude/projects/**/*.jsonl` | 解析 Claude Code 会话日志，产出 token / 成本 / 任务类型 / 每日趋势；无技能与自动化维度。可用 `CLAUDE_PROJECTS_DIR` 环境变量指向自定义目录 |
 
-> Claude Code 源的限制与扩展方式见 `ADAPTERS.md`。
+> Claude Code 源的限制与扩展方式见 `docs/ADAPTERS.md`。
 
 ### 时间窗口（可调节）
 
@@ -168,7 +168,7 @@ python scripts/generate_report.py data.json --output ClaudeCode_周报.html --fo
 |--------|------|------|
 | 会话 JSONL | `~/.claude/projects/**/*.jsonl` | 每轮 assistant 消息的 `usage`（输入/输出/缓存读写 token）、模型名、`cwd`、用户提问文本 |
 
-适配器把 JSONL 归一化为同一套 trace schema 并现场合成会话记录，因此下游聚合、计价、任务分类与报告渲染完全复用（详见 `ADAPTERS.md`）。
+适配器把 JSONL 归一化为同一套 trace schema 并现场合成会话记录，因此下游聚合、计价、任务分类与报告渲染完全复用（详见 `docs/ADAPTERS.md`）。
 
 ## Token 口径：原始总量 vs 实际消耗（计费等效）
 
@@ -220,7 +220,7 @@ python scripts/generate_report.py data.json --output report.html --format html
 报告中标 ⚠、不进「最贵模型」结论，但**被剔除者会逐条列出金额**（不让最大成本项悄悄消失）。
 可用 `pricing.local.json` 覆盖。
 
-已知偏差的完整清单（trace 盲区 / trace 独有 / 实证表格）见 `ADAPTERS.md` §四「数据来源与已知偏差」。
+已知偏差的完整清单（trace 盲区 / trace 独有 / 实证表格）见 `docs/ADAPTERS.md` §四「数据来源与已知偏差」。
 
 ## 任务类型分类规则
 
