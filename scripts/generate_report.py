@@ -907,16 +907,18 @@ def generate_markdown_report(data):
     lines = []
     _key = meta.get("period", "week")
     _label, _short, _next = _period_labels(meta)
-    lines.append("# Workbuddy使用情况报告")
+    # 标题按数据源给出（workbuddy 沿用历史文案，外部源不再冒充 WorkBuddy）
+    lines.append("# %s" % _source_identity(data)[0])
     lines.append("")
     lines.append(f"> **报告类型**：{_calendar_period(meta)}")
     lines.append(f"> **报告周期**：{meta.get('start_date', '')} 至 {meta.get('end_date', '')}")
     lines.append(f"> **生成时间**：{_fmt_generated_at()}")
-    _src_list = "WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置"
+    _src_list = _source_identity(data)[1]
     if _is_l1(data):
         _src_list += "、**官方用量导出（成本真值 L1，本地只读解析）**"
     lines.append(f"> **数据来源**：{_src_list}")
     lines.append("")
+    lines += _source_caveat_lines("md", data)
     lines += _cost_confidence_banner("md", data)
 
     # 一、概览统计
@@ -1812,6 +1814,97 @@ def _is_l1(data):
     return str(meta.get("cost_source") or "estimate").lower() == "official" and bool(_official_import(data))
 
 
+# 数据源 → (报告标题, 数据来源一行文案, 数据来源清单[JSON 用])。
+# workbuddy / 缺失 source 一律沿用历史文案，既有报告与测试断言零漂移；
+# 外部适配器（claude-code / codex / qwenwork）用自己的名字，不再冒充 WorkBuddy。
+_SOURCE_LABELS = {
+    "workbuddy": (
+        "Workbuddy使用情况报告",
+        "WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置",
+        ["WorkBuddy 会话历史", "Traces", "workbuddy.db", "技能使用记录", "自动化配置"],
+    ),
+    "claude-code": (
+        "Claude Code 使用情况报告",
+        "Claude Code 会话 JSONL（~/.claude/projects/**/*.jsonl）",
+        ["Claude Code 会话 JSONL"],
+    ),
+    "codex": (
+        "Codex CLI 使用情况报告",
+        "Codex CLI rollout JSONL（~/.codex/sessions/**/rollout-*.jsonl）",
+        ["Codex CLI rollout JSONL"],
+    ),
+    "qwenwork": (
+        "千问办公使用情况报告",
+        "千问办公会话转录（~/.qwenworkcn/projects）、逐次调用日志（logs/runs）、"
+        "agents.db 会话元信息",
+        ["千问办公会话转录 projects/*.jsonl", "逐次调用日志 logs/runs/qodercli.log",
+         "agents.db 会话元信息"],
+    ),
+}
+
+
+def _source_key(data):
+    """本次报告的数据源标识（缺失时按历史默认 workbuddy 处理）。"""
+    meta = (data or {}).get("meta", {}) or {}
+    return str(meta.get("source") or "workbuddy").strip().lower()
+
+
+def _source_identity(data):
+    """返回 (报告标题, 数据来源文案, 数据来源清单)；未知源给出通用兜底。"""
+    src = _source_key(data)
+    if src in _SOURCE_LABELS:
+        return _SOURCE_LABELS[src]
+    return ("%s 使用情况报告" % src, "%s 数据源适配器" % src, ["%s 数据源适配器" % src])
+
+
+def _source_caveat_lines(fmt, data):
+    """数据源专属口径横幅（无特殊口径的来源返回空列表）。
+
+    千问办公需要单独声明：它的 **token 本身也是估算**（服务端不回传用量），
+    与 WorkBuddy / Claude Code / Codex 的「token 真值 + 成本估算」是两种口径。
+    不写清楚就会被当成账单引用。
+    """
+    if _source_key(data) != "qwenwork":
+        return []
+    text = ("千问办公服务端<b>不回传 token 用量</b>（实测 <code>model.response.completed</code> "
+            "的四个 token 字段恒为 0），本报告 token 由转录内容按「CJK 1 字 ≈ 1 token、"
+            "其余 4 字符 ≈ 1 token」字符估算，输入 token 按逐请求<b>上下文重发</b>累加；"
+            "<b>调用次数、请求耗时、模型档位、会话标题为真实值</b>。"
+            "千问办公按积分订阅计费、账号级积分无法归因到单个会话，故<b>金额未计价</b>"
+            "（要金额请在 <code>scripts/pricing.local.json</code> 补档位单价）。")
+    plain = (text.replace("<b>", "**").replace("</b>", "**")
+                .replace("<code>", "`").replace("</code>", "`"))
+    if fmt == "html":
+        return ['        <div class="disclaimer-box">',
+                f"            <p>⚠️ <b>token 口径：本地字符估算</b> —— {text}</p>",
+                '        </div>']
+    return [f"> ⚠️ **token 口径：本地字符估算** —— {plain}", ""]
+
+
+def _l2_cost_note(data):
+    """L2 成本横幅的（标题后缀, MD 正文, HTML 正文）。
+
+    「未导入官方用量导出」「本地 trace 盲区漏记 8.7%」只对 WorkBuddy 成立
+    ——只有它有官方积分导出可对账。把这句话套到 claude-code / codex / qwenwork
+    上会让读者以为存在一个没去导的账单，故按数据源分文案。
+    """
+    src = _source_key(data)
+    if src == "workbuddy":
+        return ("（未导入官方用量导出）",
+                "成本 = `pricing.json` 静态单价 × token 量**估算**，不含服务端时段减免 / 用户免费额度；"
+                "图像模型等本地 trace 盲区也无法覆盖（实测漏记约 8.7%）。**请勿据此做预算或账单对账。**",
+                '成本 = <code>pricing.json</code> 静态单价 × token 量<b>估算</b>，'
+                '不含服务端时段减免 / 用户免费额度；图像模型等本地 trace 盲区也无法覆盖'
+                '（实测漏记约 8.7%）。<b>请勿据此做预算或账单对账。</b>')
+    # 外部数据源：压根没有「官方积分导出」这回事，别拿 WorkBuddy 的话术糊弄读者
+    tail = "；本报告 token 本身亦为本地字符估算" if src == "qwenwork" else ""
+    md = ("成本 = `pricing.json` 静态单价 × token 量**估算**%s。"
+          "该数据源没有可对账的官方积分账单，**金额仅供趋势参考**。" % tail)
+    html = ('成本 = <code>pricing.json</code> 静态单价 × token 量<b>估算</b>%s。'
+            '该数据源没有可对账的官方积分账单，<b>金额仅供趋势参考</b>。' % tail)
+    return ("（外部数据源，无官方账单可对账）", md, html)
+
+
 def _cost_confidence_banner(fmt, data):
     """成本口径横幅：默认 L2 估算；导入官方导出后自动切 L1 真值。"""
     meta = data.get("meta", {}) or {}
@@ -1826,9 +1919,9 @@ def _cost_confidence_banner(fmt, data):
 
     if fmt == "md":
         if is_est:
-            lines = [f"> {icon} **成本口径：{label}**（未导入官方用量导出）", ">",
-                     "> 成本 = `pricing.json` 静态单价 × token 量**估算**，不含服务端时段减免 / 用户免费额度；"
-                     "图像模型等本地 trace 盲区也无法覆盖（实测漏记约 8.7%）。**请勿据此做预算或账单对账。**"]
+            _suffix, _body_md, _ = _l2_cost_note(data)
+            lines = [f"> {icon} **成本口径：{label}**{_suffix}", ">",
+                     f"> {_body_md}"]
             if hits:
                 lines.append(">")
                 lines.append("> **低置信度模型（估算偏差已知较大，不参与成本结论）**：")
@@ -1854,10 +1947,9 @@ def _cost_confidence_banner(fmt, data):
         return lines
 
     if is_est:
-        rows = [f'            <b>{icon} 成本口径：{label}</b>（未导入官方用量导出）',
-                '<p>成本 = <code>pricing.json</code> 静态单价 × token 量<b>估算</b>，'
-                '不含服务端时段减免 / 用户免费额度；图像模型等本地 trace 盲区也无法覆盖'
-                '（实测漏记约 8.7%）。<b>请勿据此做预算或账单对账。</b></p>']
+        _suffix_h, _, _body_h = _l2_cost_note(data)
+        rows = [f'            <b>{icon} 成本口径：{label}</b>{_suffix_h}',
+                f'<p>{_body_h}</p>']
         if hits:
             rows.append('<p><b>低置信度模型（估算偏差已知较大，不参与成本结论）：</b></p><ul>')
             for name, reason in hits.items():
@@ -2279,18 +2371,19 @@ def generate_html_report(data):
     lines.append('    <script>')
     lines.append('        (function(){try{var t=localStorage.getItem("aurs-theme")||"system";if(t&&t!=="system"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();')
     lines.append('    </script>')
-    lines.append("    <title>Workbuddy使用情况报告</title>")
+    _title_h, _src_h, _ = _source_identity(data)
+    lines.append(f"    <title>{_title_h}</title>")
     lines.append("    <style>")
     lines.append(css)
     lines.append("    </style>")
     lines.append("</head>")
     lines.append("<body>")
     lines.append('    <div class="header">')
-    lines.append("        <h1>Workbuddy使用情况报告</h1>")
+    lines.append(f"        <h1>{_title_h}</h1>")
     lines.append(f"        <p><strong>报告类型</strong>：{_calendar_period(meta)}</p>")
     lines.append(f"        <p><strong>报告周期</strong>：{meta.get('start_date', '')} 至 {meta.get('end_date', '')}</p>")
     lines.append(f"        <p><strong>生成时间</strong>：{_fmt_generated_at()}</p>")
-    _src_list_h = "WorkBuddy 会话历史、Traces、workbuddy.db、技能使用记录、自动化配置"
+    _src_list_h = _src_h
     if _is_l1(data):
         _src_list_h += "、<strong>官方用量导出（成本真值 L1，本地只读解析）</strong>"
     lines.append(f"        <p><strong>数据来源</strong>：{_src_list_h}</p>")
@@ -2300,6 +2393,7 @@ def generate_html_report(data):
     lines.append('            <button type="button" data-set-theme="system">🖥 系统</button>')
     lines.append('        </div>')
     lines.append("    </div>")
+    lines += _source_caveat_lines("html", data)
     lines += _cost_confidence_banner("html", data)
 
     # 一、概览统计
@@ -2643,13 +2737,16 @@ def generate_json_report(data):
     _cost_src = concrete_priced or priced_models
     top_model_by_cost = max(_cost_src, key=lambda x: x.get("effective_cost", 0))["model"] if _cost_src else None
 
+    _title_j, _, _sources_j = _source_identity(data)
     report = {
         "meta": {
-            "report_title": "Workbuddy使用情况报告",
+            "report_title": _title_j,
             "start_date": meta.get("start_date", ""),
             "end_date": meta.get("end_date", ""),
             "generated_at": _fmt_generated_at(),
-            "data_sources": ["WorkBuddy 会话历史", "Traces", "workbuddy.db", "技能使用记录", "自动化配置"],
+            "data_sources": _sources_j,
+            "source": _source_key(data),
+            "tokens_source": meta.get("tokens_source", "reported"),
             "mode_rates": meta.get("mode_rates"),
             "mode_cost_estimated": meta.get("mode_cost_estimated"),
             "mode_config_cache_loaded": meta.get("mode_config_cache_loaded"),

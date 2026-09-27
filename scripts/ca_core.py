@@ -537,6 +537,12 @@ def parse_channel(raw_model_id):
     # 计价走 OpenAI 刊例价（见 price_of 的 codex 分支命中 MODEL_PRICING）。
     if n.startswith("codex:"):
         return ("codex", raw[len("codex:"):].strip())
+    # 千问办公外部入口：qwenwork: 前缀标识来自 QwenWork 数据源，模型位是**档位**
+    # （flash / pro / qwork-lite / qmodel_latest）而非裸模型名。千问办公按积分订阅
+    # 计费、无公开单 token 刊例价，故 pricing.json 故意不配这些档位：
+    # 未命中单价时按通用约定「计入 token、不计成本、报告提示补价路径」处理。
+    if n.startswith("qwenwork:"):
+        return ("qwenwork", raw[len("qwenwork:"):].strip())
     # SiliconFlow 等第三方 API 接入：trace 中保留 Vendor/Model 前缀，但 sessions.model
     # 可能未带 custom-local: 前缀；凭 vendor 前缀强制判为 custom-local，避免混入官方入口。
     if any(n.startswith(p) for p in SILICONFLOW_VENDOR_PREFIXES):

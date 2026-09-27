@@ -2,14 +2,15 @@
 
 这里汇总使用本技能时最容易撞上的问题。按「安装 → 生成 → 计价 → 自定义模型 → 标记与合并 → 数据源与隐私 → 分类与异常 → 排查」排列，单篇自足，不用再翻 SKILL.md 和 README。
 
-> 适用版本：**v1.3.0**（核对 `config.json` / `metadata.json`）。**目前仅适配 WorkBuddy。**
+> 适用版本：**v1.7.2**（核对 `config.json` / `metadata.json`）。**已适配 WorkBuddy / Claude Code / Codex CLI / 千问办公 四个数据源。**
 
 ---
 
 ## 一、适用与安装
 
 **Q1. 除了 WorkBuddy，还支持别的 Agent 吗？**
-不支持。数据采集全部来自 WorkBuddy 本机目录（`~/.workbuddy/`、工作区会话目录、`workbuddy.db`、`usage-log.json`），计价库 `scripts/pricing.json` 里也是 WorkBuddy 官方接口的模型与单价，不是通用市场价。`ADAPTERS.md` 里预留了多 Agent 接缝，但 Trae、千问办公等适配器都还没实现——别对外声称已兼容。
+支持四个数据源，用 `--source` 切换：`workbuddy`（默认，能力最全）、`claude-code`、`codex`、`qwenwork`（千问办公）。千问办公的用法与口径见 Q49 / Q50 / Q51。
+Trae 等仍未实现——能力边界一律以 `docs/ADAPTERS.md` 的表格为准，别对外声称已兼容。计价库里除 WorkBuddy 官方接口单价外，只有 Claude / OpenAI 系列的**折算估算价**，不是通用市场价。
 
 **Q2. 怎么装？**
 两种方式：
@@ -277,7 +278,7 @@ WorkBuddy 的 `auto` 自动路由下还有三档可选档位，按**积分消耗
 | 均衡 | `balanced-model` | 0.65x |
 | 极致 | `extreme-model`（配置缓存规范 id 为 `deep-model`，报告已归一） | 1.20x |
 
-**这些是估算单价，不是真实账单价**：WorBuddy 只对档位做积分倍率计费，trace 里从不记录档位背后实际落地的底层模型，因此按档位直接算「花费」在概念上不成立。报告用「倍率锚定法」估算——按已知模型的官方倍率线性外推档位 ¥ 单价（快速 ≈¥1.24/2.47、均衡 ≈¥6.58/23.04、极致 ≈¥14.80/74.10），**仅用于横向对比档位间的相对成本**，章节内明确标注为估算值，且与 §3.1（账单口径）/ §3.2（入口视图）的真实计费完全解耦——改档位定价不影响任何真实金额。
+**这些是估算单价，不是真实账单价**：WorBuddy 只对档位做积分倍率计费，trace 里从不记录档位背后实际落地的底层模型，因此按档位直接算「花费」在概念上不成立。报告用「倍率锚定法」估算——按已知模型的官方倍率线性外推档位 ¥ 单价（快速 ≈¥1.91/7.64、均衡 ≈¥6.58/23.04、极致 ≈¥12.15/42.51），**仅用于横向对比档位间的相对成本**，章节内明确标注为估算值，且与 §3.1（账单口径）/ §3.2（入口视图）的真实计费完全解耦——改档位定价不影响任何真实金额。
 
 想调估算单价只改 `pricing.json`（或 `pricing.local.json`）的 `mode_rates` 段，不用动代码。
 
@@ -379,3 +380,33 @@ python scripts/fetch_pricing.py --file ./new-prices.json --apply   # 自动备�
 安全机制：单价必须是非负数字；与现价偏差超过 5 倍的条目拒绝（确认无误加 `--force`）；`pricing.local.json` 本地覆盖永不被覆盖。
 
 CI 场景用 `--check --stale-days 30`：定价超过 30 天没更新（看 `pricing.json` 的 `_pricing_rules.updated`）就退出码 1，流水线可以据此提醒你更新。
+
+**Q49. 能统计千问办公（QwenWork）的用量吗？**
+能，用 `--source qwenwork`：
+```bash
+python scripts/collect_usage_data.py --source qwenwork --period week -o data.json
+python scripts/generate_report.py data.json --output 千问办公_周报.html --format html
+```
+它会读三处本机数据：会话转录 `~/.qwenworkcn/projects/<slug>/<sessionId>.jsonl`、逐次调用日志
+`~/.qwenworkcn/logs/runs/<run>/qodercli.log`、业务库 `%APPDATA%/QwenWorkCN/data/agents.db`（只读打开，
+读不到就自动降级为纯 JSONL 口径）。路径可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖。
+**在千问办公里让 Agent 出报告时记得带这个参数**——默认源是 WorkBuddy，本机没装它会采到 0 条数据。
+
+**Q50. 千问办公报告里为什么没有金额？**
+因为拿不到可靠的单价：千问办公是**积分订阅制**，没有公开的单 token 刊例价，`pricing.json` 里
+**故意不配** `flash` / `pro` 这些档位——编一个数就是假数据。于是按技能通用约定：计入 token、不计成本、
+报告给出补价提示。
+想看到金额，在 `scripts/pricing.local.json`（不进发布包）里按裸档位名补价：
+```json
+{"flash": {"input": 1.2, "output": 4.8}, "pro": {"input": 7.2, "output": 28.8}}
+```
+另外该源**没有 L1 真值通道**：`--import-official` 只对 WorkBuddy 可用（千问办公的账号级积分
+无法归因到单个会话），混用会直接退出码 2。
+
+**Q51. 千问办公的 token 数字能信吗？**
+当趋势看，别拿去对账。千问办公**服务端不回传 token 用量**（本机实测 1167 条
+`model.response.completed` 的四个 token 字段全是 0，转录里 `message.usage` 恒为 `null`），
+所以 token 是本地按字符估算的：CJK 1 字 ≈ 1 token、其余 4 字符 ≈ 1 token，输入按逐请求
+「上下文重发」累加，system prompt 不落盘故不计（实际 input 略高于估算）。
+不受影响的**真实值**有：调用次数、每次请求端到端耗时、模型档位、会话真名、活跃天数、任务分类。
+一旦上游开始回传真实 token，适配器会自动改用真值（`_tokens_estimated` 变 `false`），无需改代码。

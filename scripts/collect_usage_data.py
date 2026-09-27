@@ -177,12 +177,15 @@ def main():
     parser.add_argument("--pricing-api", type=str, default=None,
                         help="online 模式可选：指向一个返回 {\"models\": {模型名: {input,output}}} 的 JSON 端点，"
                              "用于补全缺失模型单价（取自你自己的定价镜像，避免抓第三方页面）")
-    parser.add_argument("--source", choices=["workbuddy", "claude-code", "codex"], default="workbuddy",
+    parser.add_argument("--source", choices=["workbuddy", "claude-code", "codex", "qwenwork"], default="workbuddy",
                         help="数据源：workbuddy=默认（WorkBuddy traces/workbuddy.db/usage-log），"
                              "claude-code=读取 ~/.claude/projects/ 下的 Claude Code 会话 JSONL（P2-1 适配器 MVP）。"
                              "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算。"
                              "codex=读取 ~/.codex/sessions/ 下的 OpenAI Codex CLI rollout JSONL，"
-                             "无需 WorkBuddy 环境，成本按 pricing.json 中 OpenAI 模型估算价计算")
+                             "无需 WorkBuddy 环境，成本按 pricing.json 中 OpenAI 模型估算价计算。"
+                             "qwenwork=读取千问办公（~/.qwenworkcn/projects 转录 + logs/runs 调用日志 + "
+                             "agents.db 会话元信息），无需 WorkBuddy 环境；"
+                             "千问办公上游不回传 token，故 token 为字符估算、成本未计价")
     parser.add_argument("--task-classifier", choices=["heuristic", "llm"], default="heuristic",
                         help="任务类型分类器：heuristic=默认加权启发式（离线、零依赖）；"
                              "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
@@ -284,6 +287,28 @@ def main():
             task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
         print(f"[INFO] Codex CLI 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
               file=sys.stderr)
+    elif args.source == "qwenwork":
+        # ── 千问办公（QwenWork）数据源 ──
+        # 无需 WorkBuddy 环境：读 ~/.qwenworkcn/projects 转录 + logs/runs 调用日志 +
+        # agents.db 会话元信息。千问办公上游不回传 token（实测 1167 条
+        # model.response.completed 的四个 token 字段全为 0），故 token 为字符估算、
+        # 档位无公开刊例价 → 成本不计价；调用次数 / 耗时 / 标题 / 档位为真实值。
+        from adapters.qwenwork import collect_qwenwork
+        traces, db_data = collect_qwenwork(start_date, end_date)
+        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        # skill_usage 留空：千问办公的 skill-usage.json 只有**累计**使用次数、
+        # 没有按日期的窗口信息，塞进「本期次数」会与 WorkBuddy 口径混淆，宁缺毋伪。
+        skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
+        outputs, memory_logs = ([], {})
+        if task_classifier is not None:
+            task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+        else:
+            task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
+        _est = sum(1 for t in traces if t.get("_tokens_estimated"))
+        print(f"[INFO] 千问办公数据源：{len(traces)} 条 trace / "
+              f"{len(db_data['sessions'])} 个会话"
+              f"（{_est}/{len(traces)} 条 token 为字符估算，档位无刊例价故未计价）",
+              file=sys.stderr)
     else:
         # ── WorkBuddy 默认数据源 ──
         db_data = collect_db_data(start_date, end_date)
@@ -362,6 +387,12 @@ def main():
                         for k, vals in memory_logs.items()},
         "task_types": task_types,
     }
+
+    # token 口径标记：WorkBuddy / claude-code / codex 的 token 是上游回传的真值，
+    # 成本才是估算（L2）；千问办公源连 token 都是本地字符估算，
+    # 显式落一个 meta 位，避免读者把估算 token 当成账单口径引用。
+    if args.source == "qwenwork":
+        result["meta"]["tokens_source"] = "estimated"
 
     # 统计摘要
     total_tokens = sum(t["total_tokens"] for t in traces)

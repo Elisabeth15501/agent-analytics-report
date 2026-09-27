@@ -8,7 +8,8 @@
 | WorkBuddy | `workbuddy`（默认） | ✅ 内置 | `~/.workbuddy/` |
 | Claude Code | `claude-code` | ✅ 已实现 | `~/.claude/projects/**/*.jsonl` |
 | OpenAI Codex CLI | `codex` | ✅ 已实现（MVP，需真实样例复核） | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
-| Trae / 千问办公等 | — | ⬜ 未实现 | 见文末「新增一个 Agent」 |
+| 千问办公 QwenWork | `qwenwork` | ✅ 已实现（⚠️ token 为本地估算，见 §四） | `~/.qwenworkcn/projects/**/*.jsonl` + `logs/runs/` + `agents.db` |
+| Trae 等 | — | ⬜ 未实现 | 见文末「新增一个 Agent」 |
 | OpenClaw | — | ⬜ 未实现（规划中） | 见文末「新增一个 Agent」 |
 
 **对账源**（与 `--source` 正交，仅 `workbuddy` 可用，用于把成本从估算升级为真值）：
@@ -21,6 +22,8 @@
 > Codex 适配器已通过单元测试（11 例，覆盖解析 / 日期过滤 / 缓存折扣 / 健壮性 / CLI 端到端），
 > 但由于 Codex CLI rollout schema 跨版本有差异（如 `reasoning_output_tokens` vs `reasoning_tokens`、
 > `type` vs `item_type`），建议用一份你本机真实 `rollout-*.jsonl` 跑一次 `--source codex` 复核后再对外宣称支持。
+> 千问办公适配器：21 例单元测试 + **本机真实数据端到端**（7 日窗口 154 次调用 / 16 个会话）均已跑通，
+> 但它是目前**唯一连 token 都需要本地估算**的数据源（服务端不回传用量），能力边界见 §四。
 
 ---
 
@@ -34,6 +37,14 @@ python scripts/generate_report.py data.json --output report.html --format html
 # 自定义 projects 根目录（非默认安装位置 / 测试）
 CLAUDE_PROJECTS_DIR=/path/to/projects \
   python scripts/collect_usage_data.py --source claude-code --period week -o data.json
+
+# 千问办公数据源（自动定位 ~/.qwenworkcn 与 %APPDATA%/QwenWorkCN/data/agents.db）
+python scripts/collect_usage_data.py --source qwenwork --period week -o data.json
+python scripts/generate_report.py data.json --output report.html --format html
+
+# 自定义千问办公主目录 / 业务库（多账号、非默认安装位、测试）
+QWENWORK_HOME=/path/to/.qwenworkcn QWENWORK_DB=/path/to/agents.db \
+  python scripts/collect_usage_data.py --source qwenwork --period week -o data.json
 ```
 
 `--source` 与 `--period` / `--days` / `--start` / `--end` 可自由组合，周期语义不变。
@@ -222,7 +233,92 @@ Claude 系列模型已写入 `scripts/pricing.json`（单位：元 / 百万 toke
 
 ---
 
-## 四、数据来源与已知偏差
+## 四、千问办公（QwenWork）适配器
+
+实现文件：`adapters/qwenwork.py`
+
+千问办公的会话内核是 qoder-agent-sdk（与 Claude Code 同构），转录格式相近，
+但**用量口径完全不同**——它同时读三个本机数据源，各有分工：
+
+| 数据源 | 位置 | 贡献的字段 | 性质 |
+|---|---|---|---|
+| 会话转录 | `~/.qwenworkcn/projects/<slug>/<sessionId>.jsonl` | 对话内容、cwd、时间戳、档位、`requestTokenAnchor.requestId` | 真实 |
+| 运行日志 | `~/.qwenworkcn/logs/runs/<run>/qodercli.log` | **逐次模型调用**（`model.request.started` / `model.response.completed`）、端到端耗时、`stop_reason` | 真实 |
+| 业务库 | `%APPDATA%/QwenWorkCN/data/agents.db`（只读） | 界面会话真名、`model_level` 档位、每轮 `durationMs` / `numTurns` | 真实 |
+
+三者的连接键是 `requestId`：转录里一次响应被拆成 `thinking` / `text` / `tool_use` 多行，
+它们共享同一个 `requestTokenAnchor.requestId`，归并后 = 日志里的一条
+`model.response.completed` = **1 条 trace**（本机实测：一份 102 次调用的会话，
+转录里的 requestId 与 `qodercli.log` 的 `request_id` 100% 对得上，无孤儿）。
+
+### 4.1 ⚠️ 与 WorkBuddy 源的根本差异：token 也是估算
+
+千问办公**服务端不回传 token 用量**。本机实测：`qodercli.log` 里 1167 条
+`model.response.completed` 的 `input_tokens` / `output_tokens` /
+`cache_read_input_tokens` / `cache_creation_input_tokens` **全部为 0**；
+转录里 `message.usage` 恒为 `null`；`agents.db` 全文检索不到 token / usage / credit 字段。
+
+| | WorkBuddy / Claude Code / Codex | 千问办公 |
+|---|---|---|
+| token | 上游回传**真值** | **本地字符估算** |
+| 成本 | 静态价表 × token（L2 估算） | 无公开单 token 价 → **不计价**（金额为 0） |
+| L1 真值通道 | `--import-official` 官方积分导出 | **没有**：积分按账号计费，无法归因到单个会话 |
+
+所以报告顶部有两道横幅：`token 口径：本地字符估算` + `成本口径：L2 估算`。
+**结构性结论（用了几次、什么时候、哪个会话、哪档位、耗时多久）可放心引用；
+token 与金额当趋势看，不要拿去对账。**
+
+### 4.2 估算规则（`estimate_tokens`）
+
+| 内容 | 规则 | 依据 |
+|---|---|---|
+| CJK 字符（中日韩 + 全角标点） | 1 字 ≈ 1 token | Qwen 系 BPE 实测 0.6~1.0，取 1.0 **偏高估** |
+| 其余字符（拉丁 / 数字 / 符号 / JSON 结构） | 4 字符 ≈ 1 token | 业界经验 3.5~4.3 |
+| 输入 token | 该请求**之前**全部已见内容的估算和 | 真实计费里 input ≈ 上下文重发 |
+| 工具入参 / 回显 | 计入（`json.dumps` 后按同一规则折算） | 它们确实进过上下文，漏计会显著低估 |
+| system prompt | **不计**（不落盘） | 实际 input 略高于估算 |
+
+系数是模块常量 `CJK_TOKENS_PER_CHAR` / `LATIN_CHARS_PER_TOKEN`，便于复核与调参。
+**不做缓存折扣**：`cached_tokens` 恒为 0，因此真去补价时成本会偏高（真实场景大量上下文命中缓存）。
+
+### 4.3 计价与补价路径
+
+trace 的 `model_key` 统一为 `qwenwork:<档位>`（`flash` / `pro` / `qwork-lite` /
+`qmodel_latest`，取自服务端下发的标识符，不是裸模型名）。`ca_core.parse_channel()`
+识别 `qwenwork:` 前缀，`price_of()` 剥前缀后按裸档位名查表——**发布版 `pricing.json`
+故意不配这些档位**（没有公开单 token 刊例价，编一个数就是假数据），
+于是按技能既有约定：计入 token、不计成本、报告提示未配置。
+
+要看到金额，在 `scripts/pricing.local.json`（不进发布包）里按裸档位名补价：
+
+```json
+{
+  "flash": {"input": 1.2, "output": 4.8},
+  "pro":   {"input": 7.2, "output": 28.8}
+}
+```
+
+### 4.4 前向兼容：上游一旦回传 token 就自动转真值
+
+`_parse_session_file` 对每条 trace 判定：日志里四个 token 字段**任一非 0** →
+直接采用真值，并把 `_tokens_estimated` 置 `false`；全为 0 才走字符估算。
+千问办公哪天在服务端补上 usage 回传，本适配器无需改代码即从「估算 token」升级为
+「真值 token + 估算成本」，与 Claude Code / Codex 同口径（`test_real_usage_overrides_estimate` 守住这条路）。
+
+### 4.5 已知限制
+
+- **无 L1 真值**：账号级积分无法归因到单个会话，`--import-official` 对该源直接退出码 2
+- `cached_tokens` 恒 0（无缓存命中数据），补价后成本会偏高
+- 会话列表里的**空会话**（建了但没跑）不进 sessions：数据源以「有转录文件」为准
+- `automation_runs` / `outputs` / `memory_logs` / 技能使用维度恒空：千问办公的
+  `skill-usage.json` 只有**累计**次数、没有按日期信息，塞进「本期次数」会与 WorkBuddy 口径混淆，宁缺毋伪
+- 未做子 Agent 拆分：`isSidechain` 记录在 trace 的 `_is_sidechain` 透明字段里，但不单独归因
+- 跨窗口长会话按 trace 日期计入窗口（与 claude-code / codex 同语义）
+- 只读：全程 `mode=ro` 打开 SQLite、不写不联网（符合 ADR-4 / ADR-6）；DB 被进程锁住时自动降级为纯 JSONL 口径
+
+---
+
+## 五、数据来源与已知偏差
 
 > 本节回答一个问题：**报告里的数字，哪些能信、哪些只能看结构。**
 > 数据来自 30 日官方导出 vs 本地 trace 的实测对标（2026-08-13 ~ 2026-09-12，WorkBuddy 客户端 773 条）。
@@ -282,7 +378,7 @@ Claude 系列模型已写入 `scripts/pricing.json`（单位：元 / 百万 toke
 
 ---
 
-## 五、新增一个 Agent
+## 六、新增一个 Agent
 
 ### 5.1 需要新增的组件
 

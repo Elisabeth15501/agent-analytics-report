@@ -1,7 +1,7 @@
 # agent-analytics-report
 
 > 生成 Agent 用量分析报告：Token 消耗趋势、缓存命中占比、各模型成本对比、异常自动预警。支持日 / 周 / 月 / 年。
-> **数据源可切换：WorkBuddy（默认）+ Claude Code。**
+> **数据源可切换：WorkBuddy（默认）+ Claude Code + Codex CLI + 千问办公。**
 
 ---
 
@@ -11,7 +11,9 @@
 |---|---|---|---|
 | WorkBuddy | `workbuddy`（默认） | ✅ | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） |
 | Claude Code | `claude-code` | ✅ | `~/.claude/projects/**/*.jsonl` |
-| Trae / 千问办公 | — | ⬜ 未实现 | — |
+| OpenAI Codex CLI | `codex` | ✅ | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
+| 千问办公 QwenWork | `qwenwork` | ✅（⚠️ token 为本地估算） | `~/.qwenworkcn/projects/**/*.jsonl` + `logs/runs/` + `agents.db` |
+| Trae 等 | — | ⬜ 未实现 | — |
 
 **对账源**（叠加在 WorkBuddy 之上，把成本从估算升级为真值）：
 
@@ -21,9 +23,12 @@
 
 - **WorkBuddy**：完整能力，含技能调用、自动化运行、任务分类；
 - **Claude Code**：解析会话日志的 token / 成本 / 任务类型 / 每日趋势，无技能与自动化维度（JSONL 里没有这两类数据）。
+- **千问办公**：调用次数、请求耗时、模型档位、会话真名是**真实值**（取自逐次调用日志与业务库）；
+  但服务端**不回传 token**，token 由本地字符估算，且积分订阅无公开单 token 价 → **金额不计价**。详见
+  [ADAPTERS.md](docs/ADAPTERS.md) §四。
 - **官方用量导出**：本地 trace 的成本是**估算**（静态价表无法表达服务端时段减免，且漏记图像模型 / minimax-m3 约 8.7%）。
   导入官方导出后成本取「积分」字段，升为 **L1 真值**，报告新增 §3.5 双源对账。详见
-  [ADAPTERS.md](docs/ADAPTERS.md) §二 / §四。
+  [ADAPTERS.md](docs/ADAPTERS.md) §二 / §五。
 - 计价库 `scripts/pricing.json` 内含 **WorkBuddy 官方接口的模型与单价**（非通用市价，含 GLM-5.3 / GLM-5.3-Flash / Hy4 preview 等），以及 Claude 系列模型的**人民币折算估算价**（以 Anthropic 美元刊例价为准，可用 `pricing.local.json` 覆盖）；
 - 升级机制依赖 `skillhub upgrade`。
 
@@ -54,6 +59,25 @@ git clone <your-repo-url> ~/.workbuddy/skills/agent-analytics-report
 ```
 重启 WorkBuddy 后技能生效。
 
+### 在千问办公（QwenWork）里安装
+千问办公按目录扫描技能，装到自己的技能目录即可（无需 `_meta.json`）：
+
+```bash
+# Windows（PowerShell / Git Bash 均可，注意展开 ~）
+git clone <your-repo-url> ~/.qwenworkcn/skills/agent-analytics-report
+# 或在 SkillHub 安装后，把技能目录拷到 ~/.qwenworkcn/skills/ 下
+```
+
+装好后在千问办公里直接说「生成我用量报告 / 周报」，或用命令行：
+
+```bash
+cd ~/.qwenworkcn/skills/agent-analytics-report
+python scripts/collect_usage_data.py --source qwenwork --period week -o data.json
+python scripts/generate_report.py data.json --output report.html --format html
+```
+
+> ⚠️ 记得带 `--source qwenwork`：默认源是 WorkBuddy，本机没有 `~/.workbuddy/` 时会采不到数据。
+
 ---
 
 ## 使用
@@ -67,15 +91,24 @@ python scripts/generate_report.py data.json --output report.md   --format markdo
 python scripts/generate_report.py data.json --output report.html --format html
 ```
 
-### 切换数据源（Claude Code）
+### 切换数据源（Claude Code / Codex CLI / 千问办公）
 
 ```bash
+# Claude Code
 python scripts/collect_usage_data.py --source claude-code --period week --output data.json
-python scripts/generate_report.py data.json --output report.html --format html
-
 # 自定义 Claude Code projects 目录
 CLAUDE_PROJECTS_DIR=/path/to/projects \
   python scripts/collect_usage_data.py --source claude-code --period week --output data.json
+
+# OpenAI Codex CLI
+python scripts/collect_usage_data.py --source codex --period week --output data.json
+
+# 千问办公（在千问办公里跑就用这个）
+python scripts/collect_usage_data.py --source qwenwork --period week --output data.json
+QWENWORK_HOME=/path/to/.qwenworkcn QWENWORK_DB=/path/to/agents.db \
+  python scripts/collect_usage_data.py --source qwenwork --period week --output data.json
+
+python scripts/generate_report.py data.json --output report.html --format html
 ```
 
 ---
@@ -84,7 +117,7 @@ CLAUDE_PROJECTS_DIR=/path/to/projects \
 
 本技能附带一套分层回归测试，覆盖从数据采集、计费等效折算、报告生成到发布一致性的全链路。**全部用例使用合成 fixture 数据，不引用任何第三方商业 API、不含真实用量/个人信息**，可安全公开（适合作为作品集在 GitHub Pages 展示）。
 
-测试分层（共 16 个测试文件、398 用例全绿）：
+测试分层（共 23 个测试文件、548 用例全绿）：
 
 | 层 | 文件 | 覆盖要点 |
 |----|------|----------|
@@ -94,6 +127,8 @@ CLAUDE_PROJECTS_DIR=/path/to/projects \
 | **L3 CLI 端到端** | `test_e2e_cli.py` | 黑盒 subprocess 跑通报告生成三格式、CLI 参数校验、恶意模型名 XSS 回归 |
 | **L4 发布一致性** | `test_publish_parity.py` | `config.json` / `metadata.json` 版本对齐、交付物齐全、`.gitignore` 闸门（敏感产物不进包） |
 | **L0 适配器** | `test_claude_code_adapter.py` | Claude Code JSONL 解析、日期窗口过滤、缓存折扣与成本、坏行健壮性、会话派生与任务分类、`--source claude-code` CLI 黑盒（fixture 走 `CLAUDE_PROJECTS_DIR`，不读真实目录） |
+| **L0 适配器** | `test_codex_adapter.py` | Codex CLI rollout JSONL 逐轮 `turn.completed` 解析、跨版本字段兼容（`type`/`item_type`、reasoning 字段）、缓存折扣、`--source codex` CLI 黑盒（`CODEX_HOME` 隔离） |
+| **L0 适配器** | `test_qwenwork_adapter.py` | 千问办公三源归一（转录 / 逐次调用日志 / agents.db）：requestId 分组、字符估算与上下文累加、日志耗时关联、上游回传真值后自动升级、DB 增强与缺失降级、毫秒时间戳等坏数据健壮性、`--source qwenwork` CLI 黑盒与标题口径横幅（`QWENWORK_HOME` / `QWENWORK_DB` 隔离，不读真实目录） |
 | **L0 官方导出** | `test_official_usage.py` | xlsx 纯标准库解析（明文/共享串/inlineStr/日期序列）、**按表头名映射（新版 6 列不取 Prompt 的回归门禁）**、缺列报错、聚合与免费判定、双源对账、`--import-official` CLI 端到端（USERPROFILE 隔离）、零回归、L1/L2 渲染与脏数据回落 |
 | **L0 任务分类** | `test_task_classification.py` | 加权评分取代首匹配、词边界（fix≠prefix）、信号密度取胜、置信度、task_rules.json 外置与回退、LLM 分类器 mock 全路径、collect_task_types 独立可调用（v1.3.0 拆分漏导入回归） |
 | **L0 定价更新** | `test_fetch_pricing.py` | 条目校验（schema/负数/倍率）、候选与 diff 产出、--apply 备份落盘、过期检查退出码、`FETCH_PRICING_ROOT` 隔离黑盒 |
