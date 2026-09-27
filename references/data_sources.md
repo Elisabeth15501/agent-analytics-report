@@ -215,7 +215,7 @@ automation_update(mode="view", id="...")  # 查看详情
 
 ### 7.2 trace 独有（官方无 → 不是漏记，别去对账）
 
-本地模型（`custom-local:*`）、限免入口（`hy3` 至 2026-09-30）、
+本地模型（`custom-local:*`）、限免入口（`hy3` 至 2026-10-31）、
 路由别名（`balanced-model` / `fast-model`）、免费时段（`hy4-preview` 夜间 23:00–08:00）。
 
 ### 7.3 模型名不体现「是否免费」

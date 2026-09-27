@@ -20,7 +20,7 @@ import allure
 
 pytestmark = [pytest.mark.unit, pytest.mark.whitebox]
 
-# 测试日期落在 hy4-preview（截至 2026-09-10）与 hy3（截至 2026-09-30）的限免期内
+# 测试日期落在 hy4-preview（截至 2026-09-10）与 hy3（截至 2026-10-31）的限免期内
 DATE = "2026-08-29"
 
 # hy4-preview 刊例价（pricing.json）：输入 6 / 输出 18 元每百万 tokens

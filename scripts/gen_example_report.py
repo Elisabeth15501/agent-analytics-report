@@ -135,7 +135,7 @@ data = {
         "period": "week",
         "period_label": f"周报 · 2026-W36（{START_DATE}/{END_DATE}）",
         "days": period_days,
-        "timed_free": {"hy3": "2026-09-30"},
+        "timed_free": {"hy3": "2026-10-31"},
     },
     "traces": traces,
     "sessions": sessions,

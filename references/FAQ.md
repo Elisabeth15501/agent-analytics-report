@@ -98,7 +98,7 @@ python scripts/generate_report.py data.json --output report.json  --format json 
 
 `auto`（路由别名）· `hy3` / `hy3-x` · `hy4-preview` / `hy4-preview-x` · `glm-5.3` / `glm-5.3-flash` / `glm-5.2` / `glm-5.2-x` / `glm-5.1` / `glm-5v-turbo` · `minimax-m3` · `kimi-k3` / `kimi-k2.7-code` / `kimi-k2.6` · `deepseek-v4-flash` / `deepseek-v4-pro`
 
-其中 `hy3` 限时免费至 2026-09-30、`hy4-preview` 限时免费至 2026-09-10。已下架的历史官方模型单独放在 `delisted` 段（报告里标 🗄️），不在上面这份清单里。
+其中 `hy3` 限时免费至 2026-10-31、`hy4-preview` 限时免费至 2026-09-10。已下架的历史官方模型单独放在 `delisted` 段（报告里标 🗄️），不在上面这份清单里。
 
 **Q12. 报告显示「未配置」怎么办？**
 报告 **§3.3** 会列出本期所有缺失单价的模型名，并给出可直接复制的 `pricing.local.json` 补写片段。照着贴进本地文件、重跑即可。未配置的模型不计入成本总额，也不会污染占比。
@@ -118,7 +118,7 @@ python scripts/generate_report.py data.json --output report.json  --format json 
 报告里所有排名（任务类型、Top 任务、每日趋势、成本）都用**实际消耗**作主口径。
 
 **Q15. 限免期为什么显示 ¥0？**
-`pricing.json` 的 `timed_free` 段记录了限时免费模型及截止日（含当天），命中期内调用记 ¥0。比如 `hy3` 限免至 2026-09-30、`hy4-preview` 限免至 2026-09-10。这段时间别只看钱——报告 §4 会插入免责声明，提示优先看 **§4.3 Token 口径**（始终运行）和缓存占比。
+`pricing.json` 的 `timed_free` 段记录了限时免费模型及截止日（含当天），命中期内调用记 ¥0。比如 `hy3` 限免至 2026-10-31、`hy4-preview` 限免至 2026-09-10。这段时间别只看钱——报告 §4 会插入免责声明，提示优先看 **§4.3 Token 口径**（始终运行）和缓存占比。
 
 **Q16. 我走自建接口（custom-local），钱算得准吗？**
 按你在 `pricing.local.json` 的 `custom_local` 段填的单价算。没填则回退到同名官方模型价；没有同名官方模型就显示「未配置」。数字仅供参考，准确账单请看接口方网站——报告表格末尾也附了这条免责备注。
