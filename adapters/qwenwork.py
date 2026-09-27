@@ -30,7 +30,14 @@ trace / session schema，复用同一套聚合与报告渲染逻辑，无需 Wor
   → 千问办公按积分订阅计费，账号级积分无法归因到单个会话，**没有 L1 真值可对账**
     （这是与 WorkBuddy 源 + --import-official 最大的差别）。
   → 一旦上游开始回传真实 token，本适配器自动改用真实值
-    （见 _emit 中的 `estimated` 判定），无需改代码。
+    （见 `_parse_session_file` 里的 `estimated` 判定），无需改代码。
+
+两处噪声数据的处理（否则头条数字会被后台任务占满）
+  - `model: "<synthetic>"` 的 assistant 消息是**中断 / 错误的占位**，不是一次真实
+    模型调用 → 不计入 trace，只记进会话的 `_synthetic_responses` 计数。
+  - 千问办公的**记忆整理后台任务**（注入提问以「Target file this round:」开头）
+    确实花额度，但不是用户的任务 → 会话标 `is_background_automation=True` 并给
+    可读名「记忆整理后台任务（awareness nudge）」，报告据此把它从 Top 榜摘出去。
 
 计价
   trace 的 model_key 统一为 `qwenwork:<档位>`（档位取服务端下发的标识符，如
@@ -84,6 +91,18 @@ __all__ = [
 QWENWORK_CHANNEL = "qwenwork"
 
 _UNKNOWN_MODEL = "qwenwork-default"
+
+# 占位响应：千问办公在中断 / 错误 / 后台任务里会写一条 `model: "<synthetic>"`
+# 的 assistant 消息，它**不是一次真实的模型调用**（上游没有请求发出），
+# 计入会虚增调用次数并把注入的大段上下文算成 input token。
+_SYNTHETIC_MODELS = {"<synthetic>", "synthetic"}
+
+# 后台自动任务指纹：千问办公的记忆整理（awareness nudge）会以
+# 「Target file this round: …」作为注入提问跑在独立会话里。
+# 它们确实花了额度，但不是用户的任务，故标 is_background_automation
+# 让报告把它们从「Top 任务」榜单里摘出去，单独归口。
+_BACKGROUND_TITLE_HINTS = ("Target file this round:",)
+_BACKGROUND_TITLE = "记忆整理后台任务（awareness nudge）"
 
 # ── token 估算系数（保守口径，集中在此便于复核调参）─────────────────────────
 # CJK 字符：Qwen 系 BPE 实测约 0.6~1.0 token/字，取 1.0 偏高估——
@@ -601,11 +620,17 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
             dialogue_parts.append(" ".join(g["texts"]))
 
     traces = []
+    synthetic_skipped = 0
     for g in groups:
         date = iso_to_date(g["ts"])
         if not date or date < start_date or date > end_date:
             continue
         usage = run_usage.get(g["request_id"]) or {}
+        # 占位响应（<synthetic>）不是一次真实调用，直接不计
+        _raw_name = usage.get("model") or g["model"] or first_model or runtime_model or ""
+        if _raw_name in _SYNTHETIC_MODELS:
+            synthetic_skipped += 1
+            continue
         real = usage.get("tokens") or {}
         in_tok = _to_int(real.get("input_tokens"))
         out_tok = _to_int(real.get("output_tokens"))
@@ -616,8 +641,7 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
             in_tok = g["input_ctx"]
             out_tok = g["out_tokens"]
         total = in_tok + out_tok
-        model = (usage.get("model") or g["model"] or first_model
-                 or runtime_model or _UNKNOWN_MODEL)
+        model = _raw_name or _UNKNOWN_MODEL
         bare = normalize_model(model)
         model_key = "%s:%s" % (QWENWORK_CHANNEL, bare)
         pricing_model = resolve_model(bare)
@@ -671,10 +695,13 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
 
     if not title:
         title = human_texts[0] if human_texts else (Path(cwd).name if cwd else session_id)
+    # 后台自动任务（记忆整理 nudge）确实花额度，但不是用户的任务：
+    # 打上 is_background_automation 并给一个可读名，报告据此把它从 Top 榜摘出去
+    is_bg = any(h in title for h in _BACKGROUND_TITLE_HINTS)
     session_meta = {
         "id": session_id,
         "cwd": cwd,
-        "title": (title[:60].strip() or session_id),
+        "title": (_BACKGROUND_TITLE if is_bg else title[:60].strip()) or session_id,
         "custom_title": "",
         "status": "completed",
         "created_at": created_ms or 0,
@@ -683,11 +710,12 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
         "mode": QWENWORK_CHANNEL,
         "model": ("%s:%s" % (QWENWORK_CHANNEL, normalize_model(first_model))
                   if first_model else QWENWORK_CHANNEL),
-        "is_background_automation": False,
+        "is_background_automation": is_bg,
         "version": cli_version or "unknown",
         "_dialogue_text": " ".join(dialogue_parts[:40]),
         "_human_turns": len(human_texts),
         "_request_count": len(groups),
+        "_synthetic_responses": synthetic_skipped,
     }
     return traces, session_meta
 

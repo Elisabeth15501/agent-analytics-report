@@ -22,7 +22,7 @@
 > Codex 适配器已通过单元测试（11 例，覆盖解析 / 日期过滤 / 缓存折扣 / 健壮性 / CLI 端到端），
 > 但由于 Codex CLI rollout schema 跨版本有差异（如 `reasoning_output_tokens` vs `reasoning_tokens`、
 > `type` vs `item_type`），建议用一份你本机真实 `rollout-*.jsonl` 跑一次 `--source codex` 复核后再对外宣称支持。
-> 千问办公适配器：21 例单元测试 + **本机真实数据端到端**（7 日窗口 154 次调用 / 16 个会话）均已跑通，
+> 千问办公适配器：23 例单元测试 + **本机真实数据端到端**（7 日窗口 154 次调用 / 16 个会话）均已跑通，
 > 但它是目前**唯一连 token 都需要本地估算**的数据源（服务端不回传用量），能力边界见 §四。
 
 ---
@@ -309,7 +309,10 @@ trace 的 `model_key` 统一为 `qwenwork:<档位>`（`flash` / `pro` / `qwork-l
 
 - **无 L1 真值**：账号级积分无法归因到单个会话，`--import-official` 对该源直接退出码 2
 - `cached_tokens` 恒 0（无缓存命中数据），补价后成本会偏高
-- 会话列表里的**空会话**（建了但没跑）不进 sessions：数据源以「有转录文件」为准
+- `<synthetic>` 占位响应（中断 / 错误）不计为模型调用，只记入会话的 `_synthetic_responses`；
+  千问办公的**记忆整理后台任务**（注入提问以 `Target file this round:` 开头）标
+  `is_background_automation=True` 并改名「记忆整理后台任务（awareness nudge）」——
+  它确实花额度，但不该出现在「Top 任务」榜里冒充用户任务
 - `automation_runs` / `outputs` / `memory_logs` / 技能使用维度恒空：千问办公的
   `skill-usage.json` 只有**累计**次数、没有按日期信息，塞进「本期次数」会与 WorkBuddy 口径混淆，宁缺毋伪
 - 未做子 Agent 拆分：`isSidechain` 记录在 trace 的 `_is_sidechain` 透明字段里，但不单独归因

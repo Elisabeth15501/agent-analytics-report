@@ -264,6 +264,41 @@ def test_input_tokens_accumulate_context(qw_home):
     assert all(t["cached_tokens"] == 0 for t in traces)
 
 
+@allure.feature("千问办公适配器")
+@allure.story("解析")
+@allure.title("<synthetic> 占位响应不计为模型调用")
+def test_synthetic_response_not_counted(qw_home):
+    sid = "ssyn"
+    rid_real = "77777777-7777-7777-7777-777777777777"
+    lines = [_runtime_config(sid, "flash"),
+             _user(sid, _iso(9, 0), "帮我把这份周报整理成三段式摘要")]
+    lines += _assistant(sid, _iso(9, 1), rid_real, [("text", "已完成")])
+    # 中断 / 错误时千问办公会写一条 model=<synthetic> 的占位消息
+    lines += _assistant(sid, _iso(9, 2), "88888888-8888-8888-8888-888888888888",
+                        [("text", "Request cancelled")], model="<synthetic>")
+    _write_session(qw_home, sid, lines)
+    traces, db_data = collect_qwenwork(START, END)
+    assert len(traces) == 1
+    assert all("<synthetic>" not in t["raw_model"] for t in traces)
+    assert db_data["sessions"][0]["_synthetic_responses"] == 1
+
+
+@allure.feature("千问办公适配器")
+@allure.story("解析")
+@allure.title("记忆整理后台任务被标记为自动化，不进用户任务榜")
+def test_background_nudge_session_labeled(qw_home):
+    sid = "snudge"
+    rid = "66666666-6666-6666-6666-666666666666"
+    lines = [_runtime_config(sid, "qwork-advanced"),
+             _user(sid, _iso(9, 0), "Target file this round: MEMORY.md\nCurrent usage: 4481 / 10240")]
+    lines += _assistant(sid, _iso(9, 1), rid, [("text", "已整理")])
+    _write_session(qw_home, sid, lines)
+    _, db_data = collect_qwenwork(START, END)
+    s = db_data["sessions"][0]
+    assert s["is_background_automation"] is True
+    assert s["title"] == "记忆整理后台任务（awareness nudge）"
+
+
 # ── 三、运行日志关联 ────────────────────────────────────────────────────────
 
 @allure.feature("千问办公适配器")
