@@ -12,8 +12,8 @@
   python collect_usage_data.py [--days N] [--output data.json]
   默认采集最近 7 天数据，输出到 stdout
 
-注意：本文件自 v1.3.0 工程债治理（Phase 1）起仅为 facade，实际实现分布在
-ca_core.py / ca_sources.py / ca_sessions.py / ca_aggregate.py，由本文件统一 re-export。
+注意：本文件是 CLI 编排入口 + facade，实际实现分布在
+ca_core.py / ca_sources.py / ca_sessions.py / ca_aggregate.py，由本文件统一编排并 re-export。
 """
 import argparse
 import calendar
@@ -37,36 +37,129 @@ _SKILL_ROOT = os.path.dirname(_HERE)
 if _SKILL_ROOT not in sys.path:
     sys.path.insert(0, _SKILL_ROOT)
 
-from ca_core import *
-from ca_sources import *
-from ca_sessions import *
-from ca_aggregate import *
+from ca_core import (
+    ALL_CUSTOM_MODELS,
+    ALL_LOCAL_MODELS,
+    ALL_ROUTER_MODELS,
+    CACHE_DISCOUNT,
+    CUSTOM_LOCAL_PRICING,
+    DB_PATH,
+    DEFAULT_BLENDED_PER_MILLION,
+    DEFAULT_MODEL,
+    DELISTED_MODELS,
+    DISCOVERED_EXTERNAL,
+    DISCOVERED_LOCAL,
+    DISCOVERED_ROUTER,
+    DISPLAY_MERGE,
+    GLM52_FAMILY,
+    GLM52_RATE,
+    HOME,
+    LOW_CONFIDENCE,
+    LOW_CONFIDENCE_BIAS,
+    MEDIA_EXTS,
+    MODEL_PRICING,
+    MODE_RATES_META,
+    ORPHAN_KEY,
+    ORPHAN_LABEL,
+    PERIOD_DAYS,
+    PERIOD_LABELS,
+    PERIOD_NEXT,
+    PERIOD_SHORT,
+    PER_MILLION,
+    PROJECTS_DIR,
+    ROUTER_ALIASES,
+    ROUTER_HOSTS,
+    ROUTER_VENDORS,
+    SCHEDULED_PRICING,
+    SESSIONS_DIR,
+    SILICONFLOW_VENDOR_PREFIXES,
+    SYSTEM_REMINDER_RE,
+    TASK_RULES_PATH,
+    TASK_TYPE_RULES,
+    TIER_ALIASES,
+    TIER_CANON,
+    TIER_LABELS,
+    TIMED_FREE,
+    TRACES_DIR,
+    TZ,
+    UNNAMED_LABEL,
+    USAGE_LOG_PATH,
+    USER_CUSTOM_MODELS,
+    WB_DIR,
+    WORKBUDDY_SESSIONS,
+    _CHEAPER_ALT,
+    _PRICING,
+    _PRICING_LOCAL_LOADED,
+    _build_sid_to_title,
+    _load_acc_product_config,
+    _load_pricing_config,
+    _to_num,
+    call_time_of,
+    canonical_tier,
+    compute_cost,
+    discover_custom_models,
+    effective_tokens_of,
+    glm52_discount_multiplier,
+    is_router_like,
+    is_scheduled_free,
+    is_timed_free,
+    iso_to_date,
+    iso_to_dt,
+    load_task_rules,
+    low_confidence_reason,
+    low_confidence_bias,
+    merge_display_key,
+    normalize_model,
+    parse_channel,
+    parse_date_range,
+    price_of,
+    resolve_date_range,
+    resolve_model,
+    score_task_types,
+    trace_cost,
+    ts_to_date,
+    ts_to_dt,
+    _router_avg_unit_price,
+)
+from ca_sources import (
+    _extract_text_from_parts,
+    _find_session_jsonl,
+    _recover_model_info_from_spans,
+    _transform_cwd,
+    collect_db_data,
+    collect_session_outputs,
+    collect_skill_usage,
+    collect_traces,
+    get_session_artifact_fingerprint,
+    get_session_content,
+)
+from ca_sessions import (
+    aggregate_task_token_stats,
+    aggregate_top_tasks,
+    classify_task,
+    collect_task_types,
+)
+from ca_aggregate import (
+    _detect_daily_anomalies,
+    _detect_session_anomalies,
+    _fmt_anom_val,
+    _normalize_model_key,
+    _percentile,
+    aggregate_by_exec_model,
+    aggregate_by_model,
+    aggregate_by_session,
+    aggregate_by_tier,
+    aggregate_traces_by,
+    build_savings_insights,
+    build_savings_insights_from_official,
+    detect_cost_anomalies,
+)
 
-# 绑定子模块名，便于测试按「真实定义模块」定位 monkeypatch（Phase 1 拆分后需要）
+# 绑定子模块名，便于测试按「真实定义模块」定位 monkeypatch（拆分后需要）
 import ca_core
 import ca_sources
 import ca_sessions
 import ca_aggregate
-
-"""
-collect_usage_data.py — WorkBuddy Agent 使用数据采集器
-
-从多个数据源采集 Agent 使用情况：
-  1. traces/       — token 消耗、模型信息、会话时长
-  2. workbuddy.db  — 会话元数据、自动化运行记录、信用消耗
-  3. usage-log.json — 技能使用记录、活跃天数
-  4. WorkBuddy/    — 会话产出文件、记忆日志
-  5. automation API — 自动化任务配置
-
-用法:
-  python collect_usage_data.py [--days N] [--output data.json]
-  默认采集最近 7 天数据，输出到 stdout
-
-功能增强：
-  - 添加成本货币化计算（基于 token 消耗）
-  - 添加模型使用状况统计
-  - 支持实时数据采集（通过 --realtime 参数）
-"""
 
 def main():
     parser = argparse.ArgumentParser(description="WorkBuddy Agent 使用数据采集器")
@@ -91,7 +184,7 @@ def main():
                              "codex=读取 ~/.codex/sessions/ 下的 OpenAI Codex CLI rollout JSONL，"
                              "无需 WorkBuddy 环境，成本按 pricing.json 中 OpenAI 模型估算价计算")
     parser.add_argument("--task-classifier", choices=["heuristic", "llm"], default="heuristic",
-                        help="任务类型分类器（P2-3）：heuristic=默认加权启发式（离线、零依赖）；"
+                        help="任务类型分类器：heuristic=默认加权启发式（离线、零依赖）；"
                              "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
                              "调用失败自动回退启发式")
     parser.add_argument("--task-llm-endpoint", type=str, default=None,
@@ -102,7 +195,7 @@ def main():
                         help="LLM 端点的 API Key（本地端点可省略）")
     parser.add_argument("--import-official", type=str, default=None, metavar="XLSX",
                         help="导入官方用量导出（官网下载的 request-usage-*.xlsx），作为**成本真值（L1）**对账源。"
-                             "纯本地只读解析，不联网、不上传（F17）。不传时成本为静态价表估算（L2）。"
+                             "纯本地只读解析，不联网、不上传。不传时成本为静态价表估算（L2）。"
                              "仅支持 --source workbuddy")
     parser.add_argument("--official-sheet", type=str, default=None,
                         help="官方导出工作表名（默认取第一个工作表；官方固定为 'Usage Details'）")
@@ -142,7 +235,7 @@ def main():
         else:
             print(f"[INFO] 采集范围[{period_label}]：{start_date} ~ {end_date}（默认一周，可用 --period/--days/--start/--end 自定义）", file=sys.stderr)
 
-    # 任务分类器（P2-3）：默认启发式零依赖；llm 仅在显式提供端点时启用
+    # 任务分类器：默认启发式零依赖；llm 仅在显式提供端点时启用
     task_classifier = None
     if args.task_classifier == "llm":
         try:
@@ -230,7 +323,7 @@ def main():
         skill_usage = collect_skill_usage(start_date, end_date)
         outputs, memory_logs = collect_session_outputs(start_date, end_date)
 
-        # 任务类型分类（P2-3）：默认加权启发式；--task-classifier llm 时走可选 LLM 增强
+        # 任务类型分类：默认加权启发式；--task-classifier llm 时走可选 LLM 增强
         task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
 
     # 汇总
@@ -255,7 +348,7 @@ def main():
             "generated_at": datetime.now(TZ).isoformat(),
             "is_realtime": args.realtime,
             "source": args.source,
-            # 成本口径（F17 · v1.6.0）："estimate"=静态价表估算（L2，默认）；
+            # 成本口径："estimate"=静态价表估算（L2，默认）；
             # 传入 --import-official 后置为 "official"（L1 真值，取官方导出「积分」字段）。
             "cost_source": "estimate",
         },
@@ -287,7 +380,7 @@ def main():
     total_input_cost = sum(t["input_cost"] for t in traces)
     total_output_cost = sum(t["output_cost"] for t in traces)
     total_effective_cost = round(sum(t.get("effective_cost", 0.0) for t in traces), 2)
-    # F17 · P1 请求数反推（估算）：trace 是 generation 粒度，与官方「请求数」差一个量级
+    # 请求数反推（估算）：trace 是 generation 粒度，与官方「请求数」差一个量级
     # （实测约 11.9x）。按 session_id + 时间窗聚类启发式反推「估算请求数」：同一会话内
     # 两次 trace 间隔超过阈值（默认 15 分钟）视为新的用户请求；无 session_id 的 trace
     # 每条算 1 次。这是估算值，口径与官方「请求数」不同，仅用于对照，不等同请求数。
@@ -356,7 +449,7 @@ def main():
         "total_input_cost": total_input_cost,
         "total_output_cost": total_output_cost,
         "total_effective_cost": round(total_effective_cost, 2),
-        # F17 · P1：generation 聚类反推的「估算请求数」（口径与官方请求数不同，仅对照用）
+        # generation 聚类反推的「估算请求数」（口径与官方请求数不同，仅对照用）
         "estimated_request_count": estimated_request_count,
         "request_estimate_gap_minutes": 15,
     }
@@ -379,13 +472,13 @@ def main():
     result["model_stats"] = aggregate_by_exec_model(traces)
     # 按入口 / 配置模型聚合（使用分布维度：auto / hy3 / custom-local 等入口）→ §3.2
     result["model_exec_stats"] = aggregate_by_model(traces)
-    # 按档位（路由三档）聚合（v1.3.0 分析维度）→ §3.4
+    # 按档位（路由三档）聚合 → §3.4
     result["tier_stats"] = aggregate_by_tier(traces)
 
-    # ── F17：官方用量导出（成本真值 L1）──
+    # ── 官方用量导出（成本真值 L1）──
     # 本地 trace 的静态价表估算（L2）在数学上无法表达「服务端时段减免 / 用户免费额度」，
     # 且存在图像模型 / minimax-m3 等盲区；导入官方导出后，报告切 L1 并以「积分」字段为成本真值。
-    # 未导入时保持 L2，输出与 v1.5.x 完全一致（零回归）。
+    # 未导入时保持 L2，输出完全一致（零回归）。
     if args.import_official:
         try:
             from adapters.official_usage import (
@@ -399,7 +492,7 @@ def main():
             print(f"[ERROR] 官方用量导出导入失败：{e}", file=sys.stderr)
             sys.exit(2)
 
-        # C7 · L1 真值模式：§4.4 省钱建议改用官方真实积分（official.by_model），
+        # L1 真值模式：§4.4 省钱建议改用官方真实积分（official.by_model），
         # 而非 trace 估算的 effective_cost。官方积分已是成本真值，折扣 / 时段模型给出
         # 「迁走」建议不会误导用户多花钱，故不过滤低置信度（low_confidence_filter=False）。
         # 归并变体（hy3-x→hy3 等）使 §4.4 与 §3.5 对账口径一致。
@@ -451,15 +544,15 @@ def main():
     # 限时免费截止日（来自 pricing.json 的 timed_free），供报告渲染「限时免费至 X」标签，
     # 避免在渲染器里硬编码日期——用户改了 pricing.json 后标签会自动跟随。
     result["meta"]["timed_free"] = dict(TIMED_FREE)
-    # 成本置信度（v1.5.2）：模型名 -> 「静态估算与实际计费存在系统性偏差」的原因。
+    # 成本置信度：模型名 -> 「静态估算与实际计费存在系统性偏差」的原因。
     # 供报告把受服务端时段 / 配额减免影响的模型标为低置信度、不参与成本结论。
     # 同样来自 pricing.json（可用 pricing.local.json 覆盖），渲染层不硬编码。
     result["meta"]["low_confidence"] = dict(LOW_CONFIDENCE)
-    # 成本置信度偏差方向（v1.7.0，机读）：模型名 -> over/under/mixed，供报告渲染 ⚠↑/⚠↓。
+    # 成本置信度偏差方向（机读）：模型名 -> over/under/mixed，供报告渲染 ⚠↑/⚠↓。
     result["meta"]["low_confidence_bias"] = dict(LOW_CONFIDENCE_BIAS)
     # 是否加载了本地定价覆盖（pricing.local.json），供报告透明提示。
     result["meta"]["pricing_local_loaded"] = bool(_PRICING_LOCAL_LOADED)
-    # 档位维度元信息（v1.3.0）：档位估算标记、官方倍率缓存是否生效、最终档位单价表。
+    # 档位维度元信息：档位估算标记、官方倍率缓存是否生效、最终档位单价表。
     # 供报告 §3.4 透明标注「估算值」并提示可配置。
     result["meta"]["mode_rates"] = dict(MODE_RATES_META.get("rates", {}))
     result["meta"]["mode_cost_estimated"] = bool(MODE_RATES_META.get("auto_estimate", False))
@@ -494,11 +587,11 @@ def main():
                     print(f"[WARN] 联网检索 {model} 失败：{e}", file=sys.stderr)
     result["meta"]["pricing_lookup"] = pricing_lookup
 
-    # P1 成本深度分析：每会话成本 / 省钱杠杆（cost_anomalies 依赖 daily_tokens，在下方构建后计算）
+    # 成本深度分析：每会话成本 / 省钱杠杆（cost_anomalies 依赖 daily_tokens，在下方构建后计算）
     result["session_stats"] = aggregate_by_session(traces, db_data["sessions"])
     # 省钱洞察基于计费维度（exec_model）找真实付费贵模型，给出更便宜替代与预计月省。
     # L1 真值模式已在上方 import-official 块用官方真实积分构造并写入 savings_insights；
-    # 此处仅当尚未构造（L2 估算模式）时补算，避免覆盖 L1 真值版（C7）。
+    # 此处仅当尚未构造（L2 估算模式）时补算，避免覆盖 L1 真值版。
     if "savings_insights" not in result:
         result["savings_insights"] = build_savings_insights(result["model_stats"])
 
@@ -524,7 +617,7 @@ def main():
         daily_tokens[d]["effective_cost"] += t.get("effective_cost", 0.0)
     result["daily_tokens"] = daily_tokens
 
-    # P1 成本异常检测（依赖 daily_tokens 与 session_stats，故置于每日统计之后）
+    # 成本异常检测（依赖 daily_tokens 与 session_stats，故置于每日统计之后）
     result["cost_anomalies"] = detect_cost_anomalies(result["daily_tokens"], result["session_stats"])
 
     output_json = json.dumps(result, ensure_ascii=False, indent=2)

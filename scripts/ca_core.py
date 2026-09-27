@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # ca_core.py — 采集器核心：常量 / 定价加载 / 日期 / 纯函数
-# （从 collect_usage_data.py 拆分，Phase 1 / 2026-09-02）
+# （从 collect_usage_data.py 拆分，2026-09-02）
 #
 # 模型单价（元 / 1M tokens）来源：联网查证 2026-07-29；限时免费截止日随官方活动更新。
 # 本模块不含任何 IO；路由类别名（auto / 三档）单价由「所有计费模型均价」估算。
@@ -23,7 +23,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
-__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'LOW_CONFIDENCE_BIAS', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SCHEDULED_PRICING', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'call_time_of', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_scheduled_free', 'is_timed_free', 'iso_to_date', 'iso_to_dt', 'load_task_rules', 'low_confidence_reason', 'low_confidence_bias', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
+__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'LOW_CONFIDENCE_BIAS', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PER_MILLION', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SCHEDULED_PRICING', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'call_time_of', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_scheduled_free', 'is_timed_free', 'iso_to_date', 'iso_to_dt', 'load_task_rules', 'low_confidence_reason', 'low_confidence_bias', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
 TIMED_FREE = {
     # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
     # 以 pricing.json 的 timed_free 段为准（权威源）。
@@ -58,7 +58,7 @@ SCHEDULED_PRICING = {
     # 解决的根本问题：静态价表只能表达「模型 -> 单价」，无法表达「夜间免费 / 峰谷双档 /
     # 限期促销」这类**按时刻变化**的服务端规则 —— 这正是低置信度偏差的主要来源。
     # ⚠️ 与 LOW_CONFIDENCE_BIAS 同理：必须先在此处定义，否则 _load_pricing_config() 冷启动
-    # 读它会触发 NameError（v1.7.0 踩过一次，整个技能 import 即崩）。
+    # 读它会触发 NameError（曾踩过一次，整个技能 import 即崩）。
 }
 
 MODEL_PRICING = {
@@ -173,6 +173,7 @@ ROUTER_HOSTS = (
 DEFAULT_BLENDED_PER_MILLION = 1.0
 
 CACHE_DISCOUNT = 0.1
+PER_MILLION = 1_000_000  # 每百万 token / 每百万积分换算分母（成本货币化统一口径）
 
 def effective_tokens_of(total_tokens, cached_tokens):
     """计费等效 token：原始 token 减去缓存命中享受的折扣量（cached 是 input 子集）。
@@ -229,7 +230,7 @@ CUSTOM_LOCAL_PRICING = {}
 def _load_acc_product_config():
     """读取 WorkBuddy 服务端推送的产品配置缓存，提取官方积分倍率（models[].credits）。
 
-    这是 v1.3.0 引入的「档位倍率权威数据源」：本地缓存优先，缺/坏则回退手工 mode_rates。
+    这是 「档位倍率权威数据源」：本地缓存优先，缺/坏则回退手工 mode_rates。
     返回 dict：{path, mtime, loaded, multipliers}，multipliers 为 {id: float|None}
     （credits 为 null 的模型标 None，表示未知，绝不按 0 处理）。
     文件缺失 / JSON 损坏 / 任何异常都安全降级为 loaded=False、空表，不向上抛。
@@ -269,7 +270,7 @@ def _load_acc_product_config():
 def _load_pricing_config():
     """从 pricing.json 加载发布版定价，再合并 pricing.local.json 用户本地覆盖。
 
-    v1.3.0：额外加载档位估算单价（mode_rates）并并入 MODEL_PRICING，使档位别名可计价；
+    额外加载档位估算单价（mode_rates）并并入 MODEL_PRICING，使档位别名可计价；
     并读取服务端配置缓存（acc-product-config-v3.json）用官方 credits 倍率覆盖 mode_rates 的
     multiplier（¥ 估算单价仍以手工锚定为准，因官方只给倍率不给 ¥）。
     """
@@ -297,20 +298,20 @@ def _load_pricing_config():
             if isinstance(data.get("timed_free"), dict):
                 cfg["timed_free"].update(data["timed_free"])
             if isinstance(data.get("low_confidence"), dict):
-                # 成本置信度（v1.5.2）：模型名 -> 偏差原因说明；跳过 _comment 等元数据键
+                # 成本置信度：模型名 -> 偏差原因说明；跳过 _comment 等元数据键
                 cfg["low_confidence"].update(
                     {normalize_model(k): str(v) for k, v in data["low_confidence"].items()
                      if not str(k).startswith("_")}
                 )
             if isinstance(data.get("low_confidence_bias"), dict):
-                # 偏差方向（v1.7.0 · A2）：模型名 -> over/under/mixed；与 low_confidence 同键。
+                # 偏差方向：模型名 -> over/under/mixed；与 low_confidence 同键。
                 # 渲染层据此画 ⚠↑/⚠↓，让用户一眼看出 L2 数字是虚高还是虚低。
                 cfg["low_confidence_bias"].update(
                     {normalize_model(k): str(v).strip().lower() for k, v in data["low_confidence_bias"].items()
                      if not str(k).startswith("_")}
                 )
             if isinstance(data.get("scheduled_pricing"), dict):
-                # 时段定价（v1.7.1）：模型名 -> 规则列表（effect: free / peak / discount）。
+                # 时段定价：模型名 -> 规则列表（effect: free / peak / discount）。
                 # 按调用时刻改写静态单价；未命中任何规则时完全不影响既有行为（零回归）。
                 cfg["scheduled_pricing"].update(
                     {normalize_model(k): list(v) if isinstance(v, (list, tuple)) else [v]
@@ -363,7 +364,7 @@ def _load_pricing_config():
                      if not str(k).startswith("_")}
                 )
             if isinstance(local.get("low_confidence_bias"), dict):
-                # 本地覆盖也允许改偏差方向（v1.7.0 · A2）
+                # 本地覆盖也允许改偏差方向
                 cfg["low_confidence_bias"].update(
                     {normalize_model(k): str(v).strip().lower() for k, v in local["low_confidence_bias"].items()
                      if not str(k).startswith("_")}
@@ -374,7 +375,7 @@ def _load_pricing_config():
                      if not str(k).startswith("_")}
                 )
             if isinstance(local.get("scheduled_pricing"), dict):
-                # 本地覆盖允许新增 / 改写时段规则（v1.7.1）；同模型名整段替换，不做逐条合并
+                # 本地覆盖允许新增 / 改写时段规则；同模型名整段替换，不做逐条合并
                 cfg["scheduled_pricing"].update(
                     {normalize_model(k): list(v) if isinstance(v, (list, tuple)) else [v]
                      for k, v in local["scheduled_pricing"].items()
@@ -388,7 +389,7 @@ def _load_pricing_config():
             local_loaded = True
         except (json.JSONDecodeError, FileNotFoundError, PermissionError) as e:
             print(f"[WARN] 读取 pricing.local.json 失败（数据格式错误/文件不存在/权限不足），忽略本地覆盖：{e}", file=sys.stderr)
-    # ── 档位（mode_rates）并入 MODEL_PRICING + 官方倍率覆盖（v1.3.0）──
+    # ── 档位（mode_rates）并入 MODEL_PRICING + 官方倍率覆盖 ──
     acc = _load_acc_product_config()
     mode_rates = dict(cfg.get("mode_rates") or {})
     auto_estimate = bool(mode_rates.pop("auto_estimate", False))
@@ -423,13 +424,13 @@ MODEL_PRICING = _PRICING["models"]
 
 TIMED_FREE = _PRICING["timed_free"]
 
-# 成本置信度（v1.5.2）：模型名 -> 偏差原因说明。为空表示该模型估算可信。
+# 成本置信度：模型名 -> 偏差原因说明。为空表示该模型估算可信。
 LOW_CONFIDENCE = _PRICING["low_confidence"]
 
-# 成本置信度偏差方向（v1.7.0）：与 LOW_CONFIDENCE 同键，值为 over/under/mixed（机读）。
+# 成本置信度偏差方向：与 LOW_CONFIDENCE 同键，值为 over/under/mixed（机读）。
 LOW_CONFIDENCE_BIAS = _PRICING.get("low_confidence_bias", {})
 
-# 时段定价（v1.7.1）：模型名 -> 规则列表，按调用时刻改写静态单价（见 SCHEDULED_PRICING 注释）。
+# 时段定价：模型名 -> 规则列表，按调用时刻改写静态单价（见 SCHEDULED_PRICING 注释）。
 SCHEDULED_PRICING = _PRICING.get("scheduled_pricing", {})
 
 CUSTOM_LOCAL_PRICING = _PRICING["custom_local"]
@@ -723,7 +724,7 @@ def is_timed_free(model_name, as_of_date):
 def low_confidence_reason(model_name):
     """返回该模型「成本估算不可信」的原因说明；可信则返回空字符串。
 
-    v1.5.2：用于报告把受服务端时段 / 配额减免影响的模型标为「低置信度」，
+    用于报告把受服务端时段 / 配额减免影响的模型标为「低置信度」，
     并提示用户不要据此做预算。数据源为 pricing.json 的 low_confidence 段
     （可用 pricing.local.json 覆盖）。
     """
@@ -735,7 +736,7 @@ def low_confidence_reason(model_name):
 def low_confidence_bias(model_name):
     """返回该模型低置信度偏差方向（机读）：'over' / 'under' / 'mixed' / ''（空=可信）。
 
-    v1.7.0 新增：与 low_confidence_reason 配套，供报告渲染方向箭头
+    与 low_confidence_reason 配套，供报告渲染方向箭头
     （⚠↑ 高估 / ⚠↓ 低估 / ⚠ 方向不明），让用户一眼看出 L2 静态估算
     是虚高还是虚低。数据源为 pricing.json 的 low_confidence_bias 段。
     """
@@ -749,7 +750,7 @@ def price_of(model_name, channel=None, as_of_date=None, as_of_hour=None, as_of_d
     channel 为空时自动从 model_name 解析（支持 custom-local:/:free/auto 等编码）。
     as_of_date('YYYY-MM-DD') 用于限时免费判定：若模型在该日期处于 TIMED_FREE 期内，返回 (0.0, 0.0)。
 
-    v1.7.1 · 时段定价：as_of_hour(0-23) 与 as_of_dow(1=周一…7=周日) 让「夜间免费 /
+    时段定价：as_of_hour(0-23) 与 as_of_dow(1=周一…7=周日) 让「夜间免费 /
     峰谷双档 / 限期促销」这类**按时刻变化**的服务端规则得以生效（见 SCHEDULED_PRICING）。
     三者可只传部分；缺失维度按「不套用该维度规则」处理（见 _rule_matches）。
     """
@@ -782,7 +783,7 @@ def price_of(model_name, channel=None, as_of_date=None, as_of_hour=None, as_of_d
     ip, op = entry.get("input"), entry.get("output")
     if ip is None or op is None:
         return (ip, op)
-    # —— v1.7.1 时段定价：夜间免费 / 峰谷双档 / 限期促销 ——
+    # —— 时段定价：夜间免费 / 峰谷双档 / 限期促销 ——
     ip, op, _rule = resolve_scheduled_price(
         ip, op, model_name, as_of_date, as_of_hour, as_of_dow, model_entry=entry)
     return (ip, op)
@@ -794,7 +795,7 @@ def compute_cost(input_tokens, output_tokens, model_name, channel=None,
                       as_of_hour=as_of_hour, as_of_dow=as_of_dow)
     if ip is None or op is None:
         return None
-    return round((input_tokens / 1_000_000) * ip + (output_tokens / 1_000_000) * op, 4)
+    return round((input_tokens / PER_MILLION) * ip + (output_tokens / PER_MILLION) * op, 4)
 
 def trace_cost(input_tokens, output_tokens, model_name, channel=None,
                as_of_date=None, as_of_hour=None, as_of_dow=None):
@@ -802,7 +803,7 @@ def trace_cost(input_tokens, output_tokens, model_name, channel=None,
     c = compute_cost(input_tokens, output_tokens, model_name, channel,
                      as_of_date=as_of_date, as_of_hour=as_of_hour, as_of_dow=as_of_dow)
     if c is None:
-        return round((input_tokens + output_tokens) / 1_000_000 * DEFAULT_BLENDED_PER_MILLION, 4)
+        return round((input_tokens + output_tokens) / PER_MILLION * DEFAULT_BLENDED_PER_MILLION, 4)
     return c
 
 def ts_to_dt(ts, tz=TZ):
@@ -989,7 +990,7 @@ TASK_TYPE_RULES = [
                    r"安装指南", r"配置指南", r"API.*文档"]),
 ]
 
-# ── P2-3：任务分类规则外置 + 加权评分 ──────────────────────────────────────
+# ── 任务分类规则外置 + 加权评分 ──────────────────────────────────────
 # 规则优先从 scripts/task_rules.json 读取（可由用户直接编辑，含权重）；
 # 文件缺失或解析失败时回退到上方内置 TASK_TYPE_RULES（全部权重 1.0）。
 
@@ -1074,7 +1075,7 @@ def _compiled_patterns(types, meta):
 
 
 def score_task_types(text, types=None, meta=None):
-    """对文本做加权评分，返回所有任务类型的得分明细（P2-3 核心）。
+    """对文本做加权评分，返回所有任务类型的得分明细（核心）。
 
     评分模型：
       - 每个 pattern 基础分 = 权重 w + 长度加分（pattern 越长越具体）；

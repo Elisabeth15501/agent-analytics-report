@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ca_sessions.py — 采集器子模块（从 collect_usage_data.py 拆分，Phase 1 / 2026-09-02）
+# ca_sessions.py — 采集器子模块（从 collect_usage_data.py 拆分，2026-09-02）
 
 import argparse
 import calendar
@@ -18,16 +18,99 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from ca_core import *  # 共享常量与纯函数
+from ca_core import (  # 共享常量与纯函数
+    ALL_CUSTOM_MODELS,
+    ALL_LOCAL_MODELS,
+    ALL_ROUTER_MODELS,
+    CACHE_DISCOUNT,
+    CUSTOM_LOCAL_PRICING,
+    DB_PATH,
+    DEFAULT_BLENDED_PER_MILLION,
+    DEFAULT_MODEL,
+    DELISTED_MODELS,
+    DISCOVERED_EXTERNAL,
+    DISCOVERED_LOCAL,
+    DISCOVERED_ROUTER,
+    DISPLAY_MERGE,
+    GLM52_FAMILY,
+    GLM52_RATE,
+    HOME,
+    LOW_CONFIDENCE,
+    LOW_CONFIDENCE_BIAS,
+    MEDIA_EXTS,
+    MODEL_PRICING,
+    MODE_RATES_META,
+    ORPHAN_KEY,
+    ORPHAN_LABEL,
+    PERIOD_DAYS,
+    PERIOD_LABELS,
+    PERIOD_NEXT,
+    PERIOD_SHORT,
+    PER_MILLION,
+    PROJECTS_DIR,
+    ROUTER_ALIASES,
+    ROUTER_HOSTS,
+    ROUTER_VENDORS,
+    SCHEDULED_PRICING,
+    SESSIONS_DIR,
+    SILICONFLOW_VENDOR_PREFIXES,
+    SYSTEM_REMINDER_RE,
+    TASK_RULES_PATH,
+    TASK_TYPE_RULES,
+    TIER_ALIASES,
+    TIER_CANON,
+    TIER_LABELS,
+    TIMED_FREE,
+    TRACES_DIR,
+    TZ,
+    UNNAMED_LABEL,
+    USAGE_LOG_PATH,
+    USER_CUSTOM_MODELS,
+    WB_DIR,
+    WORKBUDDY_SESSIONS,
+    _CHEAPER_ALT,
+    _PRICING,
+    _PRICING_LOCAL_LOADED,
+    _build_sid_to_title,
+    _load_acc_product_config,
+    _load_pricing_config,
+    _to_num,
+    call_time_of,
+    canonical_tier,
+    compute_cost,
+    discover_custom_models,
+    effective_tokens_of,
+    glm52_discount_multiplier,
+    is_router_like,
+    is_scheduled_free,
+    is_timed_free,
+    iso_to_date,
+    iso_to_dt,
+    load_task_rules,
+    low_confidence_reason,
+    low_confidence_bias,
+    merge_display_key,
+    normalize_model,
+    parse_channel,
+    parse_date_range,
+    price_of,
+    resolve_date_range,
+    resolve_model,
+    score_task_types,
+    trace_cost,
+    ts_to_date,
+    ts_to_dt,
+    _router_avg_unit_price,
+)
 from ca_sources import get_session_content, get_session_artifact_fingerprint
-# ↑ P0 修复：collect_task_types 依赖这两个 ca_sources 函数。v1.3.0 拆分时漏了导入，
+# ↑ 修复：collect_task_types 依赖这两个 ca_sources 函数。拆分时漏了导入，
 #   实际运行 collect_usage_data.py（WorkBuddy 源）会 NameError——e2e 测试只覆盖了
 #   generate_report 与 claude-code 分支，未触达此路径，故长期未被发现。
 
 __all__ = ['aggregate_task_token_stats', 'aggregate_top_tasks', 'classify_task', 'collect_task_types']
 
 def classify_task(session_text):
-    """根据会话文本推断任务类型（P2-3 加权评分版）。
+    """根据会话文本推断任务类型（加权评分版）。
 
     传入的 session_text 通常已由 collect_task_types 拼接为
     「对话内容 + 生成物指纹 + 会话标题」三部分。
@@ -44,7 +127,7 @@ def classify_task(session_text):
 def collect_task_types(sessions, classifier=None):
     """为每个会话分配任务类型
 
-    classifier: 可选 callable(text) -> task_type（如 LLM 分类器，P2-3c）；
+    classifier: 可选 callable(text) -> task_type（如 LLM 分类器）；
                 缺省用内置加权启发式 classify_task。
 
     分类依据（按优先级合并，全面覆盖「对话内容 + 生成物（含已删除）」）：

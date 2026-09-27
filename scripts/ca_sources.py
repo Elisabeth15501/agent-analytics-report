@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ca_sources.py — 采集器子模块（从 collect_usage_data.py 拆分，Phase 1 / 2026-09-02）
+# ca_sources.py — 采集器子模块（从 collect_usage_data.py 拆分，2026-09-02）
 
 import argparse
 import calendar
@@ -18,7 +18,90 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from ca_core import *  # 共享常量与纯函数
+from ca_core import (  # 共享常量与纯函数
+    ALL_CUSTOM_MODELS,
+    ALL_LOCAL_MODELS,
+    ALL_ROUTER_MODELS,
+    CACHE_DISCOUNT,
+    CUSTOM_LOCAL_PRICING,
+    DB_PATH,
+    DEFAULT_BLENDED_PER_MILLION,
+    DEFAULT_MODEL,
+    DELISTED_MODELS,
+    DISCOVERED_EXTERNAL,
+    DISCOVERED_LOCAL,
+    DISCOVERED_ROUTER,
+    DISPLAY_MERGE,
+    GLM52_FAMILY,
+    GLM52_RATE,
+    HOME,
+    LOW_CONFIDENCE,
+    LOW_CONFIDENCE_BIAS,
+    MEDIA_EXTS,
+    MODEL_PRICING,
+    MODE_RATES_META,
+    ORPHAN_KEY,
+    ORPHAN_LABEL,
+    PERIOD_DAYS,
+    PERIOD_LABELS,
+    PERIOD_NEXT,
+    PERIOD_SHORT,
+    PER_MILLION,
+    PROJECTS_DIR,
+    ROUTER_ALIASES,
+    ROUTER_HOSTS,
+    ROUTER_VENDORS,
+    SCHEDULED_PRICING,
+    SESSIONS_DIR,
+    SILICONFLOW_VENDOR_PREFIXES,
+    SYSTEM_REMINDER_RE,
+    TASK_RULES_PATH,
+    TASK_TYPE_RULES,
+    TIER_ALIASES,
+    TIER_CANON,
+    TIER_LABELS,
+    TIMED_FREE,
+    TRACES_DIR,
+    TZ,
+    UNNAMED_LABEL,
+    USAGE_LOG_PATH,
+    USER_CUSTOM_MODELS,
+    WB_DIR,
+    WORKBUDDY_SESSIONS,
+    _CHEAPER_ALT,
+    _PRICING,
+    _PRICING_LOCAL_LOADED,
+    _build_sid_to_title,
+    _load_acc_product_config,
+    _load_pricing_config,
+    _to_num,
+    call_time_of,
+    canonical_tier,
+    compute_cost,
+    discover_custom_models,
+    effective_tokens_of,
+    glm52_discount_multiplier,
+    is_router_like,
+    is_scheduled_free,
+    is_timed_free,
+    iso_to_date,
+    iso_to_dt,
+    load_task_rules,
+    low_confidence_reason,
+    low_confidence_bias,
+    merge_display_key,
+    normalize_model,
+    parse_channel,
+    parse_date_range,
+    price_of,
+    resolve_date_range,
+    resolve_model,
+    score_task_types,
+    trace_cost,
+    ts_to_date,
+    ts_to_dt,
+    _router_avg_unit_price,
+)
 
 __all__ = ['_extract_text_from_parts', '_find_session_jsonl', '_recover_model_info_from_spans', '_transform_cwd', 'collect_db_data', 'collect_session_outputs', 'collect_skill_usage', 'collect_traces', 'get_session_artifact_fingerprint', 'get_session_content']
 
@@ -185,7 +268,7 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
         cached_tokens = p["cached_tokens"]
 
         # 选定本 trace 的单价：路由别名用均价；限时免费模型按 trace 日期判 0；否则用模型真实单价
-        # v1.7.1：把调用【时刻】（日期 + 小时 + 星期）一并传进 price_of，让「夜间免费 /
+        # 把调用【时刻】（日期 + 小时 + 星期）一并传进 price_of，让「夜间免费 /
         # 峰谷双档 / 限期促销」这类按时段生效的服务端规则真正生效 —— 此前只传日期，
         # 夜间调用被当成白天计费，是低置信度模型被高估的根因。
         pricing_model = resolve_model(p.get("exec_model") or p.get("raw_model"))
@@ -199,11 +282,11 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
             ip, op = price_of(pricing_model, **_when)
 
         if ip is not None and op is not None:
-            input_cost = (input_tokens / 1_000_000) * ip
-            output_cost = (output_tokens / 1_000_000) * op
+            input_cost = (input_tokens / PER_MILLION) * ip
+            output_cost = (output_tokens / PER_MILLION) * op
             cost = input_cost + output_cost
             eff_in = max(input_tokens - cached_tokens * (1 - CACHE_DISCOUNT), 0)
-            eff_cost = (eff_in / 1_000_000) * ip + (output_tokens / 1_000_000) * op
+            eff_cost = (eff_in / PER_MILLION) * ip + (output_tokens / PER_MILLION) * op
             # GLM-5.2 夜猫子计划：按模型名定率（glm-5.2=0.79x / glm-5.2-x=0.5x）
             _mult = glm52_discount_multiplier(pricing_model)
             cost *= _mult
@@ -219,7 +302,7 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
             "output_cost": round(output_cost, 4),
             "effective_tokens": eff_tokens,
             "effective_cost": round(eff_cost, 4),
-            # v1.7.1：时段规则（夜间免费等）同样算「本次调用免费」
+            # 时段规则（夜间免费等）同样算「本次调用免费」
             "is_free": is_timed_free(pricing_model, p.get("date"))
                        or is_scheduled_free(pricing_model, **_when),
         })

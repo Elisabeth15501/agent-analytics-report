@@ -30,13 +30,10 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-TZ = timezone(timedelta(hours=8))
-
-# 会话标题语义（须与 collect_usage_data.UNNAMED_LABEL / ORPHAN_LABEL 保持一致）：
+# 会话标题语义常量与时区统一从 ca_core 导入（单一真相源，避免与 collect_usage_data 漂移）：
 #   UNNAMED_LABEL = 本地库有该会话但无标题（真·无标题）
 #   ORPHAN_LABEL  = trace 的 session_id 在本地库查不到（孤儿 trace）
-UNNAMED_LABEL = "未命名会话"
-ORPHAN_LABEL = "未关联会话"
+from ca_core import TZ, UNNAMED_LABEL, ORPHAN_LABEL, PER_MILLION
 
 
 def _esc(value):
@@ -349,7 +346,7 @@ def build_model_cost_chart_md(model_stats, title="各模型估算实际花费对
     且对超长模型名（如 custom-local:GLM-4.5-air）无渲染问题。条形长度按
     最大花费线性映射，行尾标注金额，与 HTML `build_model_cost_chart` 同源。
 
-    v1.5.2：低置信度模型（受服务端时段减免 / 配额影响）在行首标 ⚠，
+    低置信度模型（受服务端时段减免 / 配额影响）在行首标 ⚠，
     并在图下追加免责脚注，避免用户拿它做预算。
     """
     items = [m for m in model_stats if (m.get("effective_cost", 0) or 0) > 0]
@@ -389,7 +386,7 @@ def build_model_cost_chart_md(model_stats, title="各模型估算实际花费对
 def build_model_cost_chart(model_stats, title="各模型估算实际花费对比", low_conf_map=None, low_conf_bias_map=None):
     """HTML 内联条形图：各模型估算实际花费对比（仅含已配置单价模型）。
 
-    v1.5.2：低置信度模型标 ⚠ 并附 title 提示，图下追加免责脚注。
+    低置信度模型标 ⚠ 并附 title 提示，图下追加免责脚注。
     """
     items = [m for m in model_stats if (m.get("effective_cost", 0) or 0) > 0]
     if not items:
@@ -472,7 +469,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
     因本地推理零成本，单价/花费/占比列无意义）。
     GLM-5.2 家族合并已在调用方通过 merge_glm52_family() 完成。
 
-    v1.5.2：low_conf_map 为「成本置信度」配置（模型名 -> 偏差原因）。命中的模型在
+    low_conf_map 为「成本置信度」配置（模型名 -> 偏差原因）。命中的模型在
     表格里加 ⚠ 标记并在表下说明，且**不参与「最贵模型」结论**（避免拿估算做决策）。
     """
     configured = [m for m in model_stats if m.get("configured")]
@@ -502,7 +499,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
             mname = f"{m['model']}（未解析具体模型）"
         elif m.get("timed_free"):
             mname = f"{m['model']}{_timed_free_label(m['model'], timed_free_map)}"
-        # v1.5.2：低置信度（估算与实际计费存在已知系统性偏差）——与限免标记可共存
+        # 低置信度（估算与实际计费存在已知系统性偏差）——与限免标记可共存
         _lc = _lc_reason(m["model"], low_conf_map)
         if _lc:
             _lc_mark = " " + _lc_arrow(_lc_bias(m["model"], low_conf_bias_map))
@@ -522,7 +519,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
         elif m.get("is_delisted") and cfg:
             ep = m.get("unit_price_input") or 0.0
             eo = m.get("unit_price_output") or 0.0
-            est = (m.get("input_tokens", 0) / 1_000_000) * ep + (m.get("output_tokens", 0) / 1_000_000) * eo
+            est = (m.get("input_tokens", 0) / PER_MILLION) * ep + (m.get("output_tokens", 0) / PER_MILLION) * eo
             eff = est
             ip = f"{ep:.2f}"
             op = f"{eo:.2f}"
@@ -567,7 +564,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
     if any(m.get("is_router_api") for m in model_stats):
         out.extend(_emit_note("🔀 = 智能路由 / 聚合网关（外部 API，如 OpenRouter 免费档、Groq 等）：一次调用可能落到不同底层模型或上游 host，"
                                "单价 / 花费为粗略参考，实际账单请往对应接口查看。", fmt))
-    # v1.5.2：低置信度说明（只有本期真的命中时才出现，避免噪音）
+    # 低置信度说明（只有本期真的命中时才出现，避免噪音）
     _lc_hits = {m["model"]: _lc_reason(m["model"], low_conf_map) for m in model_stats}
     _lc_hits = {k: v for k, v in _lc_hits.items() if v}
     if _lc_hits:
@@ -582,7 +579,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
             top_calls = max(model_stats, key=lambda x: x["calls"])
             out.append(f"> 🏆 **最常使用模型**：`{top_calls['model']}` —— 调用 {top_calls['calls']} 次。")
         if priced:
-            # v1.5.2：低置信度模型不参与「最贵模型」结论（估算偏差已知较大）
+            # 低置信度模型不参与「最贵模型」结论（估算偏差已知较大）
             concrete = [m for m in priced
                         if not m.get("is_router") and not _lc_reason(m["model"], low_conf_map)]
             if not concrete and priced:
@@ -601,7 +598,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
             if _skipped:
                 _sk = "、".join(f"`{m['model']}` ¥{m.get('effective_cost', 0):.2f}" for m in _skipped)
                 out.append(f"> ⚠ 未计入本结论的低置信度模型：{_sk} —— 估算偏差已知较大，不代表真实支出（见报告顶部「成本口径」）。")
-            # A3 · v1.7.0 高位告警：低置信度模型恰好是本期最贵（或 Top-3）时，单独醒目提示，
+            # 高位告警：低置信度模型恰好是本期最贵（或 Top-3）时，单独醒目提示，
             # 避免用户照「最贵」去切换模型反而多花钱（这正是用户担心的「低置信度最贵」场景）。
             # 仅聚合本维度（model_stats）；low_conf 配置取自本函数入参，不可用外层 data/meta。
             _alert = _lc_top_alert({"model_stats": model_stats,
@@ -624,7 +621,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
                 out.append(chart)
             top_calls = max(model_stats, key=lambda x: x["calls"])
             if priced:
-                # v1.5.2：低置信度模型不参与「最贵模型」结论
+                # 低置信度模型不参与「最贵模型」结论
                 concrete = [m for m in priced
                             if not m.get("is_router") and not _lc_reason(m["model"], low_conf_map)]
                 if not concrete and priced:
@@ -651,7 +648,7 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
                                     for m in _skipped)
                     out.append(f'        <p class="disclaimer">⚠ 未计入本结论的低置信度模型：{_sk}'
                                ' —— 估算偏差已知较大，不代表真实支出（见报告顶部「成本口径」）。</p>')
-                # A3 · v1.7.0 高位告警（HTML）：低置信度模型为本期最贵（或 Top-3）时醒目提示。
+                # 高位告警（HTML）：低置信度模型为本期最贵（或 Top-3）时醒目提示。
                 # 注意：必须放在 if _skipped 之外——低置信度模型恰为 #1 最贵时 _skipped 为空，
                 # 而这正是最需要告警的场景。
                 _alert_h = _lc_top_alert({"model_stats": model_stats,
@@ -867,7 +864,7 @@ def build_tier_section(fmt, data):
     """HTML 章节 §3.4 / Markdown §3.4：档位维度（快速 / 均衡 / 极致）。存在档位调用时才渲染。
     MD / HTML 共用数据计算，仅渲染层不同。
 
-    v1.3.0 新增分析维度。档位真实底层模型从不落盘，只能纯档位聚合；
+    新增分析维度。档位真实底层模型从不落盘，只能纯档位聚合；
     其单价为按积分倍率锚定的**估算值**（已在 meta 标注），不计入账单总额。
     """
     meta = data.get("meta", {})
@@ -1177,7 +1174,7 @@ def build_next_week_outlook(summary, daily_tokens, automation_runs, session_cred
     active_runs = [r for r in automation_runs if _auto_is_active(r)]
     total_runs = len(active_runs)
 
-    # 1. 待审核任务 → P0（仅统计正在执行的自动化）
+    # 1. 待审核任务（仅统计正在执行的自动化）
     pending = sum(1 for r in active_runs if r.get("status") == "PENDING_REVIEW")
     if pending:
         share = pending / total_runs * 100 if total_runs else 0
@@ -1186,7 +1183,7 @@ def build_next_week_outlook(summary, daily_tokens, automation_runs, session_cred
             f"（占本期执行中自动化 {share:.0f}%），卡在人工确认环节持续占用额度与资源，建议尽快审核或配置自动放行。"
         )
 
-    # 2. 自动化稳定性 → P1（样本 ≥10 才告警，否则仅观察）
+    # 2. 自动化稳定性（样本 ≥10 才告警，否则仅观察）
     if total_runs:
         success = sum(1 for r in active_runs if r.get("result_success"))
         fail = total_runs - success
@@ -1268,7 +1265,7 @@ def generate_markdown_report(data):
                             if (t.get("exec_model") or t.get("raw_model") or "") == "default"
                             or ((t.get("input_tokens", 0) or 0) + (t.get("output_tokens", 0) or 0)) == 0)
     _billable_calls = len(_gt) - _unresolved_calls
-    # F17 · P0-3 口径标注：trace 数是 generation 粒度，与官方「请求数」差一个量级，
+    # 口径标注：trace 数是 generation 粒度，与官方「请求数」差一个量级，
     # 不标注会被读成「用量暴涨」。
     _calls_note = f"（{_unresolved_calls} 次未解析/幽灵不计费；**generation 粒度**："
     _calls_note += "一次请求内部可含多轮生成，**不等于**官方「请求数」）"
@@ -1285,7 +1282,7 @@ def generate_markdown_report(data):
         lines.append(f"| 官方账单（L1 真值） | {summary.get('official_requests', 0)} 次请求 / "
                      f"**{summary.get('total_cost_official', 0):.2f} 积分**"
                      f"（其中 {summary.get('official_free_requests', 0)} 次免费）|")
-    # F17 · P1 请求数反推：generation 聚类得到的「估算请求数」，与官方「请求数」口径不同，仅对照
+    # 请求数反推：generation 聚类得到的「估算请求数」，与官方「请求数」口径不同，仅对照
     _est_req = summary.get("estimated_request_count")
     if _est_req is not None:
         _gap = summary.get("request_estimate_gap_minutes", 15)
@@ -1618,7 +1615,7 @@ def _build_session_cwd_maps(data):
 
 
 def _compute_failed_automation_cost(automation_runs, sessions_by_cwd, session_cost_by_id):
-    """O1 v1.5 增强：按 automation_id 聚合失败自动化的浪费成本。
+    """按 automation_id 聚合失败自动化的浪费成本。
 
     数据模型说明：automation_runs.thread_id 是「run-{ts}-{n}」格式的内部 run ID，
     与 sessions.id（UUID）不是同一套标识系统，因此无法直接 1:1 关联。本函数采用
@@ -1758,7 +1755,7 @@ def _render_failed_automation_html(items):
 
 
 def _compute_session_size_anomalies(rows):
-    """O2 v1.5：会话规模（调用次数）异常检测。纯只读。
+    """会话规模（调用次数）异常检测。纯只读。
 
     threshold = max(p95(calls), 200)，top 5 按 calls 降序。
     """
@@ -1779,7 +1776,7 @@ def _compute_session_size_anomalies(rows):
 
 
 def _compute_cache_and_untitled(data, threshold_pct=60.0):
-    """O4+O6 v1.5：缓存健康度卡 + 未命名高成本会话提示。纯只读。
+    """缓存健康度卡 + 未命名高成本会话提示。纯只读。
 
     O4：从 traces 聚合每会话 cache_rate，找出 < threshold 的会话，
        按「(全局缓存率 - 当前缓存率) × 当前成本 × 0.5」估算可省（保守口径）。
@@ -2062,7 +2059,7 @@ def _free_period_disclaimer(fmt, data):
     ]
 
 
-# —— 成本置信度（v1.5.2）——
+# —— 成本置信度 ——
 # 背景：静态价表（pricing.json）在数学上无法表达「服务端时段减免 / 用户免费额度」，
 # 导致部分模型（如 hy4-preview 夜间免费）的估算严重高于实际账单。
 # 对策不是让价表变准（做不到），而是让报告**明确告诉用户你在看哪一级**：
@@ -2107,7 +2104,7 @@ LC_ALERT_MIN_SHARE = 0.05
 
 
 def _lc_top_alert(data):
-    """A3 · v1.7.0：判断低置信度模型是否「贵到值得高位告警」。
+    """判断低置信度模型是否「贵到值得高位告警」。
 
     条件（同时满足）：
       - 该模型在本期付费模型中排名 Top-3（含并列）
@@ -2184,7 +2181,7 @@ def _is_l1(data):
 
 
 def _cost_confidence_banner(fmt, data):
-    """成本口径横幅（v1.5.2 引入，v1.6.0 接 L1）：默认 L2 估算；导入官方导出后自动切 L1 真值。"""
+    """成本口径横幅：默认 L2 估算；导入官方导出后自动切 L1 真值。"""
     meta = data.get("meta", {}) or {}
     # 口径级别以「是否真拿到了官方数据」为准，而不是 meta 里的标记：
     # 若 meta 标了 official 但数据缺失（脏数据 / 手工编辑的 JSON），必须回落 L2，
@@ -2453,9 +2450,9 @@ def build_cost_analysis_section(fmt, data):
         else:
             lines.append("- 当前付费模型均已是最优性价比，暂无明确可迁移的更便宜替代；"
                          "后续若引入更便宜模型或提升缓存复用率，可进一步降本。")
-        # A1 · v1.7.0：省钱杠杆已排除低置信度模型；此处显式提示折扣/时段模型，避免用户自行「迁走」
-        # A3 · v1.7.0：低置信度模型恰好是最贵（Top-3）时，在省钱章节顶部也给出高位告警
-        # C7 · L1 真值模式：官方积分已是真值，不再渲染低置信度标记（折扣/时段模型在 L1 不构成误导）
+        # 省钱杠杆已排除低置信度模型；此处显式提示折扣/时段模型，避免用户自行「迁走」
+        # 低置信度模型恰好是最贵（Top-3）时，在省钱章节顶部也给出高位告警
+        # L1 真值模式：官方积分已是真值，不再渲染低置信度标记（折扣/时段模型在 L1 不构成误导）
         _lc_models = sorted({m["model"] for m in (data.get("model_stats", []) + data.get("model_exec_stats", []))
                               if _lc_reason(m["model"], _low_conf_map(data)) and (m.get("effective_cost", 0) or 0) > 0})
         if _lc_models and not _is_l1(data):
@@ -2552,8 +2549,8 @@ def build_cost_analysis_section(fmt, data):
     else:
         L.append("        <p>当前付费模型均已是最优性价比，暂无明确可迁移的更便宜替代；"
                  "后续若引入更便宜模型或提升缓存复用率，可进一步降本。</p>")
-    # A1 · v1.7.0：折扣/时段模型提示；A3 · v1.7.0：低置信度最贵高位告警（HTML）
-    # C7 · L1 真值模式：官方积分已是真值，不再渲染低置信度标记
+    # 折扣/时段模型提示；低置信度最贵高位告警（HTML）
+    # L1 真值模式：官方积分已是真值，不再渲染低置信度标记
     _lc_models_h = sorted({m["model"] for m in (data.get("model_stats", []) + data.get("model_exec_stats", []))
                              if _lc_reason(m["model"], _low_conf_map(data)) and (m.get("effective_cost", 0) or 0) > 0})
     if _lc_models_h and not _is_l1(data):
@@ -2657,10 +2654,10 @@ def generate_html_report(data):
         .disclaimer-box p { margin: 6px 0 0; }
         .disclaimer-box ul { margin: 6px 0 0; padding-left: 20px; }
         .disclaimer-box li { margin: 4px 0; }
-        /* v1.5.2 成本置信度：低置信度估算标记 */
+        /* 成本置信度：低置信度估算标记 */
         .lc-note { color: var(--disclaimer-fg); font-size: 12px; }
         .chart-bars .lc-note { margin: 8px 0 0; }
-        /* v1.6.0 双源对账（§3.5） */
+        /* 双源对账（§3.5） */
         .note { color: var(--disclaimer-fg); font-size: 13px; background: var(--disclaimer-bg); border-left: 4px solid var(--disclaimer-border); padding: 8px 12px; border-radius: 4px; margin: 12px 0; }
         a { color: var(--link); }
         /* 主题切换控件 */
@@ -2717,7 +2714,7 @@ def generate_html_report(data):
                                if (t.get("exec_model") or t.get("raw_model") or "") == "default"
                                or ((t.get("input_tokens", 0) or 0) + (t.get("output_tokens", 0) or 0)) == 0)
     _billable_calls_h = len(_gt_h) - _unresolved_calls_h
-    # F17 · P0-3 口径标注：generation 粒度 ≠ 官方请求数
+    # 口径标注：generation 粒度 ≠ 官方请求数
     _calls_label_h = f"调用次数·generation 粒度（{_unresolved_calls_h} 未解析）"
     stat_cards = [
         (summary.get("active_day_count", 0), "活跃天数"),
@@ -2731,7 +2728,7 @@ def generate_html_report(data):
     if _is_l1(data):
         stat_cards.insert(3, (summary.get("official_requests", 0), "官方请求数（L1）"))
         stat_cards.append((f"{summary.get('total_cost_official', 0):.2f}", "官方积分合计（L1 真值）"))
-    # F17 · P1 请求数反推（估算值，口径与官方请求数不同）
+    # 请求数反推（估算值，口径与官方请求数不同）
     _est_req_h = summary.get("estimated_request_count")
     if _est_req_h is not None:
         stat_cards.append((_est_req_h, "估算请求数（反推·估算）"))
@@ -3230,17 +3227,17 @@ def main():
             },
             "task_token_stats": collector.aggregate_task_token_stats(traces, db_data["sessions"]),
             "top_tasks": collector.aggregate_top_tasks(traces, db_data["sessions"], top_n=10),
-            # P0-1：§3.1 改为「实际计费模型」维度（exec_model，与头条/账单一致），
+            # §3.1 改为「实际计费模型」维度（exec_model，与头条/账单一致），
             # §3.2 改为「入口/配置」维度（model_key，使用分布）。对调两节数据源以消除 §3.1 与头条矛盾。
             "model_stats": collector.aggregate_by_exec_model(traces),
             "model_exec_stats": collector.aggregate_by_model(traces),
             "session_stats": _session_stats,
             "cost_anomalies": collector.detect_cost_anomalies(daily_tokens, _session_stats),
             "savings_insights": collector.build_savings_insights(collector.aggregate_by_exec_model(traces)),
-            # v1.3.0：档位维度（快速/均衡/极致）。与 §3.1/§3.2 同源、金额口径一致。
+            # 档位维度（快速/均衡/极致）。与 §3.1/§3.2 同源、金额口径一致。
             "tier_stats": collector.aggregate_by_tier(traces),
         }
-        # v1.3.0：将档位估算倍率的「配置缓存校准」状态注入 meta，供 §3.4 与 JSON 输出展示。
+        # 将档位估算倍率的「配置缓存校准」状态注入 meta，供 §3.4 与 JSON 输出展示。
         _mode_meta = getattr(collector, "MODE_RATES_META", {}) or {}
         data["meta"]["mode_rates"] = dict(_mode_meta.get("rates", {}) or {})
         data["meta"]["mode_cost_estimated"] = bool(_mode_meta.get("auto_estimate", False))

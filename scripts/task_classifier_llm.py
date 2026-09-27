@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# task_classifier_llm.py — P2-3c 可选 LLM 任务分类器
+# task_classifier_llm.py — 可选 LLM 任务分类器
 #
 # 设计原则（合规优先）：
 #   - **默认不启用**：collect_usage_data.py 的 --task-classifier 默认为 heuristic，

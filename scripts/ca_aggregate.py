@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# ca_aggregate.py — 采集器子模块（从 collect_usage_data.py 拆分，Phase 1 / 2026-09-02）
+# ca_aggregate.py — 采集器子模块（从 collect_usage_data.py 拆分，2026-09-02）
 
 import argparse
 import calendar
@@ -18,7 +18,90 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from ca_core import *  # 共享常量与纯函数
+from ca_core import (  # 共享常量与纯函数
+    ALL_CUSTOM_MODELS,
+    ALL_LOCAL_MODELS,
+    ALL_ROUTER_MODELS,
+    CACHE_DISCOUNT,
+    CUSTOM_LOCAL_PRICING,
+    DB_PATH,
+    DEFAULT_BLENDED_PER_MILLION,
+    DEFAULT_MODEL,
+    DELISTED_MODELS,
+    DISCOVERED_EXTERNAL,
+    DISCOVERED_LOCAL,
+    DISCOVERED_ROUTER,
+    DISPLAY_MERGE,
+    GLM52_FAMILY,
+    GLM52_RATE,
+    HOME,
+    LOW_CONFIDENCE,
+    LOW_CONFIDENCE_BIAS,
+    MEDIA_EXTS,
+    MODEL_PRICING,
+    MODE_RATES_META,
+    ORPHAN_KEY,
+    ORPHAN_LABEL,
+    PERIOD_DAYS,
+    PERIOD_LABELS,
+    PERIOD_NEXT,
+    PERIOD_SHORT,
+    PER_MILLION,
+    PROJECTS_DIR,
+    ROUTER_ALIASES,
+    ROUTER_HOSTS,
+    ROUTER_VENDORS,
+    SCHEDULED_PRICING,
+    SESSIONS_DIR,
+    SILICONFLOW_VENDOR_PREFIXES,
+    SYSTEM_REMINDER_RE,
+    TASK_RULES_PATH,
+    TASK_TYPE_RULES,
+    TIER_ALIASES,
+    TIER_CANON,
+    TIER_LABELS,
+    TIMED_FREE,
+    TRACES_DIR,
+    TZ,
+    UNNAMED_LABEL,
+    USAGE_LOG_PATH,
+    USER_CUSTOM_MODELS,
+    WB_DIR,
+    WORKBUDDY_SESSIONS,
+    _CHEAPER_ALT,
+    _PRICING,
+    _PRICING_LOCAL_LOADED,
+    _build_sid_to_title,
+    _load_acc_product_config,
+    _load_pricing_config,
+    _to_num,
+    call_time_of,
+    canonical_tier,
+    compute_cost,
+    discover_custom_models,
+    effective_tokens_of,
+    glm52_discount_multiplier,
+    is_router_like,
+    is_scheduled_free,
+    is_timed_free,
+    iso_to_date,
+    iso_to_dt,
+    load_task_rules,
+    low_confidence_reason,
+    low_confidence_bias,
+    merge_display_key,
+    normalize_model,
+    parse_channel,
+    parse_date_range,
+    price_of,
+    resolve_date_range,
+    resolve_model,
+    score_task_types,
+    trace_cost,
+    ts_to_date,
+    ts_to_dt,
+    _router_avg_unit_price,
+)
 
 __all__ = ['_detect_daily_anomalies', '_detect_session_anomalies', '_fmt_anom_val', '_normalize_model_key', '_percentile', 'aggregate_by_exec_model', 'aggregate_by_model', 'aggregate_by_session', 'aggregate_by_tier', 'aggregate_traces_by', 'build_savings_insights', 'build_savings_insights_from_official', 'detect_cost_anomalies']
 
@@ -83,7 +166,7 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_
             "configured": configured,
             "unit_price_input": ip if configured else None,
             "unit_price_output": op if configured else None,
-            # v1.7.1：本行是否配置了时段定价规则（夜间免费 / 峰谷双档 / 限期促销）——
+            # 本行是否配置了时段定价规则（夜间免费 / 峰谷双档 / 限期促销）——
             # 只是「有规则」的静态标记（供报告打 ⏱），真实是否命中按每次调用时刻判定。
             "scheduled": bool(SCHEDULED_PRICING.get(normalize_model(m))
                               or SCHEDULED_PRICING.get(normalize_model(bm))),
@@ -111,18 +194,18 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_
             # 入口/使用视图：按本模型在本 trace 日期的真实单价重算（免费入口记 0）
             # ⚠️ 用计费键 bm：合并行内各 trace 按「自己实际执行的模型」计价，
             # 否则 hy4-preview-x 的用量会被 hy4-preview 的限免价算成 ¥0，花费凭空消失。
-            # v1.7.1：传入调用时刻（日期 + 小时 + 星期）→ 夜间免费 / 峰谷双档 / 限期促销生效。
+            # 传入调用时刻（日期 + 小时 + 星期）→ 夜间免费 / 峰谷双档 / 限期促销生效。
             tip, top = price_of(bm, **call_time_of(t.get("started_at"), t.get("date")))
             if tip is not None and top is not None:
                 inp = t.get("input_tokens", 0)
                 out = t.get("output_tokens", 0)
                 # GLM-5.2 夜猫子计划：按模型名定率（与 §3.1 同源）
                 _mult = glm52_discount_multiplier(bm)
-                a["input_cost"] += (inp / 1_000_000) * tip * _mult
-                a["output_cost"] += (out / 1_000_000) * top * _mult
-                a["total_cost"] += ((inp / 1_000_000) * tip + (out / 1_000_000) * top) * _mult
+                a["input_cost"] += (inp / PER_MILLION) * tip * _mult
+                a["output_cost"] += (out / PER_MILLION) * top * _mult
+                a["total_cost"] += ((inp / PER_MILLION) * tip + (out / PER_MILLION) * top) * _mult
                 eff_in = max(inp - t.get("cached_tokens", 0) * (1 - CACHE_DISCOUNT), 0)
-                a["effective_cost"] += ((eff_in / 1_000_000) * tip + (out / 1_000_000) * top) * _mult
+                a["effective_cost"] += ((eff_in / PER_MILLION) * tip + (out / PER_MILLION) * top) * _mult
                 # 免费判定基于「本模型在本 trace 日期的实际单价是否为 0」（而非 trace 级 is_free，
                 # 因 is_free 基于 raw_model，无法覆盖「走 auto 路由实际执行 hy3」这类 trace）
                 if tip == 0 and top == 0:
@@ -152,11 +235,11 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_
                 r["is_router"] = True
                 inp = r["input_tokens"]
                 out = r["output_tokens"]
-                r["input_cost"] = (inp / 1_000_000) * avg_ip
-                r["output_cost"] = (out / 1_000_000) * avg_op
+                r["input_cost"] = (inp / PER_MILLION) * avg_ip
+                r["output_cost"] = (out / PER_MILLION) * avg_op
                 r["total_cost"] = r["input_cost"] + r["output_cost"]
                 eff_in = max(inp - r["cached_tokens"] * (1 - CACHE_DISCOUNT), 0)
-                r["effective_cost"] = (eff_in / 1_000_000) * avg_ip + (out / 1_000_000) * avg_op
+                r["effective_cost"] = (eff_in / PER_MILLION) * avg_ip + (out / PER_MILLION) * avg_op
             else:
                 r.setdefault("is_router", is_router_like(r["model"]))
     else:
@@ -207,7 +290,7 @@ def aggregate_traces_by(traces, key_field, resolve_key_fn=None, resolve_billing_
         r["total_cost"] = round(r["total_cost"], 2)
         # 不在此处对 effective_cost 四舍五入：保留全精度，使各模型 effective_cost 之和
         # ≡ 概览「实际成本」总额（summary.total_effective_cost，二者同源、仅分组方式不同），
-        # 消除逐行四舍五入导致的 1 分钱漂移（P0 对账目标）。显示端仍按 :.2f 取整。
+        # 消除逐行四舍五入导致的 1 分钱漂移（对账目标）。显示端仍按 :.2f 取整。
         r["effective_cost"] = r["effective_cost"]
     # 已配置按估算花费降序在前；未配置排后，仍按调用次数降序
     rows.sort(key=lambda x: (x["configured"], x["effective_cost"], x["calls"]), reverse=True)
@@ -271,7 +354,7 @@ def aggregate_by_exec_model(traces):
                                resolve_billing_key_fn=_resolve_billing_key)
 
 def aggregate_by_tier(traces):
-    """按「档位（路由三档）」维度聚合（v1.3.0 新增分析维度）。
+    """按「档位（路由三档）」维度聚合（新增分析维度）。
 
     档位（快速/均衡/极致）在 trace 中只以路由别名出现，真实底层模型从不落盘，
     故只能做纯档位聚合，无法做「档位 × 真实模型」交叉表。
@@ -489,16 +572,16 @@ def build_savings_insights(exec_stats, low_confidence_filter=True):
       - 预计月省 = 该模型 effective_cost × 30% × (1 - 价格比)。
     仅当存在已知更便宜替代且单价可解析时给出建议。
 
-    low_confidence_filter（默认 True）：是否剔除低置信度模型（L2 估算不可信，v1.7.0 · A1）。
+    low_confidence_filter（默认 True）：是否剔除低置信度模型（L2 估算不可信）。
       在 L1 真值模式（官方真实积分 by_model）下传 False —— 官方积分已是真值，折扣 / 时段模型
-      给出「迁走」建议不会误导用户多花钱（见 C7）。
+      给出「迁走」建议不会误导用户多花钱。
     """
     paid = [m for m in exec_stats
             if m.get("configured") and m.get("effective_cost", 0) > 0
             and not m.get("is_router")
-            # v1.7.0 · A1：低置信度模型（夜间免费 / 促销 / 峰谷，L2 数字不可信）
+            # 低置信度模型（夜间免费 / 促销 / 峰谷，L2 数字不可信）
             # 不参与省钱建议，避免「建议从折扣模型迁走」反而让用户多花钱。
-            # C7 · L1 真值模式（low_confidence_filter=False）下不过滤：官方积分已是真值。
+            # L1 真值模式（low_confidence_filter=False）下不过滤：官方积分已是真值。
             and (not low_confidence_filter or not low_confidence_reason(m["model"]))]
     total_paid = sum(m["effective_cost"] for m in paid) or 1
     items = []
@@ -533,11 +616,11 @@ def build_savings_insights(exec_stats, low_confidence_filter=True):
 
 
 def build_savings_insights_from_official(official_by_model, alias_map=None):
-    """C7 · L1 真值模式：用官方用量导出 by_model 的**真实积分**构造省钱建议。
+    """L1 真值模式：用官方用量导出 by_model 的**真实积分**构造省钱建议。
 
     与 build_savings_insights 同构，但成本基准取自官方 `credits`（真值），而非 trace 估算的
     effective_cost。官方积分已是成本真值，故复用同款算法时跳过低置信度过滤（low_confidence_filter=False）——
-    折扣 / 时段模型给出「迁走」建议不会误导用户多花钱（与 v1.7.0 · A1 在 L2 下的处理相反）。
+    折扣 / 时段模型给出「迁走」建议不会误导用户多花钱（与 L2 下的处理相反）。
 
     :param official_by_model: collect_official_usage() 的 by_model 列表
                               [{name, requests, credits, ...}]（按 credits 降序）
