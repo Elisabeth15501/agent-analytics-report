@@ -145,6 +145,18 @@ def test_auto_switches_to_tokens_only(collector_module):
 
 @allure.feature("计价模式")
 @allure.story("auto 判定")
+@allure.title("连模型数据都读不到 → tokens_only（百度搭子/聚合 token 源）")
+def test_no_model_data_switches_to_tokens_only(collector_module):
+    # 适配器未产出任何模型统计（unconfigured 与 configured_rows 都空）：
+    # 旧逻辑会因 `unconfigured` 为假值漏判、错误地走 priced（满屏 ¥0.00）；
+    # 新逻辑只认「有没有可计价的模型」，故应转 tokens_only。
+    assert collector_module._decide_cost_mode(
+        requested="auto", unconfigured=set(), configured_rows=[],
+        total_cost=0.0, total_effective_cost=0.0, has_official=False) == "tokens_only"
+
+
+@allure.feature("计价模式")
+@allure.story("auto 判定")
 @allure.title("限免 / 本地模型：单价已配置且合法为 0，不得误判为 tokens_only")
 def test_legit_zero_cost_stays_priced(collector_module):
     # 限免（hy3）与本地模型（custom-local）算出来的 ¥0.00 是真实结果，

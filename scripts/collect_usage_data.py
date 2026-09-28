@@ -167,7 +167,9 @@ def _decide_cost_mode(requested, unconfigured, configured_rows, total_cost,
 
     priced      ：照常输出金额（默认，历史行为）
     tokens_only ：整份报告隐藏计费维度，只讲 Token / 调用 / 耗时 / 任务
-    auto（默认）：仅当「本期一个单价都没命中」时才自动切 tokens_only。
+    auto（默认）：只要「没有任何可计价的模型」就自动切 tokens_only——覆盖两类数据形态：
+      ① 读到了模型调用数据，但全部未配置单价；② 连模型数据都读不到（如只产出聚合 token 的源）。
+      适配一切无计费能力的 Agent（千问办公、百度搭子等），不依赖每适配器写死标志位。
       三条边界必须分清，否则会误删合法内容：
       ① 限免 / 本地模型的 ¥0.00 是**已配置单价**算出来的真实结果（configured_rows 非空），
          不是「没价可算」，绝不能因此删掉成本章节；
@@ -179,8 +181,17 @@ def _decide_cost_mode(requested, unconfigured, configured_rows, total_cost,
         return "tokens_only"
     if requested == "priced":
         return "priced"
+    # auto 决策：只认「有没有可计价的模型」，与具体是哪个适配器无关。
+    #   has_priced_model = 有已配置单价的模型，或存在官方账单（L1 真值，永远有金额）
+    #   任一为真 → 照常 priced；都为假且本期金额为 0 → tokens_only。
+    # 这把两种无计费形态一并兜住（不再依赖 `unconfigured` 是否为空这个易漏的判据）：
+    #   ① unconfigured 非空、configured_rows 空（读到模型但全未配价）
+    #   ② unconfigured 与 configured_rows 都空（连模型数据都读不到）
+    # 限免 / 本地模型那种「单价已配置且合法为 ¥0.00」仍算 configured_rows 非空，不误判
+    # （见 test_legit_zero_cost_stays_priced）。
+    has_priced_model = bool(configured_rows) or has_official
     zero_everywhere = not ((total_cost or 0) > 0 or (total_effective_cost or 0) > 0)
-    if unconfigured and not configured_rows and zero_everywhere and not has_official:
+    if not has_priced_model and zero_everywhere:
         return "tokens_only"
     return "priced"
 
