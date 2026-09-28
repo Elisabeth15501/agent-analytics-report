@@ -123,8 +123,11 @@ python scripts/collect_usage_data.py --source qwenwork --cost-mode priced    -o 
 ```
 
 `tokens_only` 下报告只讲用量：撤掉成本货币化、花费速览、省钱杠杆、最贵模型、档位与缓存可省测算，
-模型表退化为「模型 / 调用次数 / 实际消耗Token」三列，§四 换成「Token 与调用深度分析」；
-§3.3「缺失单价」补价指引保留，指路 `scripts/pricing.local.json`。
+模型表退化为「模型 / 调用次数 / 实际消耗Token」三列，§四 换成「Token 与调用深度分析」，
+§3.1 表标题改为「Token 维度明细」，「缺失单价 + 补价 stub」整块也随之压制（金额都不算了，
+再摆一张补价表属于误导）。priced 模式下若只是**部分**模型缺价，该块照常出现。
+数据源若天生不支持计费（千问办公积分无法归因到会话），在适配器里声明
+`SUPPORTS_COST = False`，该块连 priced 也不出现。
 
 ---
 

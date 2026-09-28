@@ -90,6 +90,14 @@ __all__ = [
 # 本适配器产出的 trace 统一走此通道（ca_core.parse_channel 识别 qwenwork: 前缀）
 QWENWORK_CHANNEL = "qwenwork"
 
+# 显式能力声明：千问办公**在语义上不支持「计费」维度**，而不是「这次恰好没配单价」。
+# 依据：① 积分订阅制、无公开单 token 刊例价；② 账号级积分无法归因到单个会话，
+# 因此即便用户在 pricing.local.json 里填了档位单价，算出来的 ¥ 也是无法对账的虚构值。
+# 生成器据此压制「本期有未配置单价的模型 + pricing.local.json 补价 stub」整块
+# （见 generate_report._show_unconfigured_block），不靠「单价全 0」隐式推断——
+# 将来千问真出可计价套餐时，把这个标记改成 True 即可，无需回头改渲染逻辑。
+SUPPORTS_COST = False
+
 _UNKNOWN_MODEL = "qwenwork-default"
 
 # 占位响应：千问办公在中断 / 错误 / 后台任务里会写一条 `model: "<synthetic>"`

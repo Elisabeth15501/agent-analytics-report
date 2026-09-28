@@ -281,6 +281,9 @@ def main():
         except (ValueError, ImportError) as e:
             print(f"[WARN] LLM 分类器不可用（{e}），回退加权启发式", file=sys.stderr)
 
+    # 该数据源是否在语义上支持计费维度（默认支持；qwenwork 源会置 False）
+    cost_supported = True
+
     # 采集各数据源：先取会话（sessions.model 含带通道前缀的原始模型标识符，
     # 是「接口通道」的真相源），据其构建 session_id→raw_model 映射，再采集 trace 并关联通道。
     if args.source == "claude-code":
@@ -323,7 +326,10 @@ def main():
         # agents.db 会话元信息。千问办公上游不回传 token（实测 1167 条
         # model.response.completed 的四个 token 字段全为 0），故 token 为字符估算、
         # 档位无公开刊例价 → 成本不计价；调用次数 / 耗时 / 标题 / 档位为真实值。
-        from adapters.qwenwork import collect_qwenwork
+        from adapters.qwenwork import collect_qwenwork, SUPPORTS_COST
+        # 能力声明（不是「这次恰好没单价」）：千问办公在语义上不支持计费维度，
+        # 报告端据此压制「缺失单价 + 补价 stub」整块。见 generate_report._show_unconfigured_block
+        cost_supported = SUPPORTS_COST
         traces, db_data = collect_qwenwork(start_date, end_date)
         sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
         # skill_usage 留空：千问办公的 skill-usage.json 只有**累计**使用次数、
@@ -406,6 +412,9 @@ def main():
             # 成本口径："estimate"=静态价表估算（L2，默认）；
             # 传入 --import-official 后置为 "official"（L1 真值，取官方导出「积分」字段）。
             "cost_source": "estimate",
+            # 数据源能力声明（由适配器显式给出）：False 时报告端压制
+            # 「缺失单价模型 + pricing.local.json 补价 stub」整块
+            "cost_supported": cost_supported,
         },
         "traces": traces,
         "sessions": db_data["sessions"],

@@ -535,6 +535,8 @@ def test_cli_source_qwenwork_end_to_end(qw_home, tmp_path):
     assert d["meta"]["tokens_source"] == "estimated", "token 口径必须显式标记"
     # 千问办公档位无单价 → 采集器 auto 必须把报告切成 tokens_only（不再满屏 ¥0.00）
     assert d["meta"]["cost_mode"] == "tokens_only", "无单价命中的源应自动进入 tokens_only"
+    # 适配器显式声明「不支持计费」→ 报告端据此压制补价 stub（不靠单价全 0 隐式推断）
+    assert d["meta"]["cost_supported"] is False
     assert len(d["traces"]) == 2
     assert d["summary"]["total_tokens"] > 0
     assert all(m["channel"] == QWENWORK_CHANNEL for m in d["model_exec_stats"])

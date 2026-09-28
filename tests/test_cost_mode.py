@@ -116,6 +116,7 @@ def _tokens_only_data():
     d["meta"]["source"] = "qwenwork"
     d["meta"]["cost_mode"] = "tokens_only"
     d["meta"]["tokens_source"] = "estimated"
+    d["meta"]["cost_supported"] = False      # 适配器 SUPPORTS_COST=False 的落盘形态
     d["meta"]["unconfigured_models"] = ["flash"]
     d["summary"]["total_cost"] = 0.0
     d["summary"]["total_effective_cost"] = 0.0
@@ -224,8 +225,8 @@ def test_markdown_model_table_compact(report_module):
     # 模型明细表只剩用量列（金额列整列撤掉，而不是填 ¥0.00 占位）
     assert "| 模型 | 调用次数 | 实际消耗Token |" in md
     assert "占总花费比" not in md
-    # §3.3「缺失单价」补价指引**应当保留** —— 它正是 tokens_only 的出路
-    assert "建议输入单价" in md
+    # §3.1 表标题去计费口径（token-only 下没有「费用结算依据」这回事）
+    assert "**Token 维度明细**" in md
 
 
 @allure.feature("计价模式")
@@ -284,3 +285,79 @@ def test_footer_is_source_aware(report_module):
         report_module.generate_markdown_report(_base_data())
     foot = report_module._footer_text(_tokens_only_data())
     assert "千问办公" in foot and "tokens_only" in foot
+
+
+# ── 三、token-only 措辞一致性（用户实跑反馈的 5 处残留）──────────────────
+
+@allure.feature("计价模式")
+@allure.story("措辞")
+@allure.title("tokens_only 下「计费等效 / 含估算成本 / 1/10 价计费」字样清零")
+def test_no_billing_wording_in_tokens_only(report_module):
+    for fmt, fn in (("md", report_module.generate_markdown_report),
+                    ("html", report_module.generate_html_report)):
+        out = fn(_tokens_only_data())
+        for word in ("计费等效", "含估算成本", "1/10 价计费", "费用结算依据", "计费维度明细"):
+            assert word not in out, f"{fmt} 版 tokens_only 报告残留「{word}」"
+
+
+@allure.feature("计价模式")
+@allure.story("措辞")
+@allure.title("priced 下这些措辞原样保留（不得顺手改掉 WorkBuddy 口径）")
+def test_billing_wording_kept_when_priced(report_module):
+    md = report_module.generate_markdown_report(_base_data())
+    assert "实际消耗 Token（计费等效）" in md
+    assert "计费维度明细（费用结算依据）" in md
+    assert "（含估算成本）" in md
+    assert "1/10 价计费" in md
+
+
+@allure.feature("计价模式")
+@allure.story("会话数口径")
+@allure.title("§一 会话总数补口径说明，与后文「N 个会话进入统计」自洽")
+def test_session_count_note(report_module):
+    md = report_module.generate_markdown_report(_tokens_only_data())
+    # fixture：total_sessions=3，session_stats.rows=2 → 必须交代差的那 1 个是空会话
+    assert "| 会话总数 | 3 个（含空会话；其中 2 个有 token 活动，其余为无调用的空会话） |" in md
+    # 全部会话都有活动时不加括号，免得给正常窗口添噪音
+    d = _tokens_only_data()
+    d["summary"]["total_sessions"] = 2
+    assert "含空会话" not in report_module.generate_markdown_report(d)
+
+
+# ── 四、「未配置单价模型」整块的条件压制 ──────────────────────────────────
+
+@allure.feature("计价模式")
+@allure.story("缺失单价块")
+@allure.title("tokens_only → 整块（含 pricing.local.json stub）压掉")
+def test_unconfigured_block_hidden_in_tokens_only(report_module):
+    d = _tokens_only_data()
+    d["meta"]["unconfigured_models"] = ["flash"]
+    for fmt, fn in (("md", report_module.generate_markdown_report),
+                    ("html", report_module.generate_html_report)):
+        out = fn(d)
+        assert "本期有未配置单价的模型" not in out, f"{fmt} 版仍输出了缺失单价块"
+
+
+@allure.feature("计价模式")
+@allure.story("缺失单价块")
+@allure.title("源不支持计费（SUPPORTS_COST=False）→ priced 也不给补价 stub")
+def test_unconfigured_block_hidden_when_source_unsupported(report_module):
+    d = _base_data()
+    d["meta"]["cost_supported"] = False
+    d["meta"]["unconfigured_models"] = ["flash"]
+    md = report_module.generate_markdown_report(d)
+    assert "本期有未配置单价的模型" not in md
+    # 但成本章节照常（用户显式要 priced）
+    assert "### 2.2 成本货币化" in md
+
+
+@allure.feature("计价模式")
+@allure.story("缺失单价块")
+@allure.title("priced + 支持计费 + 只是部分模型缺价 → 该块保留（它这时真有用）")
+def test_unconfigured_block_shown_when_priced_and_supported(report_module):
+    d = _base_data()
+    d["meta"]["unconfigured_models"] = ["brand-new-model"]
+    md = report_module.generate_markdown_report(d)
+    assert "本期有未配置单价的模型" in md
+    assert "brand-new-model" in md
+    assert "pricing.local.json" in md

@@ -90,6 +90,15 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 落盘的 `meta.cost_mode` 会被报告渲染层读取；想给千问办公档位出金额，
 在 `scripts/pricing.local.json` 补 `"flash": {"input":..,"output":..}` 后重跑即可（自动回到 priced）。
 
+**tokens_only 下措辞一并转成纯用量口径**（生成报告时不要留着计费术语自相矛盾）：
+「实际消耗 Token（计费等效）」→「实际消耗 Token」、§3.1 表标题
+「计费维度明细（费用结算依据）」→「Token 维度明细」、任务类型表说明去掉「（含估算成本）」、
+缓存占比不再解释「按约 1/10 价计费」、「排名按『实际消耗』排序」。
+§3.3「缺失单价 + `pricing.local.json` 补价 stub」整块在 tokens_only 下压制；
+数据源若天生不支持计费，适配器声明 `SUPPORTS_COST = False`（千问办公即是），
+采集器落 `meta.cost_supported=false`，连 priced 模式也不输出该 stub。
+顶部「要出金额可以怎么强制」那句横幅说明始终保留。
+
 ### 时间窗口（可调节）
 
 支持 4 种预设周期 + 自定义，用户可自由选择按 **天/周/月/年** 计算：
