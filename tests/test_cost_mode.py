@@ -211,6 +211,9 @@ def test_markdown_tokens_only_hides_cost(report_module):
                    "### ✅ 省钱成就", "💸 **最贵模型", "实际成本（计费等效）",
                    "| 原始总成本（含缓存全价） |"):
         assert absent not in md, f"tokens_only 报告不应出现「{absent}」"
+    # 表格列头也要撤（MD 的 Top10 任务表历史上漏过一处实际成本列）
+    assert "| 排名 | 任务名称 | 任务类型 | 实际消耗 | 原始总Token | 缓存占比 | 实际成本 |" not in md
+    assert "| 排名 | 任务名称 | 任务类型 | 实际消耗 | 原始总Token | 缓存占比 |" in md
 
 
 @allure.feature("计价模式")

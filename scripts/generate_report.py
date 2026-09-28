@@ -1180,15 +1180,20 @@ def generate_markdown_report(data):
             lines.append("")
             lines.append("**实际消耗最高的 10 个任务对话框**（含自动化任务，按会话实际消耗排序）：")
             lines.append("")
-            lines.append("| 排名 | 任务名称 | 任务类型 | 实际消耗 | 原始总Token | 缓存占比 | 实际成本 |")
-            lines.append("|------|----------|----------|---------|-----------|---------|---------|")
+            if _cost_hidden(data):
+                lines.append("| 排名 | 任务名称 | 任务类型 | 实际消耗 | 原始总Token | 缓存占比 |")
+                lines.append("|------|----------|----------|---------|-----------|---------|")
+            else:
+                lines.append("| 排名 | 任务名称 | 任务类型 | 实际消耗 | 原始总Token | 缓存占比 | 实际成本 |")
+                lines.append("|------|----------|----------|---------|-----------|---------|---------|")
             for i, tk in enumerate(top_tasks, 1):
                 c_ratio = (tk.get("cached_tokens", 0) / tk["input_tokens"] * 100) if tk.get("input_tokens") else 0
                 lines.append(
                     f"| {i} | {tk.get('title', '-')} | {tk.get('task_type', '-')} "
                     f"| {format_number(tk.get('effective_tokens', 0))} "
                     f"| {format_number(tk.get('total_tokens', 0))} "
-                    f"| {c_ratio:.0f}% | ¥{tk.get('effective_cost', 0):.2f} |"
+                    f"| {c_ratio:.0f}% |"
+                    + ("" if _cost_hidden(data) else f" ¥{tk.get('effective_cost', 0):.2f} |")
                 )
             lines.append("")
     else:
