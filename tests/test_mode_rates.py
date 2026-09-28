@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.whitebox]
 DATE = "2026-09-02"
 
 # 档位估算单价（pricing.json mode_rates，与采集器加载值一致）
-FAST_IP, FAST_OP = 1.24, 2.47
+FAST_IP, FAST_OP = 1.91, 7.64
 BAL_IP, BAL_OP = 6.58, 23.04
 EXT_IP, EXT_OP = 12.15, 42.51
 
