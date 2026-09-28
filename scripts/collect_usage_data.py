@@ -161,6 +161,30 @@ import ca_sources
 import ca_sessions
 import ca_aggregate
 
+def _decide_cost_mode(requested, unconfigured, configured_rows, total_cost,
+                      total_effective_cost, has_official):
+    """判定本次报告的计价模式，返回 "priced" 或 "tokens_only"。
+
+    priced      ：照常输出金额（默认，历史行为）
+    tokens_only ：整份报告隐藏计费维度，只讲 Token / 调用 / 耗时 / 任务
+    auto（默认）：仅当「本期一个单价都没命中」时才自动切 tokens_only。
+      三条边界必须分清，否则会误删合法内容：
+      ① 限免 / 本地模型的 ¥0.00 是**已配置单价**算出来的真实结果（configured_rows 非空），
+         不是「没价可算」，绝不能因此删掉成本章节；
+      ② 已导入官方积分导出（L1 真值）时金额来自账单，与静态价表是否命中无关；
+      ③ 只有「有未配置单价的模型 + 无任何已配置行 + 总额为 0」同时成立，
+         报告才会满屏 ¥0.00 与「未配置」——这时藏起来比摊开更诚实。
+    """
+    if requested == "tokens-only":
+        return "tokens_only"
+    if requested == "priced":
+        return "priced"
+    zero_everywhere = not ((total_cost or 0) > 0 or (total_effective_cost or 0) > 0)
+    if unconfigured and not configured_rows and zero_everywhere and not has_official:
+        return "tokens_only"
+    return "priced"
+
+
 def main():
     parser = argparse.ArgumentParser(description="WorkBuddy Agent 使用数据采集器")
     parser.add_argument("--period", choices=["day", "week", "month", "year"], default="week",
@@ -186,6 +210,12 @@ def main():
                              "qwenwork=读取千问办公（~/.qwenworkcn/projects 转录 + logs/runs 调用日志 + "
                              "agents.db 会话元信息），无需 WorkBuddy 环境；"
                              "千问办公上游不回传 token，故 token 为字符估算、成本未计价")
+    parser.add_argument("--cost-mode", choices=["auto", "tokens-only", "priced"], default="auto",
+                        help="计费维度：auto=默认，本期**一个单价都没命中**时自动切 tokens_only；"
+                             "tokens-only=强制整份报告隐藏金额（只讲 Token / 调用 / 耗时 / 任务），"
+                             "适合按积分订阅计费、没有公开单 token 刊例价的数据源（如千问办公）；"
+                             "priced=无论如何都按现状输出金额（与历史行为一致）。"
+                             "注意：限免 / 本地模型那种「单价已配置且合法为 0」的情况不会被 auto 误判")
     parser.add_argument("--task-classifier", choices=["heuristic", "llm"], default="heuristic",
                         help="任务类型分类器：heuristic=默认加权启发式（离线、零依赖）；"
                              "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
@@ -571,7 +601,26 @@ def main():
             # 已下架官方模型不算「缺失单价」——它们本就无需用户补写，仅标注即可
             if not m.get("configured") and m.get("model") not in ROUTER_ALIASES and not m.get("is_delisted"):
                 unconfigured.add(m["model"])
+    # 「入口维度」与「执行维度」可能对同一个底层模型各记一次（如 `qwenwork:flash`
+    # 与 `flash`），而补价只需在 pricing.local.json 写一条裸名（price_of 会剥通道前缀
+    # 查表）→ 一律折成裸名去重，避免报告里出现「flash、qwenwork:flash」这种重复提示。
+    unconfigured = {m.split(":", 1)[-1] if ":" in m else m for m in unconfigured}
     result["meta"]["unconfigured_models"] = sorted(unconfigured)
+
+    cost_mode = _decide_cost_mode(
+        requested=args.cost_mode,
+        unconfigured=unconfigured,
+        configured_rows=[m for st in (result["model_stats"], result["model_exec_stats"])
+                         if st for m in st if m.get("configured")],
+        total_cost=total_cost,
+        total_effective_cost=total_effective_cost,
+        has_official=str(result["meta"].get("cost_source") or "") == "official")
+    result["meta"]["cost_mode"] = cost_mode
+    if cost_mode == "tokens_only":
+        print("[INFO] 计价模式=tokens_only：本期无任何命中单价（未配置："
+              + "、".join(sorted(unconfigured)[:6]) + ("…" if len(unconfigured) > 6 else "")
+              + "），报告将隐藏金额维度；要出金额请在 scripts/pricing.local.json 补单价，"
+                "或加 --cost-mode priced 强制保留现状。", file=sys.stderr)
     # 限时免费截止日（来自 pricing.json 的 timed_free），供报告渲染「限时免费至 X」标签，
     # 避免在渲染器里硬编码日期——用户改了 pricing.json 后标签会自动跟随。
     result["meta"]["timed_free"] = dict(TIMED_FREE)

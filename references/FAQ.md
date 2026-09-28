@@ -394,12 +394,18 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 
 **Q50. 千问办公报告里为什么没有金额？**
 因为拿不到可靠的单价：千问办公是**积分订阅制**，没有公开的单 token 刊例价，`pricing.json` 里
-**故意不配** `flash` / `pro` 这些档位——编一个数就是假数据。于是按技能通用约定：计入 token、不计成本、
-报告给出补价提示。
-想看到金额，在 `scripts/pricing.local.json`（不进发布包）里按裸档位名补价：
+**故意不配** `flash` / `pro` 这些档位——编一个数就是假数据。这种情况下报告**自动切到
+`tokens_only` 计价模式**：成本货币化、花费速览、省钱杠杆、最贵模型、档位与缓存可省测算整章撤掉，
+模型表退化成「模型 / 调用次数 / 实际消耗Token」三列，§四 变成「Token 与调用深度分析」。
+藏起来比摆一排 `¥0.00` 更诚实——后者容易被读成「这月免费」或「采集坏了」。
+
+想看到金额，在 `scripts/pricing.local.json`（不进发布包）里按裸档位名补价，重跑即自动回到 priced：
 ```json
 {"flash": {"input": 1.2, "output": 4.8}, "pro": {"input": 7.2, "output": 28.8}}
 ```
+也可显式指定：`--cost-mode tokens-only` 强制隐藏金额，`--cost-mode priced` 强制保留现状。
+注意限免 / 本地模型那种 `¥0.00` 是**已配置单价算出的真实结果**，不会被 auto 误判成 tokens_only。
+
 另外该源**没有 L1 真值通道**：`--import-official` 只对 WorkBuddy 可用（千问办公的账号级积分
 无法归因到单个会话），混用会直接退出码 2。
 

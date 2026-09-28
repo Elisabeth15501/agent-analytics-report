@@ -183,16 +183,20 @@ def merge_glm52_family(model_stats):
 
 
 def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_free_map=None, compact=False,
-                       low_conf_map=None, low_conf_bias_map=None):
+                       low_conf_map=None, low_conf_bias_map=None, hide_cost=False):
     """单一维度模型表格 + 洞察（MD / HTML 共用同一套数据计算，仅渲染层不同）。
 
     compact=True 时仅渲染「模型 / 调用次数 / 实际消耗Token」三列（用于本地模型使用统计，
     因本地推理零成本，单价/花费/占比列无意义）。
+    hide_cost=True（tokens_only 计价模式）：等同 compact，且**连「最贵模型 / 高位告警 /
+    模型成本图」这些金额结论一起不出**——没有单价时它们只会产出 ¥0.00 与「未配置」，
+    读者容易把「没价可算」误读成「免费」。🏆 最常使用模型属调用维度，保留。
     GLM-5.2 家族合并已在调用方通过 merge_glm52_family() 完成。
 
     low_conf_map 为「成本置信度」配置（模型名 -> 偏差原因）。命中的模型在
     表格里加 ⚠ 标记并在表下说明，且**不参与「最贵模型」结论**（避免拿估算做决策）。
     """
+    compact = compact or hide_cost
     configured = [m for m in model_stats if m.get("configured")]
     # 实际产生计费的行（含未配置单价的 auto 路由，其成本来自 trace 级汇总）——用于占比分母与图表
     priced = [m for m in model_stats if (m.get("effective_cost", 0) or 0) > 0]
@@ -265,36 +269,52 @@ def _build_model_block(fmt, model_stats, dim_label=None, is_exec=False, timed_fr
     else:
         out.extend(_emit_table(rows, columns, "html"))
     # 备注 / 免责声明（MD 用引用块，HTML 用 <p>）
+    # tokens_only 模式下整段跳过：这些备注解释的全是「单价准不准、花费算不算账单」，
+    # 金额维度缺席时留着只会自问自答。
+    def _note(text, cls=None):
+        return [] if hide_cost else _emit_note(text, fmt, cls=cls)
+
     if is_exec:
         _ie = ("＊本表为**使用量分布估算（非计费口径）**：已解析具体模型的调用按其真实单价估算；"
                "未能解析具体模型的调用（路由别名 `auto`）按本周期计费模型均价估算。"
                "**本表总额不代表真实账单，且不可与 3.1 相加**。")
-        out.extend(_emit_note(_ie, fmt, cls="disclaimer" if fmt == "html" else None))
+        out.extend(_note(_ie, "disclaimer" if fmt == "html" else None))
     if any(m.get("is_router") for m in model_stats):
-        out.extend(_emit_note("ℹ️ `auto` / `fast-model` / `balanced-model` / `extreme-model` 等路由别名（含三档）执行时"
-                               "**不记录落到哪个底层模型**，报告无法解析其真实模型，故单独成组、**不计入「最贵模型」与省钱建议等成本结论**；"
-                               "其「单价 / 花费」为所有计费模型（单价>0）的**均价估算值**，仅供横向对比参考。", fmt))
+        out.extend(_note("ℹ️ `auto` / `fast-model` / `balanced-model` / `extreme-model` 等路由别名（含三档）执行时"
+                         "**不记录落到哪个底层模型**，报告无法解析其真实模型，故单独成组、**不计入「最贵模型」与省钱建议等成本结论**；"
+                         "其「单价 / 花费」为所有计费模型（单价>0）的**均价估算值**，仅供横向对比参考。"))
     if any(m.get("is_delisted") for m in model_stats):
-        out.extend(_emit_note("🗄️ = 曾在 WorkBuddy 提供、现已下架的官方模型；历史调用仍正常统计与计价，单价未知者不计入成本。", fmt))
+        out.extend(_note("🗄️ = 曾在 WorkBuddy 提供、现已下架的官方模型；历史调用仍正常统计与计价，单价未知者不计入成本。"))
     if any(m.get("is_local") for m in model_stats):
-        out.extend(_emit_note("🔧🏠 = 你通过 Ollama 本地推理运行的模型（零 API 成本），**不计入账单总额**；"
-                               "其「花费」恒为 ¥0.00，仅作本地使用量统计。", fmt))
+        out.extend(_note("🔧🏠 = 你通过 Ollama 本地推理运行的模型（零 API 成本），**不计入账单总额**；"
+                         "其「花费」恒为 ¥0.00，仅作本地使用量统计。"))
     if any(m.get("is_custom") and not m.get("is_local") for m in model_stats):
-        out.extend(_emit_note("🔧 = 你通过外部 API 接口自建 / 接入的自定义模型（非 WorkBuddy 官方模型），与 🗄️ 官方已下架模型**分开统计**；"
-                               "单价仅作粗略参考，实际账单请往对应接口查看。", fmt))
+        out.extend(_note("🔧 = 你通过外部 API 接口自建 / 接入的自定义模型（非 WorkBuddy 官方模型），与 🗄️ 官方已下架模型**分开统计**；"
+                         "单价仅作粗略参考，实际账单请往对应接口查看。"))
     if any(m.get("is_router_api") for m in model_stats):
-        out.extend(_emit_note("🔀 = 智能路由 / 聚合网关（外部 API，如 OpenRouter 免费档、Groq 等）：一次调用可能落到不同底层模型或上游 host，"
-                               "单价 / 花费为粗略参考，实际账单请往对应接口查看。", fmt))
+        out.extend(_note("🔀 = 智能路由 / 聚合网关（外部 API，如 OpenRouter 免费档、Groq 等）：一次调用可能落到不同底层模型或上游 host，"
+                         "单价 / 花费为粗略参考，实际账单请往对应接口查看。"))
     # 低置信度说明（只有本期真的命中时才出现，避免噪音）
     _lc_hits = {m["model"]: _lc_reason(m["model"], low_conf_map) for m in model_stats}
     _lc_hits = {k: v for k, v in _lc_hits.items() if v}
     if _lc_hits:
-        out.extend(_emit_note("⚠ = **低置信度估算**：该模型存在服务端时段减免 / 用户配额，静态价表无法表达，"
-                              "估算与实际计费偏差已知较大；**不参与「最贵模型」结论，请勿据此做预算或对账**。", fmt))
+        out.extend(_note("⚠ = **低置信度估算**：该模型存在服务端时段减免 / 用户配额，静态价表无法表达，"
+                         "估算与实际计费偏差已知较大；**不参与「最贵模型」结论，请勿据此做预算或对账**。"))
         for _n, _r in sorted(_lc_hits.items()):
             _ar = _lc_arrow(_lc_bias(_n, low_conf_bias_map))
-            out.extend(_emit_note(f"　　`{_n} {_ar}`：{_r}", fmt))
+            out.extend(_note(f"　　`{_n} {_ar}`：{_r}"))
     # 洞察（🏆 最常使用 / 💸 最贵）——MD 与 HTML 结构不同
+    if hide_cost:
+        # tokens_only：只保留调用维度的 🏆，金额结论整段缺席
+        if model_stats:
+            _tc = max(model_stats, key=lambda x: x["calls"])
+            if fmt == "md":
+                out.append(f"> 🏆 **最常使用模型**：`{_tc['model']}` —— 调用 {_tc['calls']} 次。")
+            else:
+                out.append(f'        <p>🏆 <strong>最常使用模型</strong>：<code>{_esc(_tc["model"])}</code>'
+                           f'（调用 {_tc["calls"]} 次）。</p>')
+        out.append("")
+        return out
     if fmt == "md":
         if model_stats:
             top_calls = max(model_stats, key=lambda x: x["calls"])
@@ -402,43 +422,55 @@ def build_model_section(fmt, data):
     tf_map = meta.get("timed_free", {}) or {}
     lc_map = meta.get("low_confidence", {}) or {}
     lc_bias_map = meta.get("low_confidence_bias", {}) or {}
+    hidden = _cost_hidden(data)          # tokens_only：隐藏金额维度
     if fmt == "md":
         lines = []
-        lines.append("## 三、模型使用与成本对比")
+        lines.append("## 三、模型使用与成本对比" if not hidden else "## 三、模型使用对比")
         lines.append("")
-        lines.append("按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
-                     "本章节提供**两个维度**：")
+        if hidden:
+            lines.append("按模型统计调用次数与实际消耗 Token。**本报告为 tokens_only 计价模式："
+                         "本期没有任何模型命中单价，故金额、占比与「最贵模型」结论一律不出**"
+                         "（免得满屏 `¥0.00` 被读成「免费」）。3.1 按实际执行模型、3.2 按入口 / 通道模型两个维度统计使用量。")
+        else:
+            lines.append("按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
+                         "本章节提供**两个维度**：")
+            lines.append("")
+            lines.append("- **3.1 按实际计费模型（账单口径）**：按 API 实际计费的模型（即 trace 的 `exec_model`，含经 `auto`/限免入口路由到的付费模型）聚合，是费用结算依据；其各模型花费合计 = 报告概览「实际成本（计费等效）」总额。")
+            lines.append("- **3.2 按入口 / 配置模型（使用维度）**：按你配置的入口 / 通道（如 `auto` 路由、`hy3`、`custom-local`）聚合，反映你实际请求 / 配置了哪些入口、各多少次——属「使用分布」而非「账单」；本维度总额不代表真实账单，且不可与 3.1 相加。")
         lines.append("")
-        lines.append("- **3.1 按实际计费模型（账单口径）**：按 API 实际计费的模型（即 trace 的 `exec_model`，含经 `auto`/限免入口路由到的付费模型）聚合，是费用结算依据；其各模型花费合计 = 报告概览「实际成本（计费等效）」总额。")
-        lines.append("- **3.2 按入口 / 配置模型（使用维度）**：按你配置的入口 / 通道（如 `auto` 路由、`hy3`、`custom-local`）聚合，反映你实际请求 / 配置了哪些入口、各多少次——属「使用分布」而非「账单」；本维度总额不代表真实账单，且不可与 3.1 相加。")
-        lines.append("")
-        if tf_map:
+        if tf_map and not hidden:
             _tf_txt = "、".join(f"`{k}`（至 **{v}**）" for k, v in sorted(tf_map.items()))
             lines.append(f"> 🎁 **限时免费**：{_tf_txt} 在限免活动期间免费，相关调用花费记为 ¥0.00；"
                          "表格中以「限时免费」标注，以区别于永久免费模型（`:free` 后缀）。"
                          "若该模型有公开刊例价，表中仍会显示原单价，方便对比「原价 vs 实付」。")
             lines.append("")
-        lines.append("> ⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。")
-        lines.append("")
+        if not hidden:
+            lines.append("> ⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。")
+            lines.append("")
         # 3.1 接口 / 通道（计费维度）
-        lines.append("### 3.1 按实际计费模型（账单口径）")
+        lines.append("### 3.1 按实际计费模型（账单口径）" if not hidden else "### 3.1 按实际执行模型")
         lines.append("")
-        lines.append("> 备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 `glm-5.2` 的花费中。")
-        lines.append("")
+        if not hidden:
+            lines.append("> 备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 `glm-5.2` 的花费中。")
+            lines.append("")
         model_stats = merge_glm52_family(model_stats)
-        lines += _build_model_block("md", model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-        chart = build_model_cost_chart_md([m for m in model_stats if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+        lines += _build_model_block("md", model_stats, "计费维度明细（费用结算依据）", timed_free_map=tf_map,
+                                    low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, hide_cost=hidden)
+        chart = "" if hidden else build_model_cost_chart_md(
+            [m for m in model_stats if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
         if chart:
             lines.append(chart)
             lines.append("")
         # 3.2 按入口 / 配置模型（使用维度 · 非计费口径）
-        lines.append("### 3.2 按入口 / 配置模型（使用维度 · 非计费口径）")
+        lines.append("### 3.2 按入口 / 配置模型（使用维度 · 非计费口径）" if not hidden
+                     else "### 3.2 按入口 / 通道模型（使用维度）")
         lines.append("")
-        lines.append("> 本维度按你配置的**入口 / 通道模型名**聚合（如 `auto` 路由、`hy3`、`custom-local`），"
-                     "反映你实际请求 / 配置了哪些入口、各多少次——是「使用分布」而非「账单」。"
-                     "经由 `auto` 路由或限免入口（如 `hy3`）实际执行的底层付费模型，其花费已计入 3.1 对应执行模型行，"
-                     "本表不直接展开；**本维度总额不代表真实账单，且不可与 3.1 相加**；自建接口（custom-local）实际单价请往接口网站查看。")
-        lines.append("")
+        if not hidden:
+            lines.append("> 本维度按你配置的**入口 / 通道模型名**聚合（如 `auto` 路由、`hy3`、`custom-local`），"
+                         "反映你实际请求 / 配置了哪些入口、各多少次——是「使用分布」而非「账单」。"
+                         "经由 `auto` 路由或限免入口（如 `hy3`）实际执行的底层付费模型，其花费已计入 3.1 对应执行模型行，"
+                         "本表不直接展开；**本维度总额不代表真实账单，且不可与 3.1 相加**；自建接口（custom-local）实际单价请往接口网站查看。")
+            lines.append("")
         if exec_stats:
             official_exec = [m for m in exec_stats if not m.get("is_custom")]
             local_exec = [m for m in exec_stats if m.get("is_local")]
@@ -446,8 +478,8 @@ def build_model_section(fmt, data):
             if official_exec:
                 lines.append("#### 3.2.1 官方 / 网关入口模型")
                 lines.append("")
-                lines += _build_model_block("md", official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-                chart2 = build_model_cost_chart_md([m for m in official_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                lines += _build_model_block("md", official_exec, "官方入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, hide_cost=hidden)
+                chart2 = "" if hidden else build_model_cost_chart_md([m for m in official_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
                 if chart2:
                     lines.append(chart2)
                     lines.append("")
@@ -455,15 +487,15 @@ def build_model_section(fmt, data):
                 lines.append("#### 3.2.2 本地模型（Ollama 本地推理）🔧🏠")
                 lines.append("")
                 lines += _build_model_block("md", local_exec, "本地模型维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, compact=True)
-                chart3 = build_model_cost_chart_md([m for m in local_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                chart3 = "" if hidden else build_model_cost_chart_md([m for m in local_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
                 if chart3:
                     lines.append(chart3)
                     lines.append("")
             if external_exec:
                 lines.append("#### 3.2.3 外部 API 接口接入模型 🔧")
                 lines.append("")
-                lines += _build_model_block("md", external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-                chart4 = build_model_cost_chart_md([m for m in external_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+                lines += _build_model_block("md", external_exec, "外部API入口维度明细", is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, hide_cost=hidden)
+                chart4 = "" if hidden else build_model_cost_chart_md([m for m in external_exec if m.get("configured")], low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
                 if chart4:
                     lines.append(chart4)
                     lines.append("")
@@ -476,42 +508,55 @@ def build_model_section(fmt, data):
     # HTML 渲染层
     lines = []
     lines.append('    <div class="section">')
-    lines.append('        <h2 class="section-title">三、模型使用与成本对比</h2>')
-    lines.append("        <p>按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
-                 "本章节提供<b>两个维度</b>：<b>3.1 按实际计费模型</b>（账单口径，与概览总额一致）与 <b>3.2 按入口 / 配置模型</b>（使用分布）。"
-                 "未配置单价的模型以「未配置」标注——在 <code>scripts/pricing.local.json</code> 的 <code>models</code> 里补上单价即可（无需改 Python 代码；该本地文件升级 Skill 时不丢失）。</p>")
-    if tf_map:
+    lines.append('        <h2 class="section-title">三、模型使用与成本对比</h2>' if not hidden
+                 else '        <h2 class="section-title">三、模型使用对比</h2>')
+    if hidden:
+        lines.append("        <p>按模型统计调用次数与实际消耗 Token。<b>本报告为 tokens_only 计价模式："
+                     "本期没有任何模型命中单价，故金额、占比与「最贵模型」结论一律不出</b>"
+                     "（免得满屏 <code>¥0.00</code> 被读成「免费」）。</p>")
+    else:
+        lines.append("        <p>按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
+                     "本章节提供<b>两个维度</b>：<b>3.1 按实际计费模型</b>（账单口径，与概览总额一致）与 <b>3.2 按入口 / 配置模型</b>（使用分布）。"
+                     "未配置单价的模型以「未配置」标注——在 <code>scripts/pricing.local.json</code> 的 <code>models</code> 里补上单价即可（无需改 Python 代码；该本地文件升级 Skill 时不丢失）。</p>")
+    if tf_map and not hidden:
         _tf_txt = "、".join(f"<code>{_esc(k)}</code>（至 <b>{_esc(v)}</b>）" for k, v in sorted(tf_map.items()))
         lines.append(f'        <p class="disclaimer">🎁 <b>限时免费</b>：{_tf_txt} 在限免活动期间免费，'
                      '相关调用花费记为 ¥0.00，以区别于永久免费模型（<code>:free</code> 后缀）。'
                      '若该模型有公开刊例价，表中仍显示原单价，方便对比「原价 vs 实付」。</p>')
-    lines.append('        <h3>3.1 按实际计费模型（账单口径）</h3>')
-    lines.append('        <p class="disclaimer">备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 <code>glm-5.2</code> 的花费中。</p>')
+    lines.append('        <h3>3.1 按实际计费模型（账单口径）</h3>' if not hidden
+                 else '        <h3>3.1 按实际执行模型</h3>')
+    if not hidden:
+        lines.append('        <p class="disclaimer">备注：WorkBuddy 的 GLM-5.2 夜猫子计划折扣（2026 年 7 月 16 日开始）已计入 <code>glm-5.2</code> 的花费中。</p>')
     model_stats = merge_glm52_family(model_stats)
-    lines += _build_model_block("html", model_stats, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
-    lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。'
-                 '3.1 各模型花费合计 = 报告概览「实际成本（计费等效）」总额。</p>')
-    lines.append('        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>')
-    lines.append('        <p>本维度按你配置的<b>入口 / 通道模型名</b>（如 <code>auto</code> 路由、<code>hy3</code>、<code>custom-local</code>）聚合，'
-                 '反映实际请求 / 配置的入口分布（非账单）。经由 <code>auto</code> 或限免入口实际执行的底层付费模型，'
-                 '其花费已计入 3.1 对应执行模型行，本表不直接展开。'
-                 '<b>本维度总额不代表真实账单，且不可与 3.1 相加</b>。</p>')
+    lines += _build_model_block("html", model_stats, timed_free_map=tf_map, low_conf_map=lc_map,
+                                low_conf_bias_map=lc_bias_map, hide_cost=hidden)
+    if not hidden:
+        lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。'
+                     '3.1 各模型花费合计 = 报告概览「实际成本（计费等效）」总额。</p>')
+    lines.append('        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>' if not hidden
+                 else '        <h3>3.2 按入口 / 通道模型（使用维度）</h3>')
+    if not hidden:
+        lines.append('        <p>本维度按你配置的<b>入口 / 通道模型名</b>（如 <code>auto</code> 路由、<code>hy3</code>、<code>custom-local</code>）聚合，'
+                     '反映实际请求 / 配置的入口分布（非账单）。经由 <code>auto</code> 或限免入口实际执行的底层付费模型，'
+                     '其花费已计入 3.1 对应执行模型行，本表不直接展开。'
+                     '<b>本维度总额不代表真实账单，且不可与 3.1 相加</b>。</p>')
     if exec_stats:
         official_exec = [m for m in exec_stats if not m.get("is_custom")]
         local_exec = [m for m in exec_stats if m.get("is_local")]
         external_exec = [m for m in exec_stats if m.get("is_custom") and not m.get("is_local")]
         if official_exec:
             lines.append('        <h4>3.2.1 官方 / 网关入口模型</h4>')
-            lines += _build_model_block("html", official_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+            lines += _build_model_block("html", official_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, hide_cost=hidden)
         if local_exec:
             lines.append('        <h4>3.2.2 本地模型（Ollama 本地推理）🔧🏠</h4>')
             lines += _build_model_block("html", local_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, compact=True)
         if external_exec:
             lines.append('        <h4>3.2.3 外部 API 接口接入模型 🔧</h4>')
-            lines += _build_model_block("html", external_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map)
+            lines += _build_model_block("html", external_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, hide_cost=hidden)
     else:
         lines.append('        <p>（本期无模型调用数据）</p>')
-    lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>')
+    if not hidden:
+        lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>')
     # 3.3 缺失单价模型（数据驱动，仅当存在时显示）
     lines += _build_unconfigured_models_section("html", meta)
     lines.append("    </div>")
@@ -945,7 +990,10 @@ def generate_markdown_report(data):
     lines.append(f"| 产出文件 | {summary.get('total_outputs', 0)} 个 |")
     lines.append(f"| 实际消耗 Token（计费等效） | {format_number(summary.get('total_effective_tokens', 0))}（原始 {format_number(summary.get('total_tokens', 0))}）|")
     lines.append(f"| 缓存占比 | {cache_rate:.1f}%（缓存命中 token 占输入 token 的比例）|")
-    lines.append(f"| 实际成本（计费等效） | ¥{summary.get('total_effective_cost', 0):.2f}（原始口径 ¥{summary.get('total_cost', 0):.2f}）|")
+    if _cost_hidden(data):
+        lines.append("| 计价状态 | 未计价（tokens_only：本期无模型命中单价，金额维度已从全篇移除）|")
+    else:
+        lines.append(f"| 实际成本（计费等效） | ¥{summary.get('total_effective_cost', 0):.2f}（原始口径 ¥{summary.get('total_cost', 0):.2f}）|")
     if _is_l1(data):
         lines.append(f"| 官方账单（L1 真值） | {summary.get('official_requests', 0)} 次请求 / "
                      f"**{summary.get('total_cost_official', 0):.2f} 积分**"
@@ -989,15 +1037,16 @@ def generate_markdown_report(data):
     lines.append(f"| 缓存占比 | {cache_rate:.1f}%（缓存命中按约 1/10 价计费，不计入实际消耗全价）|")
     lines.append("")
 
-    lines.append("### 2.2 成本货币化")
-    lines.append("")
-    lines.append("| 指标 | 数值 |")
-    lines.append("|------|------|")
-    lines.append(f"| 实际成本（计费等效） | ¥{summary.get('total_effective_cost', 0):.2f} |")
-    lines.append(f"| 原始总成本（含缓存全价） | ¥{summary.get('total_cost', 0):.2f} |")
-    lines.append(f"| 输入成本 | ¥{summary.get('total_input_cost', 0):.2f} |")
-    lines.append(f"| 输出成本 | ¥{summary.get('total_output_cost', 0):.2f} |")
-    lines.append("")
+    if not _cost_hidden(data):
+        lines.append("### 2.2 成本货币化")
+        lines.append("")
+        lines.append("| 指标 | 数值 |")
+        lines.append("|------|------|")
+        lines.append(f"| 实际成本（计费等效） | ¥{summary.get('total_effective_cost', 0):.2f} |")
+        lines.append(f"| 原始总成本（含缓存全价） | ¥{summary.get('total_cost', 0):.2f} |")
+        lines.append(f"| 输入成本 | ¥{summary.get('total_input_cost', 0):.2f} |")
+        lines.append(f"| 输出成本 | ¥{summary.get('total_output_cost', 0):.2f} |")
+        lines.append("")
 
     lines.append("### 2.3 每日 Token 消耗趋势")
     lines.append("")
@@ -1011,23 +1060,30 @@ def generate_markdown_report(data):
             lines.append(f"{date} |{bar} {format_number(stats.get('total', 0))}")
         lines.append("```")
         lines.append("")
-        lines.append("| 日期 | 原始总Token | 实际消耗 | 输入 | 输出 | 缓存 | 调用 | 实际成本 |")
-        lines.append("|------|-----------|---------|------|------|------|------|---------|")
+        _hidden_daily = _cost_hidden(data)
+        if _hidden_daily:
+            lines.append("| 日期 | 原始总Token | 实际消耗 | 输入 | 输出 | 缓存 | 调用 |")
+            lines.append("|------|-----------|---------|------|------|------|------|")
+        else:
+            lines.append("| 日期 | 原始总Token | 实际消耗 | 输入 | 输出 | 缓存 | 调用 | 实际成本 |")
+            lines.append("|------|-----------|---------|------|------|------|------|---------|")
         for date in sorted(daily_tokens.keys()):
             stats = daily_tokens[date]
             lines.append(
                 f"| {date} | {format_number(stats.get('total', 0))} | "
                 f"{format_number(stats.get('effective', 0))} | "
                 f"{format_number(stats.get('input', 0))} | {format_number(stats.get('output', 0))} | "
-                f"{format_number(stats.get('cached', 0))} | {stats.get('calls', 0)} | "
-                f"¥{stats.get('effective_cost', 0):.2f} |"
+                f"{format_number(stats.get('cached', 0))} | {stats.get('calls', 0)} |"
+                + ("" if _hidden_daily else f" ¥{stats.get('effective_cost', 0):.2f} |")
             )
         lines.append("")
 
     # （新增）三、模型使用与成本对比
     lines.extend(build_model_section("md", data))
     lines.extend(build_reconciliation_section("md", data))
-    lines.extend(build_tier_section("md", data))
+    if not _cost_hidden(data):
+        # 档位维度的价值全在「倍率 × 估算单价」，tokens_only 下没有可算的钱
+        lines.extend(build_tier_section("md", data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）
     lines.extend(build_cost_analysis_section("md", data))
@@ -1073,8 +1129,13 @@ def generate_markdown_report(data):
                      "故不虚高；「缓存占比」高说明该任务大量复用同一段上下文（如连续多轮生成），"
                      "看起来 token 多但实际便宜。")
         lines.append("")
-        lines.append("| 任务类型 | 会话数 | 实际消耗 | 原始总Token | 输入Token | 输出Token | 缓存占比 | 实际成本 | 占比 |")
-        lines.append("|---------|------|---------|-----------|----------|----------|---------|---------|------|")
+        _hidden_task = _cost_hidden(data)
+        if _hidden_task:
+            lines.append("| 任务类型 | 会话数 | 实际消耗 | 原始总Token | 输入Token | 输出Token | 缓存占比 | 占比 |")
+            lines.append("|---------|------|---------|-----------|----------|----------|---------|------|")
+        else:
+            lines.append("| 任务类型 | 会话数 | 实际消耗 | 原始总Token | 输入Token | 输出Token | 缓存占比 | 实际成本 | 占比 |")
+            lines.append("|---------|------|---------|-----------|----------|----------|---------|---------|------|")
         for s in display_stats:
             eff = s.get("effective_tokens", 0)
             pct = (eff / total_eff * 100) if total_eff else 0
@@ -1083,7 +1144,9 @@ def generate_markdown_report(data):
                 f"| {s['task_type']} | {s['session_count']} | {format_number(eff)} "
                 f"| {format_number(s['total_tokens'])} "
                 f"| {format_number(s['input_tokens'])} | {format_number(s['output_tokens'])} "
-                f"| {c_ratio:.0f}% | ¥{s.get('effective_cost', 0):.2f} | {pct:.1f}% |"
+                f"| {c_ratio:.0f}% |"
+                + ("" if _hidden_task else f" ¥{s.get('effective_cost', 0):.2f} |")
+                + f" {pct:.1f}% |"
             )
         lines.append("")
         lines.append("> ℹ️ 「未关联会话」= trace 的会话 ID 在本地会话库找不到（孤儿 trace，已合并为单一汇总行）；")
@@ -1091,11 +1154,18 @@ def generate_markdown_report(data):
         lines.append("")
         top = task_token_stats[0]
         top_pct = (top.get("effective_tokens", 0) / total_eff * 100) if total_eff else 0
-        lines.append(
-            f"> 🔥 **实际消耗最高的任务类型**：{top['task_type']} —— "
-            f"{format_number(top.get('effective_tokens', 0))} token（原始 {format_number(top['total_tokens'])}），"
-            f"占 {top_pct:.1f}%，实际成本 ¥{top.get('effective_cost', 0):.2f}。"
-        )
+        if _hidden_task:
+            lines.append(
+                f"> 🔥 **实际消耗最高的任务类型**：{top['task_type']} —— "
+                f"{format_number(top.get('effective_tokens', 0))} token（原始 {format_number(top['total_tokens'])}），"
+                f"占 {top_pct:.1f}%。"
+            )
+        else:
+            lines.append(
+                f"> 🔥 **实际消耗最高的任务类型**：{top['task_type']} —— "
+                f"{format_number(top.get('effective_tokens', 0))} token（原始 {format_number(top['total_tokens'])}），"
+                f"占 {top_pct:.1f}%，实际成本 ¥{top.get('effective_cost', 0):.2f}。"
+            )
         # 占比图：各任务类型 实际消耗 token 占比（横向条形图，主题安全、不重叠）
         donut = build_task_type_chart_md(display_stats, title="实际消耗 Token 占比（按任务类型，计费等效）")
         if donut:
@@ -1189,17 +1259,25 @@ def generate_markdown_report(data):
     eff_tokens = summary.get("total_effective_tokens", 0)
     cache_saving = max(raw_cost - eff_cost, 0)
 
-    # 💰 花费速览（钱头条，数据驱动）
-    lines.append("### 💰 花费速览")
-    lines.append("")
-    lines.append(f"- 本期实际花费 **¥{eff_cost:.2f}**（原始口径 ¥{raw_cost:.2f}），缓存复用为你节省约 **¥{cache_saving:.2f}**。")
-    session_credits = data.get("session_credits", [])
-    if session_credits:
-        latest = max(session_credits, key=lambda x: x.get("updated_at", 0))
-        used = latest.get("used", 0); size = latest.get("size", 0)
-        if size > 0:
-            lines.append(f"- 当前会话额度已用 **{used / size * 100:.0f}%**（{format_number(used)} / {format_number(size)}）。")
-    lines.append("")
+    # 💰 花费速览（钱头条，数据驱动）/ tokens_only 下换成用量速览
+    if _cost_hidden(data):
+        lines.append("### 📈 用量速览")
+        lines.append("")
+        lines.append(f"- 本期实际消耗 **{format_number(eff_tokens)} token**"
+                     f"（原始 {format_number(summary.get('total_tokens', 0))}），"
+                     f"计价模式 tokens_only：本期无模型命中单价，**不输出金额与省钱结论**。")
+        lines.append("")
+    else:
+        lines.append("### 💰 花费速览")
+        lines.append("")
+        lines.append(f"- 本期实际花费 **¥{eff_cost:.2f}**（原始口径 ¥{raw_cost:.2f}），缓存复用为你节省约 **¥{cache_saving:.2f}**。")
+        session_credits = data.get("session_credits", [])
+        if session_credits:
+            latest = max(session_credits, key=lambda x: x.get("updated_at", 0))
+            used = latest.get("used", 0); size = latest.get("size", 0)
+            if size > 0:
+                lines.append(f"- 当前会话额度已用 **{used / size * 100:.0f}%**（{format_number(used)} / {format_number(size)}）。")
+        lines.append("")
 
     # 🔍 最大成本来源（替代"高峰日"，带数据驱动判断）
     if daily_tokens and eff_tokens:
@@ -1209,10 +1287,14 @@ def generate_markdown_report(data):
         peak_share = peak_tok / eff_tokens * 100
         verdict = "占本期实际消耗比重偏高，建议复盘当日是否存在可精简的批量/重复任务" \
             if peak_share >= 25 else "占本期实际消耗比重正常，属单日波动"
-        lines.append("### 🔍 最大成本来源")
+        lines.append("### 🔍 最大成本来源" if not _cost_hidden(data) else "### 🔍 最大消耗日")
         lines.append("")
-        lines.append(f"- **高峰日 {peak_day}**：实际花费 ¥{peak_cost:.2f}（{format_number(peak_tok)} token），"
-                     f"占本期实际消耗 **{peak_share:.1f}%**——{verdict}。")
+        if _cost_hidden(data):
+            lines.append(f"- **高峰日 {peak_day}**：{format_number(peak_tok)} token，"
+                         f"占本期实际消耗 **{peak_share:.1f}%**——{verdict}。")
+        else:
+            lines.append(f"- **高峰日 {peak_day}**：实际花费 ¥{peak_cost:.2f}（{format_number(peak_tok)} token），"
+                         f"占本期实际消耗 **{peak_share:.1f}%**——{verdict}。")
         lines.append("")
 
     # 📊 任务类型洞察（加分布形态判断）
@@ -1231,8 +1313,8 @@ def generate_markdown_report(data):
         lines.append(f"- **主要任务类型**：{top_task}（{top_n} 次，{top_pct:.1f}%）——{shape}。")
         lines.append("")
 
-    # ✅ 省钱成就（替代"缓存效率优秀"，翻成钱）
-    if cache_rate > 0:
+    # ✅ 省钱成就（替代"缓存效率优秀"，翻成钱）——tokens_only 下无钱可翻
+    if cache_rate > 0 and not _cost_hidden(data):
         lines.append("### ✅ 省钱成就")
         lines.append("")
         lines.append(f"- 缓存命中率达 **{cache_rate:.1f}%**，按原始全价计费你本应付约 ¥{raw_cost:.2f}，"
@@ -1251,7 +1333,7 @@ def generate_markdown_report(data):
     lines.append("")
     lines.append("---")
     lines.append("")
-    lines.append("*本报告基于 WorkBuddy 数据自动生成。*")
+    lines.append("*%s*" % _footer_text(data))
 
     return "\n".join(lines)
 
@@ -1808,6 +1890,21 @@ def _official_import(data):
     return off if isinstance(off, dict) and off.get("by_model") is not None else None
 
 
+def _cost_mode(data):
+    """计价模式：'tokens_only' 或 'priced'。
+
+    缺失该字段的历史 JSON 一律按 'priced' 处理——报告口径不得因为升级而回头改变
+    既有数据文件的呈现（也让 §四/§三 的既有测试断言零漂移）。
+    """
+    meta = (data or {}).get("meta", {}) or {}
+    return "tokens_only" if str(meta.get("cost_mode") or "priced") == "tokens_only" else "priced"
+
+
+def _cost_hidden(data):
+    """本报告是否应隐藏金额维度（Tokens-only 口径）。"""
+    return _cost_mode(data) == "tokens_only"
+
+
 def _is_l1(data):
     """成本是否为 L1 真值（已导入官方用量导出）。"""
     meta = data.get("meta", {}) or {}
@@ -1855,6 +1952,15 @@ def _source_identity(data):
     if src in _SOURCE_LABELS:
         return _SOURCE_LABELS[src]
     return ("%s 使用情况报告" % src, "%s 数据源适配器" % src, ["%s 数据源适配器" % src])
+
+
+def _footer_text(data):
+    """页脚署名：workbuddy 沿用历史文案（既有测试断言它），其余源标清来源与计价模式。"""
+    src = _source_key(data)
+    if src == "workbuddy":
+        return "本报告基于 WorkBuddy 数据自动生成。"
+    label = _SOURCE_LABELS[src][0].replace("使用情况报告", "").strip() if src in _SOURCE_LABELS else src
+    return f"本报告基于 {label} 本机数据自动生成（计价模式 {_cost_mode(data)}）。"
 
 
 def _source_caveat_lines(fmt, data):
@@ -1905,9 +2011,33 @@ def _l2_cost_note(data):
     return ("（外部数据源，无官方账单可对账）", md, html)
 
 
+def _cost_hidden_banner(fmt, data):
+    """tokens_only 模式的口径横幅：说明金额维度为何缺席、怎么打开。"""
+    meta = data.get("meta", {}) or {}
+    unc = meta.get("unconfigured_models") or []
+    _unc_txt = "、".join("`%s`" % m for m in unc[:6]) + ("…" if len(unc) > 6 else "")
+    body = ("本报告**不提供金额（¥）与花费结论**：本期所有调用都没有命中"
+            "`pricing.json` 里的单价（未配置：%s），继续渲染只会得到满屏 "
+            "`¥0.00` 与「未配置」，反而容易被误读成「免费」或「采集失败」。"
+            "Token / 调用次数 / 耗时 / 任务维度不受影响。" % (_unc_txt or "（本期无模型名记录）"))
+    howto = ("要出金额：在 `scripts/pricing.local.json` 补上这些模型的单价后重跑，"
+             "或加 `--cost-mode priced` 强制保留成本章节。")
+    if fmt == "html":
+        return ['        <div class="disclaimer-box">',
+                '            <p>ℹ️ <b>计价模式：tokens_only（仅用量，不计价）</b></p>',
+                f'            <p>{body.replace("**", "")}</p>',
+                f'            <p>{howto.replace("`", "")}</p>',
+                '        </div>']
+    return [f"> ℹ️ **计价模式：tokens_only（仅用量，不计价）**", ">",
+            f"> {body}", ">", f"> {howto}", ""]
+
+
 def _cost_confidence_banner(fmt, data):
     """成本口径横幅：默认 L2 估算；导入官方导出后自动切 L1 真值。"""
     meta = data.get("meta", {}) or {}
+    # tokens_only：连单价都没有，L1/L2 这套「成本置信度」话术无从谈起，换专属横幅
+    if _cost_hidden(data):
+        return _cost_hidden_banner(fmt, data)
     # 口径级别以「是否真拿到了官方数据」为准，而不是 meta 里的标记：
     # 若 meta 标了 official 但数据缺失（脏数据 / 手工编辑的 JSON），必须回落 L2，
     # 否则会渲染出「L1 真值（未导入官方用量导出）」这种自相矛盾的横幅。
@@ -2047,8 +2177,143 @@ def _render_anomaly_block(fmt, title, block, kind):
     return L
 
 
+def _token_buckets(rows):
+    """tokens_only 模式下的「每会话 Token 消耗」分桶（替代成本分桶）。
+
+    区间按数量级切，末档为 ≥1M；返回 [(label, 会话数, 合计 token)]，
+    仅保留有会话的区间，避免整表 0 噪音。
+    """
+    edges = [(0, 10_000, "< 10K"), (10_000, 100_000, "10K–100K"),
+             (100_000, 1_000_000, "100K–1M"), (1_000_000, float("inf"), "≥ 1M")]
+    out = []
+    for lo, hi, label in edges:
+        sel = [r for r in rows
+               if lo <= (r.get("effective_tokens") or 0) < hi]
+        if sel:
+            out.append((label, len(sel), sum(r.get("effective_tokens") or 0 for r in sel)))
+    return out
+
+
+def _build_tokens_only_analysis(fmt, data):
+    """tokens_only 模式的 §四：只讲 Token 与调用，不讲钱。
+
+    独立成章而不是往成本章节里塞十几个 if：既有 §四 的渲染路径与 20+ 条断言
+    一行不动（零回归），新口径的可读性也由这一处承载。
+    """
+    session_stats = data.get("session_stats") or {}
+    rows = session_stats.get("rows", [])
+    ca = data.get("cost_anomalies") or {}
+    if not rows:
+        return []
+    total_tokens = sum(r.get("effective_tokens") or 0 for r in rows)
+    top = rows[:10]
+    buckets = _token_buckets(rows)
+    size_anom = _compute_session_size_anomalies(rows)
+
+    if fmt == "md":
+        lines = ["## 四、Token 与调用深度分析（每会话 / 异常）", ""]
+        lines.append("> 本报告为 **tokens_only 计价模式**（本期无模型命中单价），"
+                     "故本章按「每会话 Token 消耗、调用次数、异常峰值」拆解；"
+                     "省钱杠杆、失败自动化成本归因、缓存可省测算等金额结论整章缺席。")
+        lines.append("")
+        _warn = _unresolved_warning_md(_unresolved_call_stats(data))
+        if _warn:
+            lines.append(_warn)
+            lines.append("")
+        lines.append("### 4.1 每会话 Token 消耗 Top 10")
+        lines.append("")
+        lines.append("| 排名 | 任务名称 | 任务类型 | 实际消耗 | 调用 | 主要模型 |")
+        lines.append("|------|---------|---------|---------|------|---------|")
+        for i, r in enumerate(top, 1):
+            models = "、".join(r.get("models", [])[:3]) or "—"
+            lines.append(f"| {i} | {r['title']} | {r['task_type']} | "
+                         f"{format_number(r.get('effective_tokens', 0))} | {r.get('calls', 0)} | {models} |")
+        lines.append("")
+        lines.append("### 4.2 每会话 Token 消耗分布")
+        lines.append("")
+        lines.append(f"本期共 {len(rows)} 个会话进入统计，合计实际消耗 {format_number(total_tokens)} token。")
+        lines.append("")
+        lines.append("| Token 区间 | 会话数 | 合计 Token | 占比 |")
+        lines.append("|-----------|--------|-----------|------|")
+        for label, cnt, tk in buckets:
+            pct = (tk / total_tokens * 100) if total_tokens else 0
+            lines.append(f"| {label} | {cnt} | {format_number(tk)} | {pct:.1f}% |")
+        lines.append("")
+        lines.append("### 4.3 Token 异常与飙升检测")
+        lines.append("")
+        if ca.get("token") is not None:
+            lines.extend(_render_anomaly_block("md", "Token 口径", ca["token"], "token"))
+        else:
+            lines.append("- 日级 Token 消耗平稳，无超过 p95 或环比突增的异常日。")
+            lines.append("")
+        if size_anom and size_anom["items"]:
+            lines.append(f"**📊 会话规模异常**（调用次数 > {size_anom['threshold']}，"
+                         f"取 max(会话 p95={size_anom['p95']}, 200)，疑似 fan-out / 长链路）：")
+            lines.append("")
+            lines.append("| 任务名称 | 任务类型 | 调用 | 实际消耗 |")
+            lines.append("|---------|---------|------|---------|")
+            for r in size_anom["items"]:
+                lines.append(f"| {r['title'][:30]} | {r['task_type']} | {r['calls']} | "
+                             f"{format_number(r.get('effective_tokens', 0))} |")
+            lines.append("")
+        return lines
+
+    L = ['    <div class="section">',
+         '        <h2 class="section-title">四、Token 与调用深度分析（每会话 / 异常）</h2>',
+         '        <p>本报告为 <b>tokens_only 计价模式</b>（本期无模型命中单价），本章按'
+         '「每会话 Token 消耗、调用次数、异常峰值」拆解；省钱杠杆、失败自动化成本归因、'
+         '缓存可省测算等金额结论整章缺席。</p>']
+    _warn_h = _unresolved_warning_md(_unresolved_call_stats(data))
+    if _warn_h:
+        L.append(f"        <p class='disclaimer'>{_warn_h.replace(chr(10), ' ').replace('&gt; ', '')}</p>")
+    L.append('        <h3>4.1 每会话 Token 消耗 Top 10</h3>')
+    L.append('        <table>')
+    L.append('            <thead><tr><th>排名</th><th>任务名称</th><th>任务类型</th>'
+             '<th>实际消耗</th><th>调用</th><th>主要模型</th></tr></thead>')
+    L.append('            <tbody>')
+    for i, r in enumerate(top, 1):
+        models = "、".join(r.get("models", [])[:3]) or "—"
+        L.append(f"                <tr><td>{i}</td><td>{_esc(r['title'])}</td>"
+                 f"<td>{_esc(r['task_type'])}</td>"
+                 f"<td>{format_number(r.get('effective_tokens', 0))}</td>"
+                 f"<td>{r.get('calls', 0)}</td><td>{_esc(models)}</td></tr>")
+    L.append('            </tbody>')
+    L.append('        </table>')
+    L.append('        <h3>4.2 每会话 Token 消耗分布</h3>')
+    L.append(f'        <p>本期共 {len(rows)} 个会话进入统计，合计实际消耗 '
+             f'{format_number(total_tokens)} token。</p>')
+    L.append('        <table>')
+    L.append('            <thead><tr><th>Token 区间</th><th>会话数</th><th>合计 Token</th><th>占比</th></tr></thead>')
+    L.append('            <tbody>')
+    for label, cnt, tk in buckets:
+        pct = (tk / total_tokens * 100) if total_tokens else 0
+        L.append(f"                <tr><td>{_esc(label)}</td><td>{cnt}</td>"
+                 f"<td>{format_number(tk)}</td><td>{pct:.1f}%</td></tr>")
+    L.append('            </tbody>')
+    L.append('        </table>')
+    L.append('        <h3>4.3 Token 异常与飙升检测</h3>')
+    if ca.get("token") is not None:
+        L.extend(_render_anomaly_block("html", "Token 口径", ca["token"], "token"))
+    else:
+        L.append('        <p>日级 Token 消耗平稳，无超过 p95 或环比突增的异常日。</p>')
+    if size_anom and size_anom["items"]:
+        L.append(f'        <p><b>📊 会话规模异常</b>（调用次数 &gt; {size_anom["threshold"]}，'
+                 f'取 max(会话 p95={size_anom["p95"]}, 200)，疑似 fan-out / 长链路）：</p>')
+        L.append('        <table><thead><tr><th>任务名称</th><th>任务类型</th><th>调用</th>'
+                 '<th>实际消耗</th></tr></thead><tbody>')
+        for r in size_anom["items"]:
+            L.append(f"            <tr><td>{_esc(r['title'][:30])}</td><td>{_esc(r['task_type'])}</td>"
+                     f"<td>{r['calls']}</td><td>{format_number(r.get('effective_tokens', 0))}</td></tr>")
+        L.append('        </tbody></table>')
+    L.append("    </div>")
+    return L
+
+
 def build_cost_analysis_section(fmt, data):
     """章节：四、成本深度分析（每会话 / 异常 / 省钱）。MD / HTML 共用一份数据与逻辑。"""
+    if _cost_hidden(data):
+        # tokens_only：换用「Token 与调用」版章节，既有成本渲染路径一行不动
+        return _build_tokens_only_analysis(fmt, data)
     session_stats = data.get("session_stats") or {}
     rows = session_stats.get("rows", [])
     buckets = session_stats.get("buckets", [])
@@ -2407,6 +2672,7 @@ def generate_html_report(data):
     _billable_calls_h = len(_gt_h) - _unresolved_calls_h
     # 口径标注：generation 粒度 ≠ 官方请求数
     _calls_label_h = f"调用次数·generation 粒度（{_unresolved_calls_h} 未解析）"
+    _hidden_h = _cost_hidden(data)     # tokens_only：隐藏金额维度
     stat_cards = [
         (summary.get("active_day_count", 0), "活跃天数"),
         (summary.get("total_sessions", 0), "会话总数"),
@@ -2414,8 +2680,11 @@ def generate_html_report(data):
         (summary.get("skills_used", 0), "使用技能"),
         (summary.get("total_automation_runs", 0), "自动化任务运行"),
         (format_number(summary.get("total_effective_tokens", 0)), "实际消耗 Token"),
-        (f"¥{summary.get('total_effective_cost', 0):.2f}", "实际成本（估算）"),
     ]
+    if _hidden_h:
+        stat_cards.append(("tokens_only", "计价模式（不计价）"))
+    else:
+        stat_cards.append((f"¥{summary.get('total_effective_cost', 0):.2f}", "实际成本（估算）"))
     if _is_l1(data):
         stat_cards.insert(3, (summary.get("official_requests", 0), "官方请求数（L1）"))
         stat_cards.append((f"{summary.get('total_cost_official', 0):.2f}", "官方积分合计（L1 真值）"))
@@ -2443,9 +2712,12 @@ def generate_html_report(data):
         ("输出 Token", format_number(summary.get("total_output_tokens", 0))),
         ("缓存命中 Token", format_number(summary.get("total_cached_tokens", 0))),
         ("缓存占比", f"{cache_rate:.1f}%"),
-        ("实际成本（计费等效）", f"¥{summary.get('total_effective_cost', 0):.2f}"),
-        ("原始总成本（含缓存全价）", f"¥{summary.get('total_cost', 0):.2f}"),
     ]
+    if _hidden_h:
+        token_rows.append(("计价状态", "未计价（tokens_only：本期无模型命中单价，金额维度已从全篇移除）"))
+    else:
+        token_rows.append(("实际成本（计费等效）", f"¥{summary.get('total_effective_cost', 0):.2f}"))
+        token_rows.append(("原始总成本（含缓存全价）", f"¥{summary.get('total_cost', 0):.2f}"))
     for name, val in token_rows:
         lines.append(f"            <tr><td>{name}</td><td>{val}</td></tr>")
     lines.append("        </table>")
@@ -2475,7 +2747,9 @@ def generate_html_report(data):
     # （新增）三、模型使用与成本对比
     lines.extend(build_model_section("html", data))
     lines.extend(build_reconciliation_section("html", data))
-    lines.extend(build_tier_section("html", data))
+    if not _hidden_h:
+        # 档位维度的价值全在「倍率 × 估算单价」，tokens_only 下没有可算的钱
+        lines.extend(build_tier_section("html", data))
 
     # （新增）四、成本深度分析（每会话 / 异常 / 省钱）
     lines.extend(build_cost_analysis_section("html", data))
@@ -2510,7 +2784,10 @@ def generate_html_report(data):
         total_eff = sum(s.get("effective_tokens", 0) for s in display_stats)
         total_tok = sum(s["total_tokens"] for s in display_stats)
         lines.append("        <table>")
-        lines.append("            <tr><th>任务类型</th><th>会话数</th><th>实际消耗</th><th>原始总Token</th><th>输入</th><th>输出</th><th>缓存占比</th><th>实际成本</th><th>占比</th></tr>")
+        if _hidden_h:
+            lines.append("            <tr><th>任务类型</th><th>会话数</th><th>实际消耗</th><th>原始总Token</th><th>输入</th><th>输出</th><th>缓存占比</th><th>占比</th></tr>")
+        else:
+            lines.append("            <tr><th>任务类型</th><th>会话数</th><th>实际消耗</th><th>原始总Token</th><th>输入</th><th>输出</th><th>缓存占比</th><th>实际成本</th><th>占比</th></tr>")
         for s in display_stats:
             eff = s.get("effective_tokens", 0)
             pct = (eff / total_eff * 100) if total_eff else 0
@@ -2519,7 +2796,9 @@ def generate_html_report(data):
                 f"            <tr><td>{_esc(s['task_type'])}</td><td>{s['session_count']}</td>"
                 f"<td>{format_number(eff)}</td><td>{format_number(s['total_tokens'])}</td>"
                 f"<td>{format_number(s['input_tokens'])}</td><td>{format_number(s['output_tokens'])}</td>"
-                f"<td>{c_ratio:.0f}%</td><td>¥{s.get('effective_cost', 0):.2f}</td><td>{pct:.1f}%</td></tr>"
+                f"<td>{c_ratio:.0f}%</td>"
+                + ("" if _hidden_h else f"<td>¥{s.get('effective_cost', 0):.2f}</td>")
+                + f"<td>{pct:.1f}%</td></tr>"
             )
         lines.append("        </table>")
         lines.append('        <p style="font-size:.85em;opacity:.75;margin:.4em 0">ℹ️ 「未关联会话」= trace 的会话 ID 在本地会话库找不到（孤儿 trace，已合并为单一汇总行）；「未命名会话」= 本地会话库中确有但无标题的会话；「其他」= 任务类型无法自动归类或自动分类失败的 token。</p>')
@@ -2528,7 +2807,7 @@ def generate_html_report(data):
         lines.append(
             f'        <p>🔥 <strong>实际消耗最高的任务类型</strong>：{top["task_type"]} —— '
             f'{format_number(top.get("effective_tokens", 0))} token（原始 {format_number(top["total_tokens"])}），'
-            f'占 {top_pct:.1f}%，实际成本 ¥{top.get("effective_cost", 0):.2f}。</p>'
+            f'占 {top_pct:.1f}%' + ("" if _hidden_h else f'，实际成本 ¥{top.get("effective_cost", 0):.2f}') + '。</p>'
         )
         # 环形图：各任务类型 实际消耗 token 占比
         donut = build_donut_chart(display_stats, title="实际消耗 Token 占比（按任务类型，计费等效）")
@@ -2542,7 +2821,10 @@ def generate_html_report(data):
                 '        <p><strong>实际消耗最高的 10 个任务对话框</strong>（含自动化任务，按会话实际消耗排序）：</p>'
             )
             lines.append("        <table>")
-            lines.append("            <tr><th>排名</th><th>任务名称</th><th>任务类型</th><th>实际消耗</th><th>原始总Token</th><th>缓存占比</th><th>实际成本</th></tr>")
+            if _hidden_h:
+                lines.append("            <tr><th>排名</th><th>任务名称</th><th>任务类型</th><th>实际消耗</th><th>原始总Token</th><th>缓存占比</th></tr>")
+            else:
+                lines.append("            <tr><th>排名</th><th>任务名称</th><th>任务类型</th><th>实际消耗</th><th>原始总Token</th><th>缓存占比</th><th>实际成本</th></tr>")
             for i, tk in enumerate(top_tasks, 1):
                 c_ratio = (tk.get("cached_tokens", 0) / tk["input_tokens"] * 100) if tk.get("input_tokens") else 0
                 lines.append(
@@ -2550,7 +2832,8 @@ def generate_html_report(data):
                     f"<td>{_esc(tk.get('task_type', '-'))}</td>"
                     f"<td>{format_number(tk.get('effective_tokens', 0))}</td>"
                     f"<td>{format_number(tk.get('total_tokens', 0))}</td>"
-                    f"<td>{c_ratio:.0f}%</td><td>¥{tk.get('effective_cost', 0):.2f}</td></tr>"
+                    f"<td>{c_ratio:.0f}%</td>"
+                    + ("" if _hidden_h else f"<td>¥{tk.get('effective_cost', 0):.2f}</td>") + "</tr>"
                 )
             lines.append("        </table>")
     else:
@@ -2621,16 +2904,23 @@ def generate_html_report(data):
     cache_saving = max(raw_cost - eff_cost, 0)
     session_credits = data.get("session_credits", [])
 
-    # 💰 花费速览
-    lines.append("        <h3>💰 花费速览</h3>")
-    lines.append(f"        <p>本期实际花费 <strong>¥{eff_cost:.2f}</strong>（原始口径 ¥{raw_cost:.2f}），"
-                 f"缓存复用为你节省约 <strong>¥{cache_saving:.2f}</strong>。</p>")
-    if session_credits:
-        latest = max(session_credits, key=lambda x: x.get("updated_at", 0))
-        used = latest.get("used", 0); size = latest.get("size", 0)
-        if size > 0:
-            lines.append(f"        <p>当前会话额度已用 <strong>{used / size * 100:.0f}%</strong>"
-                         f"（{format_number(used)} / {format_number(size)}）。</p>")
+    # 💰 花费速览 / tokens_only 下为 📈 用量速览
+    if _hidden_h:
+        lines.append("        <h3>📈 用量速览</h3>")
+        lines.append(f"        <p>本期实际消耗 <strong>{format_number(eff_tokens)} token</strong>"
+                     f"（原始 {format_number(summary.get('total_tokens', 0))}）。"
+                     f"计价模式 <code>tokens_only</code>：本期无模型命中单价，"
+                     f"<strong>不输出金额与省钱结论</strong>。</p>")
+    else:
+        lines.append("        <h3>💰 花费速览</h3>")
+        lines.append(f"        <p>本期实际花费 <strong>¥{eff_cost:.2f}</strong>（原始口径 ¥{raw_cost:.2f}），"
+                     f"缓存复用为你节省约 <strong>¥{cache_saving:.2f}</strong>。</p>")
+        if session_credits:
+            latest = max(session_credits, key=lambda x: x.get("updated_at", 0))
+            used = latest.get("used", 0); size = latest.get("size", 0)
+            if size > 0:
+                lines.append(f"        <p>当前会话额度已用 <strong>{used / size * 100:.0f}%</strong>"
+                             f"（{format_number(used)} / {format_number(size)}）。</p>")
 
     # 🔍 最大成本来源
     if daily_tokens and eff_tokens:
@@ -2640,9 +2930,14 @@ def generate_html_report(data):
         peak_share = peak_tok / eff_tokens * 100
         verdict = "占本期实际消耗比重偏高，建议复盘当日是否存在可精简的批量/重复任务" \
             if peak_share >= 25 else "占本期实际消耗比重正常，属单日波动"
-        lines.append("        <h3>🔍 最大成本来源</h3>")
-        lines.append(f"        <p><strong>高峰日 {peak_day}</strong>：实际花费 ¥{peak_cost:.2f}"
-                     f"（{format_number(peak_tok)} token），占本期实际消耗 <strong>{peak_share:.1f}%</strong>——{verdict}。</p>")
+        lines.append("        <h3>🔍 最大成本来源</h3>" if not _hidden_h
+                     else "        <h3>🔍 最大消耗日</h3>")
+        if _hidden_h:
+            lines.append(f"        <p><strong>高峰日 {peak_day}</strong>：{format_number(peak_tok)} token，"
+                         f"占本期实际消耗 <strong>{peak_share:.1f}%</strong>——{verdict}。</p>")
+        else:
+            lines.append(f"        <p><strong>高峰日 {peak_day}</strong>：实际花费 ¥{peak_cost:.2f}"
+                         f"（{format_number(peak_tok)} token），占本期实际消耗 <strong>{peak_share:.1f}%</strong>——{verdict}。</p>")
 
     # 📊 任务类型洞察
     if task_dist:
@@ -2658,8 +2953,8 @@ def generate_html_report(data):
         lines.append("        <h3>📊 任务类型洞察</h3>")
         lines.append(f"        <p><strong>主要任务类型</strong>：{_esc(top_task)}（{top_n} 次，{top_pct:.1f}%）——{shape}。</p>")
 
-    # ✅ 省钱成就
-    if cache_rate > 0:
+    # ✅ 省钱成就 —— tokens_only 下无钱可翻
+    if cache_rate > 0 and not _hidden_h:
         lines.append("        <h3>✅ 省钱成就</h3>")
         lines.append(f"        <p>缓存命中率达 <strong>{cache_rate:.1f}%</strong>，按原始全价计费你本应付约 ¥{raw_cost:.2f}，"
                      f"实际仅 ¥{eff_cost:.2f}——<strong>缓存为你省下 ¥{cache_saving:.2f}</strong>，"
@@ -2681,7 +2976,7 @@ def generate_html_report(data):
     lines.append("    </div>")
 
     lines.append('    <footer>')
-    lines.append('        <p style="text-align: center; color: var(--muted); margin-top: 40px;">*本报告基于 WorkBuddy 数据自动生成。</p>')
+    lines.append(f'        <p style="text-align: center; color: var(--muted); margin-top: 40px;">{_footer_text(data)}</p>')
     lines.append("    </footer>")
     lines.append('    <script>')
     lines.append('        (function(){')
@@ -2746,6 +3041,7 @@ def generate_json_report(data):
             "generated_at": _fmt_generated_at(),
             "data_sources": _sources_j,
             "source": _source_key(data),
+            "cost_mode": _cost_mode(data),
             "tokens_source": meta.get("tokens_source", "reported"),
             "mode_rates": meta.get("mode_rates"),
             "mode_cost_estimated": meta.get("mode_cost_estimated"),

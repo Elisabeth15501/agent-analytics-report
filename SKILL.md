@@ -79,6 +79,17 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 > **在千问办公里替用户生成报告时，务必带 `--source qwenwork`**——默认源是 WorkBuddy，
 > 本机没有 `~/.workbuddy/` 时会采到 0 条数据，报告全是空表。
 
+### 计价模式（--cost-mode）
+
+| 取值 | 行为 |
+|------|------|
+| `auto`（默认） | 本期**一个单价都没命中**时自动切 `tokens_only`（如千问办公档位）；限免 / 本地模型那种「单价已配置、金额合法为 0」不会被误判 |
+| `tokens-only` | 强制隐藏金额维度：撤掉成本货币化 / 花费速览 / 省钱杠杆 / 最贵模型 / 档位与缓存可省测算，模型表退化为用量三列，§四 换成「Token 与调用深度分析」 |
+| `priced` | 无论如何都按现状输出金额章节（历史行为） |
+
+落盘的 `meta.cost_mode` 会被报告渲染层读取；想给千问办公档位出金额，
+在 `scripts/pricing.local.json` 补 `"flash": {"input":..,"output":..}` 后重跑即可（自动回到 priced）。
+
 ### 时间窗口（可调节）
 
 支持 4 种预设周期 + 自定义，用户可自由选择按 **天/周/月/年** 计算：
