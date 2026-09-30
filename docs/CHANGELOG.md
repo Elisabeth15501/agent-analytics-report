@@ -2,6 +2,36 @@
 
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
+
+## [1.8.0] — 2026-09-30
+
+### 🆕 千问办公（QwenWork）数据源适配器
+新增 `--source qwenwork`，从千问办公本地工作区采集对话 / 技能调用 / 定时任务 / 后台运行等 trace，自动产出统一 trace schema。千问办公不提供模型计费数据，故该源默认走 `tokens_only` 模式（只出 token 维度、不出金额）。
+
+- `c420afd` 新增适配器骨架；`680d906` 采集技能调用 / 交付物 / 定时任务 / 后台运行维度；`d1aba18` 剔除 `<synthetic>` 占位调用；`694cc54` 跨转录按 `requestId` / `sessionId` 去重，避免双计；`95a0b8a` 机制文档。
+- `bc4be9a` 泛化 `auto` 判定：任何读不到可计价模型的源（千问办公、百度搭子等）在 `auto` 下自动转 `tokens_only`，不再依赖各适配器写死 `SUPPORTS_COST` 标志位。
+
+### 💰 定价刷新
+- `1154803` hy3 免费限额与 hy4-preview 夜间免费额度延长至 **2026-10-31**；DeepSeek V4.1-Flash 在 WorkBuddy 的积分倍率由 0.03x 修正为官方 **0.11x**。
+- `3ee79b1` Fast 档按 V4.1-Flash 0.11x 重新锚定（input/output 1.24/2.47 → **1.91/7.64**），`multiplier` 维持 0.21。
+
+### 🧮 tokens_only 计价模式（feat + 一致性修复）
+新增 `--cost-mode` 三态（`auto` / `tokens-only` / `priced`）：无单价数据时 `auto` 自动隐藏金额维度，报告不再出现「未配置单价」噪音与自相矛盾的计费措辞。
+
+- `bef791d` 新增 `--cost-mode`；`8b76df6` / `b639c9a` / `b0696de` 修复 tokens_only 下 MD/HTML 措辞、Top10 表实际成本列、缺失单价块条件压制。
+
+### 📐 报告口径一致性修复（消除全文数字打架）
+- `0c272b9` §5 任务类型计数改为只数「真正产生 token 活动的会话」，与 §1/§4.2/§6 口径统一（此前偶发 0-token 会话被误计入，导致 §5=8 而 §1=7）；§4.3 会话级 p95 此前顶部报 436、会话规模异常又报 376（两套百分位算法），`_compute_session_size_anomalies` 复用同一插值算法与同一会话集合 → 统一为 436。
+- `d26c3e8` 「有 token 活动」口径在采集器侧补齐，确保适配器与生成器两侧同源。
+
+### ♻️ 代码质量阶段 2 收口（R4 / R5）
+- `e91960e` R4：消除 9 对 `_md` / `_html` 孪生入口（合并为 `build_*(fmt, data)` + 删 13 个 wrapper）。
+- `bf79f3a` R5：拆分 god-module `generate_report.py`（297 行图表逻辑抽到 `report_charts.py`，原模块 3264 → 2861 行，re-export 保兼容）。
+- `f23250a` / `d4a36fa` / `fd95fc3`：阶段 0/1 清理、allure 渲染脚本去重、版本号守卫扩到 5 处、文档收拢进 docs/。
+
+### 🧪 验证
+全量测试（去掉易波动的 e2e）零回归；`test_version_parity` 门禁通过；527 基线用例保持通过。
+
 ## [1.7.2] — 2026-09-22
 
 ### 🎯 Phase C · L1 真值模式下 §4.4 省钱建议改用官方真实积分（C7）

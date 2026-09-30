@@ -6,6 +6,8 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.8.0** | 2026-09-30 | 千问办公（QwenWork）数据源 + tokens_only 计价模式 + 定价刷新（V4.1-Flash 0.11x / 限免延至 10-31）+ 阶段2 代码质量收口（R4/R5） | [tag/v1.8.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.8.0) |
+
 | **v1.7.2** | 2026-09-22 | Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）；L1 不再渲染低置信度噪音 | [tag/v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2) |
 | **v1.7.1** | 2026-09-16 | Phase B 按调用时刻应用时段定价：B4 夜间免费 / B5 峰谷双档 / B6 促销跨期 | [tag/v1.7.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.1) |
 | **v1.7.0** | 2026-09-15 | F17 P1 请求数反推 + P2 路由别名解析；低置信度最贵模型 A1/A2/A3 告警 | [tag/v1.7.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.0) |
@@ -25,6 +27,19 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.8.0 — 2026-09-30
+
+**千问办公数据源 · tokens_only 计价模式 · 定价刷新 · 阶段 2 代码质量收口**
+
+- 🆕 千问办公（QwenWork）数据源适配器（`--source qwenwork`），默认 `tokens_only`；`auto` 判定泛化到一切无计费源（含百度搭子）。
+- 💰 定价刷新：hy3 / hy4-preview 限免延至 2026-10-31；V4.1-Flash 0.11x 重锚；Fast 档 1.24/2.47 → 1.91/7.64。
+- 🧮 新增 `--cost-mode`（auto / tokens-only / priced），无单价时自动隐藏金额维度并修复措辞自相矛盾。
+- 📐 修复报告口径打架：§5 任务类型计数与 §1/§4.2/§6 统一；§4.3 会话级 p95 双值统一为 436。
+- ♻️ 阶段 2 收口：R4 消孪生入口、R5 拆 god-module（generate_report.py 3264 → 2861 行）。
+- 🧪 全量测试零回归，`test_version_parity` 通过。
+
+🔗 [GitHub Release v1.8.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.8.0)
 
 ## v1.7.2 — 2026-09-22
 
