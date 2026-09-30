@@ -1002,6 +1002,38 @@ def collect_deliverables(sessions, start_date, end_date):
 
 # ── 对外入口 ────────────────────────────────────────────────────────────────
 
+def _merge_session(a, b):
+    """合并同一 sessionId 的两份记录（转录散落多文件时会出现）。
+
+    以「调用更多」的那份为主档（信息更全），只从另一份补齐缺失字段并对列表型素材
+    去重合并；`_human_turns` 取较大值而非求和 —— 同一段对话在两份文件里是重复的，
+    相加会双计提问轮数。
+    """
+    keep, other = (a, b) if (a.get("_request_count") or 0) >= (b.get("_request_count") or 0) else (b, a)
+    for field in ("cwd", "version", "model"):
+        if not keep.get(field) and other.get(field):
+            keep[field] = other[field]
+    if not keep.get("created_at") and other.get("created_at"):
+        keep["created_at"], keep["created_date"] = other["created_at"], other.get("created_date")
+    keep["updated_at"] = max(_to_int(keep.get("updated_at")), _to_int(other.get("updated_at")))
+    for lst in ("_skill_calls", "_presents"):
+        seen = {tuple(x) for x in keep.get(lst) or []}
+        merged = list(keep.get(lst) or [])
+        for item in (other.get(lst) or []):
+            if tuple(item) not in seen:
+                seen.add(tuple(item))
+                merged.append(item)
+        keep[lst] = merged
+    keep["_writes"] = sorted(set((keep.get("_writes") or []) + (other.get("_writes") or [])))
+    keep["_human_turns"] = max(_to_int(keep.get("_human_turns")),
+                              _to_int(other.get("_human_turns")))
+    keep["_request_count"] = _to_int(keep.get("_request_count")) + _to_int(other.get("_request_count"))
+    keep["_synthetic_responses"] = _to_int(keep.get("_synthetic_responses")) + \
+        _to_int(other.get("_synthetic_responses"))
+    keep["_merged_transcripts"] = _to_int(keep.get("_merged_transcripts")) + 1
+    return keep
+
+
 def _assemble(start_date, end_date, home=None, projects_root=None, db_path=None,
               use_run_logs=True):
     """解析候选会话并做 agents.db 增强，返回 (traces, sessions, extras)。
@@ -1018,7 +1050,11 @@ def _assemble(start_date, end_date, home=None, projects_root=None, db_path=None,
     if use_run_logs and files:
         run_usage = load_run_usage(home, {f.stem for f in files})
     traces = []
-    sessions = []
+    sessions = {}
+    # 跨文件去重：会话被恢复 / 续写时，同一个 sessionId 的行会散落在多个转录文件里，
+    # 同一 requestId 的响应因此在两份文件中各存一份。不去重就会双计调用次数与 token
+    # （本机月报实测：1022 条 trace 只有 834 个唯一 requestId，虚高 22%）。
+    seen_requests = set()
     for f in files:
         file_traces, meta = _parse_session_file(f, start_date, end_date, run_usage)
         info = db_index.get(meta["id"]) or {}
@@ -1037,8 +1073,22 @@ def _assemble(start_date, end_date, home=None, projects_root=None, db_path=None,
             meta["updated_at"] = _to_int(info["updated_at"])
         meta["_db_duration_ms"] = _to_int(info.get("duration_ms"))
         meta["_db_num_turns"] = _to_int(info.get("num_turns"))
-        traces.extend(file_traces)
-        sessions.append(meta)
+
+        uniq = []
+        for t in file_traces:
+            key = t.get("_request_id") or t["trace_id"]
+            if key in seen_requests:
+                continue
+            seen_requests.add(key)
+            uniq.append(t)
+        traces.extend(uniq)
+
+        prev = sessions.get(meta["id"])
+        if prev is None:
+            sessions[meta["id"]] = meta
+        else:
+            sessions[meta["id"]] = _merge_session(prev, meta)
+    sessions = list(sessions.values())
     traces.sort(key=lambda x: x.get("ended_at") or "")
 
     active_days = {t["date"] for t in traces if t.get("date")}

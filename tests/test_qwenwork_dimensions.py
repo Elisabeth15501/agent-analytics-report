@@ -304,6 +304,35 @@ def test_background_runs_summary_separate(env):
 
 @allure.feature("千问办公维度")
 @allure.story("端到端")
+@allure.title("同一会话的转录散落多个文件时不双计调用与 token")
+def test_cross_transcript_duplicate_not_double_counted(env):
+    """会话被恢复 / 续写时，同一 sessionId 与同一 requestId 会在两份文件里各存一份。
+
+    本机月报实测过这个坑：1022 条 trace 只有 834 个唯一 requestId（虚高 22%）。
+    """
+    home = env["home"]
+    cwd = str(env["tmp"] / "ws" / "chatdup")
+    rid = "55555555-5555-5555-5555-555555555555"
+    shared = [_user("sdup", TS, "同一会话的提问内容在这里", cwd)]
+    shared += _assistant("sdup", TS, rid,
+                         [{"type": "text", "text": "一份有长度的回复，重复出现时不该再算一次"}],
+                         cwd=cwd)
+    _write_session(home, "C--ws-chatdup", "sdup", shared)
+    # 另一份转录里出现了同一个 sessionId 的同一段内容（模拟会话被恢复后回写）
+    _write_session(home, "C--ws-chatdup-alias", "sdup-part2",
+                   [_line({"type": "runtime-config", "sessionId": "sdup",
+                           "model": "flash", "timestamp": TS})] + shared)
+
+    traces, db_data = collect_qwenwork(START, END)
+    assert len(traces) == 1, "同一 requestId 只能算一次调用"
+    assert len(db_data["sessions"]) == 1, "同一 sessionId 不该产出两条会话"
+    s = db_data["sessions"][0]
+    assert s["_human_turns"] == 1, "重复转录的提问轮数取大值，不求和"
+    assert sum(t["total_tokens"] for t in traces) == traces[0]["total_tokens"]
+
+
+@allure.feature("千问办公维度")
+@allure.story("端到端")
 @allure.title("「有 token 活动」单一口径：0-token 会话不进 §五 任务计数")
 def test_token_active_predicate_shared_by_all_sections(env):
     """回归护栏：§一 会话总数补充 / §4.2 分布 / §五·§十 任务计数必须同源。
