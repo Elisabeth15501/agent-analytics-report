@@ -73,7 +73,7 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 | `workbuddy`（默认） | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） | 完整能力：技能调用、自动化运行、任务分类全部可用 |
 | `claude-code` | `~/.claude/projects/**/*.jsonl` | 解析 Claude Code 会话日志，产出 token / 成本 / 任务类型 / 每日趋势；无技能与自动化维度。可用 `CLAUDE_PROJECTS_DIR` 环境变量指向自定义目录 |
 | `codex` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | 解析 Codex CLI 逐轮 `turn.completed` 的 usage；可用 `CODEX_HOME` 覆盖主目录 |
-| `qwenwork` | `~/.qwenworkcn/projects/**/*.jsonl` + `~/.qwenworkcn/logs/runs/` + `agents.db` | **千问办公专用**。调用次数 / 请求耗时 / 模型档位 / 会话真名为真实值；⚠️ 服务端不回传 token，token 为**字符估算**，且积分订阅无公开单 token 价 → **金额不计价**。可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖路径 |
+| `qwenwork` | `~/.qwenworkcn/projects/**/*.jsonl` + `~/.qwenworkcn/logs/runs/` + `agents.db` + `<cwd>/outputs/` | **千问办公专用**。调用次数 / 请求耗时 / 模型档位 / 会话真名 / **技能调用** / **交付物** / **定时任务**均为真实值；⚠️ 服务端不回传 token，token 为**字符估算**，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（金额全撤）。可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖路径 |
 
 > 各源的限制与扩展方式见 `docs/ADAPTERS.md`（千问办公见 §四）。
 > **在千问办公里替用户生成报告时，务必带 `--source qwenwork`**——默认源是 WorkBuddy，
@@ -200,12 +200,15 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 
 | 数据源 | 路径 | 内容 |
 |--------|------|------|
-| 会话转录 | `~/.qwenworkcn/projects/<slug>/<sessionId>.jsonl` | 对话内容、`cwd`、时间戳、模型档位、`requestTokenAnchor.requestId` |
+| 会话转录 | `~/.qwenworkcn/projects/<slug>/<sessionId>.jsonl` | 对话内容、`cwd`、时间戳、模型档位、`requestTokenAnchor.requestId`；**技能调用**（`tool_use name="Skill"` → `input.skill`）、**交付物**（`present_files` 的 `file_path`）、**用户提问轮数**（`humanInput`）都在这里 |
 | 运行日志 | `~/.qwenworkcn/logs/runs/<run>/qodercli.log` | 逐次模型调用（`model.request.started` / `model.response.completed`）、端到端耗时、`stop_reason` |
-| 业务库 | `%APPDATA%/QwenWorkCN/data/agents.db`（只读；缺失时自动降级） | 界面会话真名、`model_level` 档位、每轮 `durationMs` / `numTurns` |
+| 业务库 | `%APPDATA%/QwenWorkCN/data/agents.db`（只读；缺失时自动降级） | 界面会话真名、`model_level` 档位、每轮 `durationMs` / `numTurns`、**定时任务** `scheduled_tasks` + `task_run_logs`、后台运行 `nudge_logs` |
+| 产出目录 | `<会话 cwd>/outputs/`（即 `~/.qwenworkcn/workspace/<chatId>/outputs/`） | 交付物兜底（跳过 `.bak` / `.tmp` / `~$` / 隐藏文件），与 `present_files` 去重合并 |
 
 ⚠️ 千问办公**服务端不回传 token 用量**（实测四个 token 字段恒为 0），故该源的 token 是
-本地字符估算、金额不计价；调用次数 / 耗时 / 档位 / 标题为真实值。详见 `docs/ADAPTERS.md` §四。
+本地字符估算，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（金额维度全篇撤掉）；
+调用次数 / 耗时 / 档位 / 标题 / 技能 / 交付物为真实值。机制差异与「为什么 `skill-usage.json`
+不作统计源」详见 `docs/ADAPTERS.md` §四、§4.6。
 
 适配器把 JSONL 归一化为同一套 trace schema 并现场合成会话记录，因此下游聚合、计价、任务分类与报告渲染完全复用（详见 `docs/ADAPTERS.md`）。
 

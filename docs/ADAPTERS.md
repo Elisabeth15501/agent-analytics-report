@@ -339,11 +339,37 @@ L1 官方账单在场时永远 `priced`、历史 JSON 缺 `cost_mode` 字段按 
   千问办公的**记忆整理后台任务**（注入提问以 `Target file this round:` 开头）标
   `is_background_automation=True` 并改名「记忆整理后台任务（awareness nudge）」——
   它确实花额度，但不该出现在「Top 任务」榜里冒充用户任务
-- `automation_runs` / `outputs` / `memory_logs` / 技能使用维度恒空：千问办公的
-  `skill-usage.json` 只有**累计**次数、没有按日期信息，塞进「本期次数」会与 WorkBuddy 口径混淆，宁缺毋伪
+- 技能 / 交付物 / 自动化的侦测机制与 WorkBuddy 完全不同，见 **§4.6**（`memory_logs`
+  该源确实无对应结构，恒空）
 - 未做子 Agent 拆分：`isSidechain` 记录在 trace 的 `_is_sidechain` 透明字段里，但不单独归因
 - 跨窗口长会话按 trace 日期计入窗口（与 claude-code / codex 同语义）
 - 只读：全程 `mode=ro` 打开 SQLite、不写不联网（符合 ADR-4 / ADR-6）；DB 被进程锁住时自动降级为纯 JSONL 口径
+
+### 4.6 技能 / 交付物 / 自动化的侦测机制（与 WorkBuddy 的根本差异）
+
+WorkBuddy 这三件事各有**独立数据源**，千问办公全都不是那个形状。第一版适配器曾据此判
+「该源无此维度」并把 §一/§七/§九 全部留空——**那是错的**：信号都在，只是要换个地方找。
+
+| 维度 | WorkBuddy | 千问办公（权威源） | 归因粒度 |
+|---|---|---|---|
+| 技能调用 | `usage-log.json` 的 `firstSeenDate` / `recentDates[]` | 转录 `tool_use name="Skill"` → `input.skill` | 每次调用都有 `timestamp` + `sessionId`，**日期与会话双归因，比 WorkBuddy 更准** |
+| 自动化运行 | `workbuddy.db` automation + runs | `agents.db` 的 `scheduled_tasks` ⟕ `task_run_logs` | `automation_id` / `auto_status` / `result_success` / `created_date` |
+| 产出文件 | 扫 `~/WorkBuddy/` 会话目录 | `qwenwork_file_present_files` 的 `input.files[].file_path` ∪ 磁盘 `<cwd>/outputs/` | 前者有调用时刻（更准），后者只有 mtime |
+
+配套约定：
+
+- **`skill-usage.json` 不作统计源**：本机实测它只有 2 条累计记录，而转录里实到 17 次
+  `Skill` 调用（低估约 8.5 倍），只当旁证；差异落 `meta.skill_usage_source` 说明取自转录。
+- **`Write`/`Edit` 不混进交付清单**：只作为「改动过的文件」单独计数（本机 Edit 3305 次，
+  混入会把 §九 淹掉）；磁盘兜底扫描跳过 `.bak` / `.tmp` / `~$` / 隐藏文件。
+- **`nudge_logs` 不进 `automation_runs`**：本机 317 条后台运行里只有 26 条能 join 到会话
+  （归因率约 8%），进 §八 会造出一堆 unknown 组；它只出全局摘要 `meta.background_runs`
+  （次数 / 失败数 / 耗时 / 类型），§一 用一行交代，且 §十一 会据此提示失败率过高的空转。
+- **定时任务显示 0 是真 0**：本机 `scheduled_tasks` 与 `task_run_logs` 均 0 行，此时
+  报告写「本月无自动化任务运行记录」是对的——**不要**用「不适用」话术掩盖没采的事实。
+- **`single_channel`**：千问办公只有一层通道（档位即入口），§3.2「按入口 / 通道模型」必然
+  与 §3.1 同构，故采集端声明 `meta.single_channel=True`，渲染端跳过该节并留一行说明——
+  同样走**显式声明**，不让渲染层靠「两表行数相等」隐式猜。
 
 ---
 
@@ -440,9 +466,23 @@ L1 官方账单在场时永远 `priced`、历史 JSON 缺 `cost_mode` 字段按 
    避免引导用户去填一个算不出真实金额的价。
    **不要靠「单价全是 0」隐式推断** —— 那样将来该源真出可计价套餐时还得回头改渲染层。
 
+5. **（可选）维度与结构声明**，同样「显式优于隐式」，采集器算好后并入 `meta`：
+
+   | 字段 | 含义 | 不给会怎样 |
+   |---|---|---|
+   | `single_channel` | 该源只有一层通道（档位即入口），§3.2 与 §3.1 必然同构 | 渲染端只能靠「两表行数相等」猜，且换源就失效 |
+   | `background_runs` | 后台自动运行摘要（次数 / 失败数 / 耗时 / 类型），**不进 `automation_runs`** | §八 会出现一堆归因不上的 unknown 组 |
+   | `skill_usage_source` / `outputs_source` | 技能与交付物各自的**权威源**标注 | 报告读者无法判断这格数字从哪来（如累计表 vs 转录） |
+
+   技能 / 交付物 / 自动化三件事在每个 Agent 上的落点都不同，**必须实测该 Agent 的本机数据**
+   再决定「采什么、显示什么、留空什么」——千问办公这一轮的初判就是把「我没采」误写成
+   「该源没有」，参见 §4.6。
+
 ### 5.2 验收清单
 
 - [ ] `adapters/<agent>.py` 能读取该 Agent 用量并归一化为统一 schema
+- [ ] 技能 / 交付物 / 自动化三维度各自**实测过本机数据落点**，采到就出、真没有就是 0，
+      不许用「不适用」话术掩盖未采
 - [ ] 该 Agent 的模型单价可查（发布版或本地覆盖）
 - [ ] `--source <agent>` 端到端跑通一份报告
 - [ ] `tests/test_<agent>_adapter.py` 通过：解析正确性、日期过滤、成本计算、健壮性、CLI 黑盒

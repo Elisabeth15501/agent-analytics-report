@@ -23,10 +23,12 @@
 
 - **WorkBuddy**：完整能力，含技能调用、自动化运行、任务分类；
 - **Claude Code**：解析会话日志的 token / 成本 / 任务类型 / 每日趋势，无技能与自动化维度（JSONL 里没有这两类数据）。
-- **千问办公**：调用次数、请求耗时、模型档位、会话真名是**真实值**（取自逐次调用日志与业务库）；
-  但服务端**不回传 token**，token 由本地字符估算，且积分订阅无公开单 token 价 → 报告自动进入
-  **`tokens_only` 计价模式**（金额、花费速览、省钱杠杆等章节整章缺席，补价后自动恢复）。详见
-  [ADAPTERS.md](docs/ADAPTERS.md) §四。
+- **千问办公**：调用次数、请求耗时、模型档位、会话真名、**技能调用**、**交付物**、**定时任务**
+  都是**真实值**（技能取自转录里的 `Skill` 工具调用、交付物取 `present_files` ∪ `outputs/` 目录、
+  定时任务取 `agents.db` 的 `task_run_logs`）；但服务端**不回传 token**，token 由本地字符估算，
+  且积分订阅无公开单 token 价 → 报告自动进入 **`tokens_only` 计价模式**（金额、花费速览、
+  省钱杠杆等章节整章缺席，补价后自动恢复）。详见
+  [ADAPTERS.md](docs/ADAPTERS.md) §四、§4.6。
 - **官方用量导出**：本地 trace 的成本是**估算**（静态价表无法表达服务端时段减免，且漏记图像模型 / minimax-m3 约 8.7%）。
   导入官方导出后成本取「积分」字段，升为 **L1 真值**，报告新增 §3.5 双源对账。详见
   [ADAPTERS.md](docs/ADAPTERS.md) §二 / §五。
@@ -135,7 +137,7 @@ python scripts/collect_usage_data.py --source qwenwork --cost-mode priced    -o 
 
 本技能附带一套分层回归测试，覆盖从数据采集、计费等效折算、报告生成到发布一致性的全链路。**全部用例使用合成 fixture 数据，不引用任何第三方商业 API、不含真实用量/个人信息**，可安全公开（适合作为作品集在 GitHub Pages 展示）。
 
-测试分层（共 24 个测试文件、562 用例全绿）：
+测试分层（共 25 个测试文件、587 用例全绿）：
 
 | 层 | 文件 | 覆盖要点 |
 |----|------|----------|
@@ -147,7 +149,8 @@ python scripts/collect_usage_data.py --source qwenwork --cost-mode priced    -o 
 | **L0 适配器** | `test_claude_code_adapter.py` | Claude Code JSONL 解析、日期窗口过滤、缓存折扣与成本、坏行健壮性、会话派生与任务分类、`--source claude-code` CLI 黑盒（fixture 走 `CLAUDE_PROJECTS_DIR`，不读真实目录） |
 | **L0 适配器** | `test_codex_adapter.py` | Codex CLI rollout JSONL 逐轮 `turn.completed` 解析、跨版本字段兼容（`type`/`item_type`、reasoning 字段）、缓存折扣、`--source codex` CLI 黑盒（`CODEX_HOME` 隔离） |
 | **L0 适配器** | `test_qwenwork_adapter.py` | 千问办公三源归一（转录 / 逐次调用日志 / agents.db）：requestId 分组、字符估算与上下文累加、日志耗时关联、上游回传真值后自动升级、DB 增强与缺失降级、毫秒时间戳等坏数据健壮性、`--source qwenwork` CLI 黑盒与标题口径横幅（`QWENWORK_HOME` / `QWENWORK_DB` 隔离，不读真实目录） |
-| **L0 计价模式** | `test_cost_mode.py` | `_decide_cost_mode` 三条边界（限免/本地合法 ¥0 不误判、L1 优先、显式开关覆盖）、tokens_only 下 MD/HTML 金额章节与表头缺席、历史 JSON 缺 `cost_mode` 按 priced 零回归、JSON 落盘 `meta.cost_mode`、页脚按数据源署名 |
+| **L0 计价模式** | `test_cost_mode.py` | `_decide_cost_mode` 三条边界（限免/本地合法 ¥0 不误判、L1 优先、显式开关覆盖）、tokens_only 下 MD/HTML 金额章节与表头缺席、历史 JSON 缺 `cost_mode` 按 priced 零回归、JSON 落盘 `meta.cost_mode`、页脚按数据源署名；第二批：调用粒度按源分流、真实提问轮数取代聚类估算、后台运行摘要行、`cost_hidden` 下的 Token 口径下期预测与峰值日承接、`single_channel` 跳过 §3.2、token 口径异常条目 📈/💰 分列、分母口径补充 —— **每条都配一条 WorkBuddy 侧「不许变」断言** |
+| **L0 千问办公维度** | `test_qwenwork_dimensions.py` | 技能调用取自转录 `tool_use.Skill`（含窗口过滤、按调用次数计、按日期去重）、交付物 = `present_files` ∪ `outputs/` 磁盘扫描（跳过 `.bak`/`.tmp`/`~$`/隐藏、同路径不双计、文件缺失优雅降级）、`scheduled_tasks ⟕ task_run_logs` 五字段契约（`result_success` 不得缺，否则汇总 KeyError）、无 cron 的机器返回真 `[]`、`nudge_logs` 只出全局摘要不混入自动化 |
 | **L0 官方导出** | `test_official_usage.py` | xlsx 纯标准库解析（明文/共享串/inlineStr/日期序列）、**按表头名映射（新版 6 列不取 Prompt 的回归门禁）**、缺列报错、聚合与免费判定、双源对账、`--import-official` CLI 端到端（USERPROFILE 隔离）、零回归、L1/L2 渲染与脏数据回落 |
 | **L0 任务分类** | `test_task_classification.py` | 加权评分取代首匹配、词边界（fix≠prefix）、信号密度取胜、置信度、task_rules.json 外置与回退、LLM 分类器 mock 全路径、collect_task_types 独立可调用（v1.3.0 拆分漏导入回归） |
 | **L0 定价更新** | `test_fetch_pricing.py` | 条目校验（schema/负数/倍率）、候选与 diff 产出、--apply 备份落盘、过期检查退出码、`FETCH_PRICING_ROOT` 隔离黑盒 |

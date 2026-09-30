@@ -381,6 +381,22 @@ python scripts/fetch_pricing.py --file ./new-prices.json --apply   # 自动备�
 
 CI 场景用 `--check --stale-days 30`：定价超过 30 天没更新（看 `pricing.json` 的 `_pricing_rules.updated`）就退出码 1，流水线可以据此提醒你更新。
 
+**Q52. 千问办公报告里的技能调用、交付物、自动化任务分别是从哪来的？**
+三个维度的落点跟 WorkBuddy 完全不一样，都是**实测本机数据**后定的（机制详见
+[ADAPTERS.md](../docs/ADAPTERS.md) §4.6）：
+- **技能调用**：会话转录里的 `tool_use name="Skill"` → `input.skill`，每次调用都带时间戳和
+  会话 ID，所以能按窗口过滤、能归因到会话。⚠️ **不用 `~/.qwenworkcn/skill-usage.json`**：
+  它只记累计 `usageCount`，本机实测只有 2 条记录、而转录里实到 17 次调用（低估约 8.5 倍），
+  拿它统计会严重少报。
+- **交付物**：`present_files` 工具调用里列出的路径（语义=「已作为交付物交给你」）**并上**
+  `~/.qwenworkcn/workspace/<chatId>/outputs/` 目录扫描，按归一化路径去重；磁盘扫描会跳过
+  `.bak` / `.tmp` / `~$` 与隐藏文件。`Write`/`Edit` 改过的文件**不混进清单**（本机 Edit 有
+  3305 次，混入会把清单淹掉），只作为「改动过的文件」单独计数。
+- **自动化任务**：`agents.db` 的 `scheduled_tasks` ⟕ `task_run_logs`。你本机这两张表是空的，
+  所以报告里「自动化任务运行 0 次」是**真 0**，不是没采——将来建了定时任务会自动出现。
+  另外千问办公有一类**后台自动运行**（记忆整理 / 反思，来自 `nudge_logs`），它的会话归因率只有
+  约 8%，因此不混进 §八，只在 §一 用一行交代次数与失败数，失败率过高时 §十一 会提示。
+
 **Q49. 能统计千问办公（QwenWork）的用量吗？**
 能，用 `--source qwenwork`：
 ```bash
