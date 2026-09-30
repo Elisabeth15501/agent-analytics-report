@@ -423,6 +423,11 @@ def build_model_section(fmt, data):
     lc_map = meta.get("low_confidence", {}) or {}
     lc_bias_map = meta.get("low_confidence_bias", {}) or {}
     hidden = _cost_hidden(data)          # tokens_only：隐藏金额维度
+    # 单通道数据源（如千问办公：档位即入口）——§3.2「按入口/通道」必然与 §3.1 同构，
+    # 由采集端显式声明 meta.single_channel，渲染端不靠「两表行数相等」隐式猜。
+    _skip32 = bool(meta.get("single_channel"))
+    if _skip32:
+        exec_stats = []
     if fmt == "md":
         lines = []
         lines.append("## 三、模型使用与成本对比" if not hidden else "## 三、模型使用对比")
@@ -430,7 +435,9 @@ def build_model_section(fmt, data):
         if hidden:
             lines.append("按模型统计调用次数与实际消耗 Token。**本报告为 tokens_only 计价模式："
                          "本期没有任何模型命中单价，故金额、占比与「最贵模型」结论一律不出**"
-                         "（免得满屏 `¥0.00` 被读成「免费」）。3.1 按实际执行模型、3.2 按入口 / 通道模型两个维度统计使用量。")
+                         "（免得满屏 `¥0.00` 被读成「免费」）。"
+                         + ("§3.1 按实际执行模型统计使用量。" if _skip32
+                            else "3.1 按实际执行模型、3.2 按入口 / 通道模型两个维度统计使用量。"))
         else:
             lines.append("按模型统计调用次数、实际消耗 Token 与单价（元 / 1M tokens，输入 / 输出分别计价）。"
                          "本章节提供**两个维度**：")
@@ -464,10 +471,11 @@ def build_model_section(fmt, data):
             lines.append(chart)
             lines.append("")
         # 3.2 按入口 / 配置模型（使用维度 · 非计费口径）
-        lines.append("### 3.2 按入口 / 配置模型（使用维度 · 非计费口径）" if not hidden
-                     else "### 3.2 按入口 / 通道模型（使用维度）")
-        lines.append("")
-        if not hidden:
+        if not _skip32:
+            lines.append("### 3.2 按入口 / 配置模型（使用维度 · 非计费口径）" if not hidden
+                         else "### 3.2 按入口 / 通道模型（使用维度）")
+            lines.append("")
+        if not hidden and not _skip32:
             lines.append("> 本维度按你配置的**入口 / 通道模型名**聚合（如 `auto` 路由、`hy3`、`custom-local`），"
                          "反映你实际请求 / 配置了哪些入口、各多少次——是「使用分布」而非「账单」。"
                          "经由 `auto` 路由或限免入口（如 `hy3`）实际执行的底层付费模型，其花费已计入 3.1 对应执行模型行，"
@@ -502,7 +510,8 @@ def build_model_section(fmt, data):
                     lines.append(chart4)
                     lines.append("")
         else:
-            lines.append("（本期无模型调用数据）")
+            lines.append("> ℹ️ 本数据源仅一层通道（档位即入口），§3.2 入口维度与 §3.1 必然同构，"
+                         "故不重复输出。" if _skip32 else "（本期无模型调用数据）")
             lines.append("")
         # 3.3 缺失单价模型（数据驱动）——tokens_only 或该源不支持计费时整块压制
         if _show_unconfigured_block(data):
@@ -536,9 +545,10 @@ def build_model_section(fmt, data):
     if not hidden:
         lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。'
                      '3.1 各模型花费合计 = 报告概览「实际成本（计费等效）」总额。</p>')
-    lines.append('        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>' if not hidden
-                 else '        <h3>3.2 按入口 / 通道模型（使用维度）</h3>')
-    if not hidden:
+    if not _skip32:
+        lines.append('        <h3>3.2 按入口 / 配置模型（使用维度 · 非计费口径）</h3>' if not hidden
+                     else '        <h3>3.2 按入口 / 通道模型（使用维度）</h3>')
+    if not hidden and not _skip32:
         lines.append('        <p>本维度按你配置的<b>入口 / 通道模型名</b>（如 <code>auto</code> 路由、<code>hy3</code>、<code>custom-local</code>）聚合，'
                      '反映实际请求 / 配置的入口分布（非账单）。经由 <code>auto</code> 或限免入口实际执行的底层付费模型，'
                      '其花费已计入 3.1 对应执行模型行，本表不直接展开。'
@@ -557,7 +567,8 @@ def build_model_section(fmt, data):
             lines.append('        <h4>3.2.3 外部 API 接口接入模型 🔧</h4>')
             lines += _build_model_block("html", external_exec, is_exec=True, timed_free_map=tf_map, low_conf_map=lc_map, low_conf_bias_map=lc_bias_map, hide_cost=hidden)
     else:
-        lines.append('        <p>（本期无模型调用数据）</p>')
+        lines.append('        <p>ℹ️ 本数据源仅一层通道（档位即入口），§3.2 入口维度与 §3.1 必然同构，'
+                     '故不重复输出。</p>' if _skip32 else '        <p>（本期无模型调用数据）</p>')
     if not hidden:
         lines.append('        <p class="disclaimer">⚠️ 以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单。</p>')
     # 3.3 缺失单价模型（数据驱动）——tokens_only 或该源不支持计费时整块压制
@@ -849,7 +860,9 @@ def _auto_state_label(status):
     }.get(status or "UNKNOWN", "未知")
 
 
-def build_next_week_outlook(summary, daily_tokens, automation_runs, session_credits, period_key="week"):
+def build_next_week_outlook(summary, daily_tokens, automation_runs, session_credits,
+                            period_key="week", cost_hidden=False, anomaly_days=None,
+                            background_runs=None):
     """基于本期实际数据，生成动态的下期用量预测 + 优先级行动建议。
 
     所有结论均由报告内真实数据驱动：花费预测来自日均花费，额度预测来自
@@ -859,6 +872,10 @@ def build_next_week_outlook(summary, daily_tokens, automation_runs, session_cred
     自动化相关建议**仅考虑「正在执行」的自动化（auto_status == ACTIVE）**：
     已停止（已暂停 PAUSED / 已删除 DELETED）的自动化任务不计入，其运行记录
     即便处于 PENDING_REVIEW 也不再视为需要人工处理的「待审核」项。
+
+    tokens_only（`cost_hidden=True`）时金额恒为 0，原 `eff_cost > 0` 门槛会把预测整段
+    静默吞掉、只剩一句「使用趋势平稳」兜底，故改按**日均 token** 推算；`anomaly_days`
+    与 `background_runs` 用来让展望不再与 §4.3 的异常检测自相矛盾。
     """
     _short = _PERIOD_SHORT.get(period_key, "本周")
     _next = _PERIOD_NEXT.get(period_key, "下周")
@@ -866,8 +883,9 @@ def build_next_week_outlook(summary, daily_tokens, automation_runs, session_cred
 
     # 0. 下期用量预测（真·展望，数据驱动）
     eff_cost = summary.get("total_effective_cost", 0)
+    eff_tokens = summary.get("total_effective_tokens", 0)
     active_days = summary.get("active_day_count", 0)
-    if daily_tokens and active_days > 0 and eff_cost > 0:
+    if daily_tokens and active_days > 0 and (eff_cost > 0 or cost_hidden):
         avg_daily_cost = eff_cost / active_days
         dates = sorted(daily_tokens.keys())
         try:
@@ -876,13 +894,26 @@ def build_next_week_outlook(summary, daily_tokens, automation_runs, session_cred
             period_days = max((d1 - d0).days + 1, 1)
         except (ValueError, TypeError):
             period_days = PERIOD_DAYS.get(period_key, 7)
-        peak_day_cost = max((v.get("effective_cost", 0) for v in daily_tokens.values()), default=0)
-        forecast_low = avg_daily_cost * period_days
-        forecast_high = (avg_daily_cost + max(peak_day_cost - avg_daily_cost, 0)) * period_days
-        items.append(
-            f"- 📈 **下期用量预测**：按本期日均 ¥{avg_daily_cost:.2f} 推算，{_next}（约 {period_days} 天）"
-            f"预计花费 **¥{forecast_low:.2f} ~ ¥{forecast_high:.2f}**。"
-        )
+        if cost_hidden:
+            # tokens_only：按日均 token 推算，单位与全文一致走 format_number，不提 ¥
+            avg_daily_tok = eff_tokens / active_days
+            peak_day_tok = max((v.get("effective", 0) for v in daily_tokens.values()),
+                               default=0)
+            tok_low = avg_daily_tok * period_days
+            tok_high = (avg_daily_tok + max(peak_day_tok - avg_daily_tok, 0)) * period_days
+            items.append(
+                f"- 📈 **下期用量预测（Token 口径）**：按本期日均 {format_number(avg_daily_tok)} token "
+                f"推算，{_next}（约 {period_days} 天）预计 "
+                f"**{format_number(tok_low)} ~ {format_number(tok_high)} token**。"
+            )
+        else:
+            peak_day_cost = max((v.get("effective_cost", 0) for v in daily_tokens.values()), default=0)
+            forecast_low = avg_daily_cost * period_days
+            forecast_high = (avg_daily_cost + max(peak_day_cost - avg_daily_cost, 0)) * period_days
+            items.append(
+                f"- 📈 **下期用量预测**：按本期日均 ¥{avg_daily_cost:.2f} 推算，{_next}（约 {period_days} 天）"
+                f"预计花费 **¥{forecast_low:.2f} ~ ¥{forecast_high:.2f}**。"
+            )
 
     # 自动化相关建议：仅统计「正在执行（ACTIVE）」的自动化。
     # 已停止（PAUSED/DELETED）的自动化不计入——其 PENDING_REVIEW 运行不再视为待处理项。
@@ -930,6 +961,31 @@ def build_next_week_outlook(summary, daily_tokens, automation_runs, session_cred
                     f"- 💳 **P2 关注 Token 额度**：已用约 {ratio:.0f}%，"
                     f"建议定期核对防止高峰期任务因额度不足而失败。"
                 )
+
+    # 4. 本期有 Token 峰值日 → 展望必须承接 §4.3，不能再套「使用趋势平稳」的兜底话
+    if anomaly_days:
+        _peak = anomaly_days[0]
+        items.append(
+            f"- ⚠️ **P1 复盘 Token 峰值日**：{_peak.get('date', '')} 出现 "
+            f"{'；'.join(_peak.get('reasons') or [])}（见 §4.3），"
+            f"建议排查当日是否存在可精简的批量 / 重复调用，而不是等它在下期复现。"
+        )
+
+    # 5. 后台自动运行（千问办公这类源无 cron 自动化时的替代观察点）
+    br = background_runs or {}
+    if br.get("count"):
+        _err = br.get("error_count") or 0
+        _rate = (_err / br["count"] * 100) if br["count"] else 0
+        if _rate >= 30:
+            items.append(
+                f"- 🤖 **P2 关注后台自动运行**：本期 {br['count']} 次后台运行（记忆整理 / 反思等）"
+                f"失败 {_err} 次（{_rate:.0f}%）——虽不计入任务榜，但同样消耗额度且失败即空转，"
+                f"建议在设置里核查相关后台能力是否被反复重试。"
+            )
+        else:
+            items.append(
+                f"- 🤖 **P3 后台自动运行**：本期 {br['count']} 次（失败 {_err} 次），运行正常。"
+            )
 
     if not items:
         items.append("- 使用趋势平稳，建议继续保持并关注高峰时段任务调度。")
@@ -982,13 +1038,19 @@ def generate_markdown_report(data):
                             if (t.get("exec_model") or t.get("raw_model") or "") == "default"
                             or ((t.get("input_tokens", 0) or 0) + (t.get("output_tokens", 0) or 0)) == 0)
     _billable_calls = len(_gt) - _unresolved_calls
-    # 口径标注：trace 数是 generation 粒度，与官方「请求数」差一个量级，
-    # 不标注会被读成「用量暴涨」。
-    _calls_note = f"（{_unresolved_calls} 次未解析/幽灵不计费；**generation 粒度**："
-    _calls_note += "一次请求内部可含多轮生成，**不等于**官方「请求数」）"
+    # 口径标注：粒度随数据源而变（WorkBuddy=generation，千问办公=逐次调用真值），
+    # 不标注会被读成「用量暴涨」或「调用数 ≠ 请求数」。
+    _calls_note = f"（{_unresolved_calls} 次未解析/幽灵不计费；{_calls_granularity_note(data)}）"
     if _is_l1(data):
         _calls_note += f"；官方导出同期 **{summary.get('official_requests', 0)} 次请求**"
     lines.append(f"| 调用次数 | {_billable_calls} 次{_calls_note} |")
+    _user_turns = _user_turn_count(data)
+    if _user_turns is not None:
+        lines.append(f"| 用户提问轮数（真实计数） | {_user_turns} 次"
+                     f"（仅统计本期有调用的会话；转录里可直接数出，非估算）|")
+    _bg_note = _background_runs_note(data)
+    if _bg_note:
+        lines.append(_bg_note)
     lines.append(f"| 使用技能 | {summary.get('skills_used', 0)} 个 |")
     lines.append(f"| 自动化任务运行 | {summary.get('total_automation_runs', 0)} 次（成功 {summary.get('successful_automation_runs', 0)} 次）|")
     lines.append(f"| 产出文件 | {summary.get('total_outputs', 0)} 个 |")
@@ -1004,7 +1066,9 @@ def generate_markdown_report(data):
                      f"（其中 {summary.get('official_free_requests', 0)} 次免费）|")
     # 请求数反推：generation 聚类得到的「估算请求数」，与官方「请求数」口径不同，仅对照
     _est_req = summary.get("estimated_request_count")
-    if _est_req is not None:
+    # 有真实提问轮数可数时不再摆估算值（两条并存会让人问「该信哪个」）；
+    # WorkBuddy 等拿不到 _human_turns 的源走原路径，含 L1 对照行。
+    if _est_req is not None and _user_turns is None:
         _gap = summary.get("request_estimate_gap_minutes", 15)
         lines.append(f"| 估算请求数（generation 反推） | {_est_req} 次"
                      f"（按会话内 ≥{_gap} 分钟间隔聚类；**估算值**，口径与官方「请求数」不同，不可等同）|")
@@ -1318,7 +1382,10 @@ def generate_markdown_report(data):
             shape = "分布较均衡，未见单一类型主导"
         lines.append("### 📊 任务类型洞察")
         lines.append("")
-        lines.append(f"- **主要任务类型**：{top_task}（{top_n} 次，{top_pct:.1f}%）——{shape}。")
+        # 分母只含有 token 活动的会话（§五 D5 口径），不交代会被拿来跟 §一 的会话总数对
+        _scope = ("" if total_count == summary.get("total_sessions")
+                  else f"，仅统计本期有 token 活动的 {total_count} 个会话")
+        lines.append(f"- **主要任务类型**：{top_task}（{top_n} 次，{top_pct:.1f}%{_scope}）——{shape}。")
         lines.append("")
 
     # ✅ 省钱成就（替代"缓存效率优秀"，翻成钱）——tokens_only 下无钱可翻
@@ -1336,7 +1403,10 @@ def generate_markdown_report(data):
     lines.append(f"基于{_short}实际数据，先预测下期用量，再按优先级给出行动建议：")
     lines.append("")
     for item in build_next_week_outlook(summary, daily_tokens, automation_runs,
-                                        data.get("session_credits", []), period_key=_key):
+                                        data.get("session_credits", []), period_key=_key,
+                                        cost_hidden=_cost_hidden(data),
+                                        anomaly_days=_token_anomaly_days(data),
+                                        background_runs=(meta.get("background_runs") or {})):
         lines.append(item)
     lines.append("")
     lines.append("---")
@@ -2017,6 +2087,64 @@ def _donut_title(data):
             else "实际消耗 Token 占比（按任务类型，计费等效）")
 
 
+def _calls_granularity_note(data):
+    """§一 调用次数的粒度括注（MD 版，不含外层括号）。
+
+    WorkBuddy 的 trace 是 generation 粒度（一次请求内含多轮生成），
+    千问办公的 trace 是**逐次模型调用**（按 requestId 归并、来自调用日志），
+    两者量级与含义都不同——套同一句话会把真值说成"不等于请求数"。
+    """
+    if _source_key(data) == "qwenwork":
+        return ("**逐次模型调用粒度**：按 `requestId` 归并，取自逐次调用日志，"
+                "与「请求数」同一量级")
+    return "**generation 粒度**：一次请求内部可含多轮生成，**不等于**官方「请求数」"
+
+
+def _calls_granularity_short(data):
+    """HTML 统计卡用的短标签（纯文本、无 markdown 星号）。"""
+    return "逐次模型调用" if _source_key(data) == "qwenwork" else "generation 粒度"
+
+
+def _user_turn_count(data):
+    """真实用户提问轮数（仅统计本期有调用的会话）；拿不到返回 None 走回退。
+
+    千问办公转录里 `humanInput` 可直接数出来（适配器落在 sessions[]._human_turns），
+    比 15 分钟聚类反推的「估算请求数」更准，不该被估算值顶掉。
+    WorkBuddy / claude-code / codex 没有这个字段 → 返回 None，报告保留原估算行。
+    """
+    traced = {t.get("session_id") for t in (data or {}).get("traces", [])
+              if t.get("session_id")}
+    if not traced:
+        return None
+    total, has_field = 0, False
+    for s in (data or {}).get("sessions", []):
+        if s.get("id") not in traced:
+            continue
+        n = s.get("_human_turns")
+        if isinstance(n, int):
+            has_field = True
+            total += n
+    return total if has_field else None
+
+
+def _background_runs_note(data):
+    """千问办公的后台自动运行摘要（记忆整理 / 反思等），无则返回 ""。"""
+    br = ((data or {}).get("meta", {}) or {}).get("background_runs") or {}
+    count = br.get("count") or 0
+    if not count:
+        return ""
+    err = br.get("error_count") or 0
+    note = f"| 后台自动运行 | {count} 次（记忆整理 / 反思等，非用户任务）"
+    note += f"，其中失败 {err} 次 |" if err else " |"
+    return note
+
+
+def _token_anomaly_days(data):
+    """§4.3 已判定的 Token 异常日列表（供 §十一 展望承接，别自相矛盾）。"""
+    block = ((data or {}).get("cost_anomalies") or {}).get("token") or {}
+    return block.get("daily") or []
+
+
 def _session_count_note(data):
     """§一「会话总数」的口径补充：总数含空会话，与后文「N 个会话进入统计」自洽。
 
@@ -2037,7 +2165,9 @@ def _footer_text(data):
     if src == "workbuddy":
         return "本报告基于 WorkBuddy 数据自动生成。"
     label = _SOURCE_LABELS[src][0].replace("使用情况报告", "").strip() if src in _SOURCE_LABELS else src
-    return f"本报告基于 {label} 本机数据自动生成（计价模式 {_cost_mode(data)}）。"
+    # 纯中文标签两侧不加空格（中英混排才需要），ASCII 标签（Codex CLI 等）保留空格
+    pad = "" if any("\u4e00" <= ch <= "\u9fff" for ch in label) else " "
+    return (f"本报告基于{pad}{label}{pad}本机数据自动生成（计价模式 {_cost_mode(data)}）。")
 
 
 def _source_caveat_lines(fmt, data):
@@ -2214,7 +2344,8 @@ def _render_anomaly_block(fmt, title, block, kind):
                 if kind == "cost":
                     lines.append(f"- 💰 **{a['title']}**：¥{a['value']:.2f}（主要模型：{models}）")
                 else:
-                    lines.append(f"- 💰 **{a['title']}**：实际消耗 {a['value']:,.0f} token、"
+                    # token 口径不是钱，沿用 💰 会让 tokens_only 报告自己打自己脸
+                    lines.append(f"- 📈 **{a['title']}**：实际消耗 {a['value']:,.0f} token、"
                                  f"调用 {a.get('calls', 0)} 次（主要模型：{models}）")
             lines.append("")
         return lines
@@ -2247,7 +2378,7 @@ def _render_anomaly_block(fmt, title, block, kind):
             if kind == "cost":
                 L.append(f"            <li>💰 <b>{_esc(a['title'])}</b>：¥{a['value']:.2f}（主要模型：{models}）</li>")
             else:
-                L.append(f"            <li>💰 <b>{_esc(a['title'])}</b>：实际消耗 {a['value']:,.0f} token、"
+                L.append(f"            <li>📈 <b>{_esc(a['title'])}</b>：实际消耗 {a['value']:,.0f} token、"
                          f"调用 {a.get('calls', 0)} 次（主要模型：{models}）</li>")
         L.append("        </ul>")
     return L
@@ -2746,8 +2877,9 @@ def generate_html_report(data):
                                if (t.get("exec_model") or t.get("raw_model") or "") == "default"
                                or ((t.get("input_tokens", 0) or 0) + (t.get("output_tokens", 0) or 0)) == 0)
     _billable_calls_h = len(_gt_h) - _unresolved_calls_h
-    # 口径标注：generation 粒度 ≠ 官方请求数
-    _calls_label_h = f"调用次数·generation 粒度（{_unresolved_calls_h} 未解析）"
+    # 口径标注：粒度随数据源而变（WorkBuddy=generation，千问办公=逐次调用真值）
+    _calls_label_h = f"调用次数·{_calls_granularity_short(data)}（{_unresolved_calls_h} 未解析）"
+    _user_turns_h = _user_turn_count(data)
     _hidden_h = _cost_hidden(data)     # tokens_only：隐藏金额维度
     stat_cards = [
         (summary.get("active_day_count", 0), "活跃天数"),
@@ -2764,10 +2896,15 @@ def generate_html_report(data):
     if _is_l1(data):
         stat_cards.insert(3, (summary.get("official_requests", 0), "官方请求数（L1）"))
         stat_cards.append((f"{summary.get('total_cost_official', 0):.2f}", "官方积分合计（L1 真值）"))
-    # 请求数反推（估算值，口径与官方请求数不同）
+    # 请求数：有真实提问轮数就用真值卡片，否则保留聚类反推的估算卡片
     _est_req_h = summary.get("estimated_request_count")
-    if _est_req_h is not None:
+    if _user_turns_h is not None:
+        stat_cards.append((_user_turns_h, "用户提问轮数（真实）"))
+    elif _est_req_h is not None:
         stat_cards.append((_est_req_h, "估算请求数（反推·估算）"))
+    _br = ((data or {}).get("meta", {}) or {}).get("background_runs") or {}
+    if _br.get("count"):
+        stat_cards.append((_br["count"], "后台自动运行（次）"))
     for val, label in stat_cards:
         lines.append('            <div class="stat-card">')
         lines.append(f"                <div class=\"stat-value\">{val}</div>")
@@ -3031,7 +3168,9 @@ def generate_html_report(data):
         else:
             shape = "分布较均衡，未见单一类型主导"
         lines.append("        <h3>📊 任务类型洞察</h3>")
-        lines.append(f"        <p><strong>主要任务类型</strong>：{_esc(top_task)}（{top_n} 次，{top_pct:.1f}%）——{shape}。</p>")
+        _scope_h = ("" if total_count == summary.get("total_sessions")
+                    else f"，仅统计本期有 token 活动的 {total_count} 个会话")
+        lines.append(f"        <p><strong>主要任务类型</strong>：{_esc(top_task)}（{top_n} 次，{top_pct:.1f}%{_scope_h}）——{shape}。</p>")
 
     # ✅ 省钱成就 —— tokens_only 下无钱可翻
     if cache_rate > 0 and not _hidden_h:
@@ -3047,7 +3186,10 @@ def generate_html_report(data):
     lines.append(f"        <p>基于{_short}实际数据，先预测下期用量，再按优先级给出行动建议：</p>")
     lines.append("        <ul>")
     for item in build_next_week_outlook(summary, daily_tokens, automation_runs,
-                                        data.get("session_credits", []), period_key=_key):
+                                        data.get("session_credits", []), period_key=_key,
+                                        cost_hidden=_cost_hidden(data),
+                                        anomaly_days=_token_anomaly_days(data),
+                                        background_runs=(meta.get("background_runs") or {})):
         raw = item[2:].strip() if item.startswith("- ") else item
         escaped = _esc(raw)
         text = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)

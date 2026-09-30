@@ -46,6 +46,7 @@ def _base_data():
             "total_cost": 12.0, "total_effective_cost": 10.0,
             "total_input_cost": 7.0, "total_output_cost": 3.0,
             "task_type_distribution": {"代码开发": 2, "问答": 1},
+            "estimated_request_count": 30,
         },
         "daily_tokens": {
             "2026-08-10": {"total": 600000, "effective": 540000, "input": 400000,
@@ -129,6 +130,12 @@ def _tokens_only_data():
     d["cost_anomalies"].pop("cost")
     d["cost_anomalies"]["cost_note"] = "本期成本为 0，成本口径不适用"
     d["savings_insights"] = {"items": [], "total_estimated_monthly_save": 0.0}
+    # 千问办公专有维度（第 9 项）：真实提问轮数、单通道声明、后台自动运行摘要
+    d["sessions"][0]["_human_turns"] = 5
+    d["meta"]["single_channel"] = True
+    d["meta"]["background_runs"] = {"count": 227, "error_count": 172,
+                                    "total_duration_ms": 211597541,
+                                    "types": {"reflection_memory_error": 172}}
     return d
 
 
@@ -373,3 +380,135 @@ def test_unconfigured_block_shown_when_priced_and_supported(report_module):
     assert "本期有未配置单价的模型" in md
     assert "brand-new-model" in md
     assert "pricing.local.json" in md
+
+
+# ── 五、第二批修正：口径措辞 / 真实计数 / 单通道 / 符号（含成对回归断言）────
+#
+# 每条都配一条 WorkBuddy 侧的「不许变」断言 —— 这些措辞是数据源专属的，
+# 改 A 源不能顺手把 B 源的口径也改了（历史上已经串过味一次）。
+
+@allure.feature("计价模式")
+@allure.story("调用粒度")
+@allure.title("千问办公=逐次模型调用，WorkBuddy 仍=generation 粒度")
+def test_calls_granularity_is_source_aware(report_module):
+    qw = report_module.generate_markdown_report(_tokens_only_data())
+    assert "逐次模型调用粒度" in qw
+    assert "generation 粒度" not in qw
+    wb = report_module.generate_markdown_report(_base_data())
+    assert "generation 粒度" in wb
+    assert "逐次模型调用" not in wb
+    html_qw = report_module.generate_html_report(_tokens_only_data())
+    assert "调用次数·逐次模型调用" in html_qw
+    assert "调用次数·generation 粒度" not in html_qw
+    assert "调用次数·generation 粒度" in report_module.generate_html_report(_base_data())
+
+
+@allure.feature("计价模式")
+@allure.story("用户提问轮数")
+@allure.title("有真实计数时不再摆聚类估算值；WorkBuddy 保留估算行")
+def test_user_turn_count_preferred_over_estimate(report_module):
+    d = _tokens_only_data()
+    assert report_module._user_turn_count(d) == 5
+    md = report_module.generate_markdown_report(d)
+    assert "用户提问轮数（真实计数）" in md
+    assert "估算请求数" not in md
+    # WorkBuddy 形态没有 _human_turns → 回退估算行，一字不动
+    wb = _base_data()
+    assert report_module._user_turn_count(wb) is None
+    wb_md = report_module.generate_markdown_report(wb)
+    assert "估算请求数（generation 反推）" in wb_md
+    assert "用户提问轮数" not in wb_md
+
+
+@allure.feature("计价模式")
+@allure.story("后台自动运行")
+@allure.title("千问办公补一行后台运行，WorkBuddy 不出现该行")
+def test_background_runs_row_only_for_qwenwork(report_module):
+    md = report_module.generate_markdown_report(_tokens_only_data())
+    assert "后台自动运行" in md and "227 次" in md and "失败 172 次" in md
+    assert "后台自动运行" not in report_module.generate_markdown_report(_base_data())
+
+
+@allure.feature("计价模式")
+@allure.story("下期预测")
+@allure.title("tokens_only 按日均 token 预测；priced 的 ¥ 文案逐字不变")
+def test_outlook_forecast_token_variant(report_module):
+    items = report_module.build_next_week_outlook(
+        _tokens_only_data()["summary"], _tokens_only_data()["daily_tokens"], [], [],
+        period_key="week", cost_hidden=True)
+    assert any("下期用量预测（Token 口径）" in i for i in items)
+    assert not any("¥" in i for i in items)
+    d = _base_data()
+    wb_items = report_module.build_next_week_outlook(
+        d["summary"], d["daily_tokens"], [], [], period_key="week")
+    assert any("下期用量预测**：按本期日均 ¥" in i or "按本期日均 ¥" in i for i in wb_items)
+    # 展望必须承接 §4.3 的峰值日，不能再退化成「使用趋势平稳」
+    tok = _tokens_only_data()
+    with_anom = report_module.build_next_week_outlook(
+        tok["summary"], tok["daily_tokens"], [], [], period_key="week", cost_hidden=True,
+        anomaly_days=tok["cost_anomalies"]["token"]["daily"],
+        background_runs=tok["meta"]["background_runs"])
+    assert any("复盘 Token 峰值日" in i for i in with_anom)
+    assert any("关注后台自动运行" in i for i in with_anom)
+    assert "使用趋势平稳" not in "\n".join(with_anom)
+    # 整份报告里也要看得到
+    md = report_module.generate_markdown_report(tok)
+    assert "下期用量预测（Token 口径）" in md and "复盘 Token 峰值日" in md
+
+
+@allure.feature("计价模式")
+@allure.story("单通道")
+@allure.title("meta.single_channel → §3.2 不重复输出；未声明时照旧")
+def test_single_channel_skips_section_32(report_module):
+    md = report_module.generate_markdown_report(_tokens_only_data())
+    assert "### 3.2" not in md
+    assert "仅一层通道" in md
+    html = report_module.generate_html_report(_tokens_only_data())
+    assert "<h3>3.2" not in html
+    wb = report_module.generate_markdown_report(_base_data())
+    assert "### 3.2 按入口 / 配置模型" in wb
+    assert "仅一层通道" not in wb
+
+
+@allure.feature("计价模式")
+@allure.story("异常符号")
+@allure.title("token 口径条目用 📈，cost 口径仍是 💰")
+def test_anomaly_emoji_matches_metric(report_module):
+    qw = report_module.generate_markdown_report(_tokens_only_data())
+    assert "- 📈 **写一个快排**" in qw
+    assert "💰 **写一个快排**" not in qw
+    wb = report_module.generate_markdown_report(_base_data())
+    assert "💰 **写一个快排**" in wb          # 成本口径条目保持原样
+    html_qw = report_module.generate_html_report(_tokens_only_data())
+    assert "📈 <b>写一个快排</b>" in html_qw
+    # token 口径条目在任何源都该是 📈（这是通用修复，不是千问专属）；
+    # WorkBuddy 的 HTML 里同时有 💰（成本口径）与 📈（token 口径）两条，各自正确
+    wb_html = report_module.generate_html_report(_base_data())
+    assert "💰 <b>写一个快排</b>" in wb_html and "📈 <b>写一个快排</b>" in wb_html
+
+
+@allure.feature("计价模式")
+@allure.story("分母口径")
+@allure.title("任务类型洞察交代「仅统计有 token 活动的会话」，WorkBuddy 相等时不加")
+def test_task_insight_scope_note(report_module):
+    d = _tokens_only_data()
+    d["summary"]["total_sessions"] = 155          # 远大于有 token 活动的 3 个会话
+    md = report_module.generate_markdown_report(d)
+    assert "仅统计本期有 token 活动的 3 个会话" in md
+    w = _base_data()
+    # total_sessions 与 task_type_distribution 合计相等 → 不该冒出口径补充
+    w["summary"]["total_sessions"] = sum(w["summary"]["task_type_distribution"].values())
+    assert "仅统计本期有 token 活动的" not in report_module.generate_markdown_report(w)
+
+
+@allure.feature("计价模式")
+@allure.story("页脚署名")
+@allure.title("中文标签两侧不留空格，ASCII 标签仍留空格")
+def test_footer_spacing_by_script(report_module):
+    assert report_module._footer_text(_tokens_only_data()) == \
+        "本报告基于千问办公本机数据自动生成（计价模式 tokens_only）。"
+    d = _base_data()
+    d["meta"]["source"] = "codex"
+    assert " Codex CLI 本机数据" in report_module._footer_text(d)
+    d2 = _base_data()
+    assert report_module._footer_text(d2) == "本报告基于 WorkBuddy 数据自动生成。"
