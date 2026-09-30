@@ -1577,15 +1577,20 @@ def _compute_session_size_anomalies(rows):
     """会话规模（调用次数）异常检测。纯只读。
 
     threshold = max(p95(calls), 200)，top 5 按 calls 降序。
+    p95 用与 §4.3 顶部「会话级 p95（调用次数）」相同的线性插值百分位
+    （ca_aggregate._percentile），且输入集合同为全部会话行——避免同一节里
+    先报 436、后报 376 两个不一致的 p95。
     """
     if not rows:
         return None
-    calls_sorted = sorted([r.get("calls", 0) for r in rows if r.get("calls", 0) > 0])
-    if not calls_sorted:
+    calls = sorted(r.get("calls", 0) for r in rows)
+    if not calls:
         return None
-    n = len(calls_sorted)
-    p95_idx = max(0, int(n * 0.95) - 1)
-    p95_calls = calls_sorted[p95_idx]
+    n = len(calls)
+    idx = 0.95 * (n - 1)
+    lo = int(idx)
+    hi = min(lo + 1, n - 1)
+    p95_calls = calls[lo] * (1 - (idx - lo)) + calls[hi] * (idx - lo)
     threshold = max(p95_calls, 200)
     items = sorted(
         [r for r in rows if r.get("calls", 0) > threshold],
@@ -3396,11 +3401,15 @@ def main():
         # 活跃天数 = 窗口内产生 token 活动的日期（仅 trace 日期，避免会话创建日虚高）
         active_days = set(t["date"] for t in traces)
 
-        # §5 任务类型分布（D5：仅统计本期有 trace 的会话，避免历史空会话虚高）
-        traced_session_ids = {t.get("session_id") for t in traces if t.get("session_id")}
+        # §5 任务类型分布（D5：仅统计「真正产生 token 活动」的会话）
+        # 与 §一「N 个有 token 活动」、§4.2、§六 口径一致：不再把「有 trace 但估算
+        # token 为 0」的会话算进来——否则 §5 计数会与全文打架（千问办公字符估算口径下
+        # 偶发 0-token 会话，会让 §5=8 而 §1/§4.2/§6=7）。
+        token_active_ids = {t.get("session_id") for t in traces
+                            if t.get("session_id") and (t.get("total_tokens") or 0) > 0}
         task_dist = {}
         for s in db_data["sessions"]:
-            if s.get("id") not in traced_session_ids:
+            if s.get("id") not in token_active_ids:
                 continue
             tt = s.get("task_type", "其他")
             task_dist[tt] = task_dist.get(tt, 0) + 1
