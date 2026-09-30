@@ -116,6 +116,7 @@ from ca_core import (
     resolve_date_range,
     resolve_model,
     score_task_types,
+    token_active_session_ids,
     trace_cost,
     ts_to_date,
     ts_to_dt,
@@ -543,8 +544,9 @@ def main():
         "request_estimate_gap_minutes": 15,
     }
 
-    # 任务类型分布（D5：仅统计本期有 trace 的会话，避免历史空会话虚高 §5）
-    _traced_ids = {t.get("session_id") for t in traces if t.get("session_id")}
+    # 任务类型分布（D5：仅统计本期**有 token 活动**的会话，避免历史空会话虚高 §5；
+    # 与 §一 会话总数补充、§4.2 分布同源 → ca_core.token_active_session_ids）
+    _traced_ids = token_active_session_ids(traces)
     for s in db_data["sessions"]:
         if s.get("id") not in _traced_ids:
             continue

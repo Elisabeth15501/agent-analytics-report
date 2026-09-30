@@ -33,7 +33,7 @@ from pathlib import Path
 # 会话标题语义常量与时区统一从 ca_core 导入（单一真相源，避免与 collect_usage_data 漂移）：
 #   UNNAMED_LABEL = 本地库有该会话但无标题（真·无标题）
 #   ORPHAN_LABEL  = trace 的 session_id 在本地库查不到（孤儿 trace）
-from ca_core import TZ, UNNAMED_LABEL, ORPHAN_LABEL, PER_MILLION
+from ca_core import TZ, UNNAMED_LABEL, ORPHAN_LABEL, PER_MILLION, token_active_session_ids
 from report_charts import (
     _esc, _fmt_inline, format_number, _disp_width, _pad_label, _DONUT_PALETTE,
     build_donut_chart, build_session_cost_bar_md, build_task_type_chart_md,
@@ -2904,7 +2904,7 @@ def generate_html_report(data):
     # 请求数：有真实提问轮数就用真值卡片，否则保留聚类反推的估算卡片
     _est_req_h = summary.get("estimated_request_count")
     if _user_turns_h is not None:
-        stat_cards.append((_user_turns_h, "用户提问轮数（真实）"))
+        stat_cards.append((_user_turns_h, "用户提问轮数（真实计数）"))
     elif _est_req_h is not None:
         stat_cards.append((_est_req_h, "估算请求数（反推·估算）"))
     _br = ((data or {}).get("meta", {}) or {}).get("background_runs") or {}
@@ -3405,8 +3405,7 @@ def main():
         # 与 §一「N 个有 token 活动」、§4.2、§六 口径一致：不再把「有 trace 但估算
         # token 为 0」的会话算进来——否则 §5 计数会与全文打架（千问办公字符估算口径下
         # 偶发 0-token 会话，会让 §5=8 而 §1/§4.2/§6=7）。
-        token_active_ids = {t.get("session_id") for t in traces
-                            if t.get("session_id") and (t.get("total_tokens") or 0) > 0}
+        token_active_ids = token_active_session_ids(traces)
         task_dist = {}
         for s in db_data["sessions"]:
             if s.get("id") not in token_active_ids:

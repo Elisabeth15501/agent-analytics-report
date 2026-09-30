@@ -304,6 +304,36 @@ def test_background_runs_summary_separate(env):
 
 @allure.feature("千问办公维度")
 @allure.story("端到端")
+@allure.title("「有 token 活动」单一口径：0-token 会话不进 §五 任务计数")
+def test_token_active_predicate_shared_by_all_sections(env):
+    """回归护栏：§一 会话总数补充 / §4.2 分布 / §五·§十 任务计数必须同源。
+
+    曾经各节自己定义「有活动」（一处看有 trace、一处看有 token），千问办公这种
+    字符估算口径下偶发 0-token 会话，就会出现 §5=8 而 §1/§4.2=7 的全文打架。
+    """
+    from ca_core import token_active_session_ids
+    home = env["home"]
+    cwd = str(env["tmp"] / "ws" / "chat9")
+    # 会话 A：正常有 token；会话 B：只有一条空响应（估算 token = 0）
+    lines_a = [_user("s9a", TS, "有内容的会话", cwd)]
+    lines_a += _assistant("s9a", TS, "99999999-1111-1111-1111-111111111111",
+                          [{"type": "text", "text": "这是一段有长度的回复内容"}], cwd=cwd)
+    _write_session(home, "C--ws-chat9", "s9a", lines_a)
+    # 会话 B：没有用户输入（input_ctx=0）+ 空响应（out=0）→ 该 trace 总 token = 0
+    lines_b = _assistant("s9b", TS, "88888888-2222-2222-2222-222222222222",
+                         [{"type": "text", "text": ""}], cwd=cwd)
+    _write_session(home, "C--ws-chat9", "s9b", lines_b)
+
+    traces, db_data = collect_qwenwork(START, END)
+    active = token_active_session_ids(traces)
+    assert "s9a" in active
+    assert "s9b" not in active, "0-token 会话不该算「有 token 活动」"
+    counted = {s["id"] for s in db_data["sessions"] if s["id"] in active}
+    assert len(counted) == 1
+
+
+@allure.feature("千问办公维度")
+@allure.story("端到端")
 @allure.title("collect_usage_data → summary 与 meta 带上新维度")
 def test_cli_carries_new_dimensions(env):
     home = env["home"]

@@ -828,6 +828,21 @@ def iso_to_date(iso_str, tz=TZ):
     except (ValueError, TypeError):
         return None
 
+def token_active_session_ids(traces):
+    """「有 token 活动」的唯一口径：会话有 trace 且该条 trace 的 total_tokens > 0。
+
+    §一 会话总数补充、§4.2 每会话分布、§五/§十 任务类型计数都由它派生。
+    各节曾经各自定义（一处看「有 trace」、一处看「有 token」），千问办公这种
+    字符估算口径下偶发 0-token 会话，就会让 §5=8 而 §1=7 当场打架。
+    """
+    ids = set()
+    for t in traces or []:
+        sid = t.get("session_id")
+        if sid and (t.get("total_tokens") or 0) > 0:
+            ids.add(sid)
+    return ids
+
+
 def parse_date_range(days):
     """返回 (start_date, end_date) 字符串（滚动 N 天，含今天）"""
     end = datetime.now(TZ)
