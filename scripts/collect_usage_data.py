@@ -294,6 +294,9 @@ def main():
 
     # 该数据源是否在语义上支持计费维度（默认支持；qwenwork 源会置 False）
     cost_supported = True
+    # 数据源自己声明的 meta 补充（single_channel / background_runs / 采集来源标注等），
+    # 由适配器算好、这里整体并入 result["meta"]，避免每加一个源就改一次 meta 字面量
+    source_meta = {}
 
     # 采集各数据源：先取会话（sessions.model 含带通道前缀的原始模型标识符，
     # 是「接口通道」的真相源），据其构建 session_id→raw_model 映射，再采集 trace 并关联通道。
@@ -343,10 +346,13 @@ def main():
         cost_supported = SUPPORTS_COST
         traces, db_data = collect_qwenwork(start_date, end_date)
         sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
-        # skill_usage 留空：千问办公的 skill-usage.json 只有**累计**使用次数、
-        # 没有按日期的窗口信息，塞进「本期次数」会与 WorkBuddy 口径混淆，宁缺毋伪。
-        skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
-        outputs, memory_logs = ([], {})
+        skill_usage = db_data.get("skill_usage") or {
+            "skills": {}, "active_days": sorted({t["date"] for t in traces})}
+        outputs = db_data.get("outputs") or []
+        # memory_logs 保持空：千问办公的记忆写进 awareness/*.md（由 file-history 快照承载），
+        # 没有 WorkBuddy 那种「按日期归集的会话记忆日志目录」可映射，硬凑会造假结构。
+        memory_logs = {}
+        source_meta.update(db_data.get("_meta") or {})
         if task_classifier is not None:
             task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
         else:
@@ -426,6 +432,8 @@ def main():
             # 数据源能力声明（由适配器显式给出）：False 时报告端压制
             # 「缺失单价模型 + pricing.local.json 补价 stub」整块
             "cost_supported": cost_supported,
+            # 适配器自行声明的补充 meta（single_channel / background_runs / 采集来源）
+            **source_meta,
         },
         "traces": traces,
         "sessions": db_data["sessions"],

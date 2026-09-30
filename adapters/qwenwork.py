@@ -112,6 +112,55 @@ _SYNTHETIC_MODELS = {"<synthetic>", "synthetic"}
 _BACKGROUND_TITLE_HINTS = ("Target file this round:",)
 _BACKGROUND_TITLE = "记忆整理后台任务（awareness nudge）"
 
+# ── 技能 / 产出物 / 自动化的本机信号源（WorkBuddy 三者都是独立数据源，千问办公不是）──
+# 技能调用：转录里 tool_use name="Skill" → input.skill。~/.qwenworkcn/skill-usage.json
+# 只有累计 usageCount（本机实测 2 条 vs 转录 17 次调用，低估约 8.5 倍），故只当旁证。
+_SKILL_TOOL_NAME = "Skill"
+# 交付物：present_files 工具（语义=「已作为交付物呈现给用户」），工具名带 MCP 前缀且
+# 版本间可能改名，故用子串匹配而非硬枚举全名。
+_PRESENT_TOOL_HINT = "present_files"
+# 改过的文件（单独计数，不进交付清单：Edit 本机 3305 次会把清单淹掉）
+_WRITE_TOOLS = ("Write", "Edit", "NotebookEdit")
+# 交付物磁盘兜底目录名（千问办公每个 chat 一个 workspace/<chatId>/outputs）
+_OUTPUTS_DIR_NAME = "outputs"
+# 磁盘扫描时跳过的备份/临时产物（present_files 显式交付的文件一律照单收，不筛）：
+# 只扫磁盘会把 `xxx.json.2026....bak`、`~$xxx.docx` 这类当成"交付物"灌进 §九。
+_DISK_SKIP_SUFFIXES = (".bak", ".tmp", ".temp", ".swp", "~")
+_DISK_SKIP_PREFIXES = ("~$", ".")
+# task_run_logs.status 的成功态（不同版本字面量不一，一律小写比对；
+# 未列出的状态一律算失败，宁可少报成功也不把未知态当成功）
+_AUTO_SUCCESS_STATES = {"success", "succeeded", "completed", "complete", "ok", "done"}
+
+
+def _norm_path_key(path):
+    """路径归一化做去重键：统一分隔符 + 小写（Windows 大小写不敏感）。"""
+    return str(path or "").replace("\\", "/").strip().rstrip("./").lower()
+
+
+def _deliverable(path, date=None, source="present_files"):
+    """把一条文件路径摊成 §九 渲染层要的 file_name/extension/size_bytes/date。
+
+    size 走 os.stat（文件已被清理则给 0，不抛异常也不猜）；date 优先用调用时刻，
+    仅磁盘扫描命中（没有调用时间可考）时退到文件 mtime 的北京时间日期。
+    额外带 `path` / `source` / `missing` 三个透明字段，渲染层不读但便于排查与测试。
+    """
+    p = Path(str(path))
+    size = 0
+    try:
+        st = p.stat()
+        size = int(getattr(st, "st_size", 0) or 0)
+        if not date:
+            date = iso_to_date(_ms_to_iso(int(st.st_mtime * 1000))) or ""
+    except (OSError, ValueError):
+        pass
+    return {"file_name": p.name or str(path),
+            "extension": (p.suffix or "").lstrip(".").lower(),
+            "size_bytes": size,
+            "path": str(path),
+            "date": date or "",
+            "source": source,
+            "missing": size == 0}
+
 # ── token 估算系数（保守口径，集中在此便于复核调参）─────────────────────────
 # CJK 字符：Qwen 系 BPE 实测约 0.6~1.0 token/字，取 1.0 偏高估——
 # 宁可高估用量，也不要把成本算少。
@@ -448,13 +497,8 @@ def load_db_index(db_path=None):
     库缺失 / 被锁 / schema 变更时返回 {}，适配器自动降级为纯 JSONL 口径。
     """
     index = {}
-    path = Path(db_path) if db_path else resolve_qwenwork_db()
-    if not path.exists():
-        return index
-    uri = "file:" + str(path).replace("\\", "/") + "?mode=ro"
-    try:
-        con = sqlite3.connect(uri, uri=True, timeout=1.0)
-    except sqlite3.Error:
+    con = _db_connect(db_path)
+    if con is None:
         return index
     try:
         cur = con.cursor()
@@ -600,6 +644,9 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
                 "input_ctx": ctx,
                 "blocks": 0,
                 "texts": [],
+                "skills": [],        # 本次响应里调用了哪些技能（[skill_id]，可重复）
+                "presents": [],      # 本次响应里 present_files 交付的文件路径
+                "writes": [],        # 本次响应里 Write/Edit 改动的文件路径（单独计数）
                 "sidechain": bool(obj.get("isSidechain")),
                 "settled": False,
             }
@@ -619,6 +666,17 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
                 # 只把助手正文喂给任务分类（thinking / 工具噪声会污染分类）
                 if isinstance(blk, dict) and blk.get("type") == "text" and txt:
                     g["texts"].append(txt)
+                elif isinstance(blk, dict) and blk.get("type") == "tool_use":
+                    _tname = blk.get("name") or ""
+                    _tinp = blk.get("input") if isinstance(blk.get("input"), dict) else {}
+                    if _tname == _SKILL_TOOL_NAME and _tinp.get("skill"):
+                        g["skills"].append(str(_tinp["skill"]))
+                    elif _PRESENT_TOOL_HINT in _tname:
+                        for _it in (_tinp.get("files") or []):
+                            if isinstance(_it, dict) and _it.get("file_path"):
+                                g["presents"].append(str(_it["file_path"]))
+                    elif _tname in _WRITE_TOOLS and _tinp.get("file_path"):
+                        g["writes"].append(str(_tinp["file_path"]))
 
     if groups and not groups[-1]["settled"]:
         ctx += groups[-1]["out_tokens"]
@@ -706,6 +764,18 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
     # 后台自动任务（记忆整理 nudge）确实花额度，但不是用户的任务：
     # 打上 is_background_automation 并给一个可读名，报告据此把它从 Top 榜摘出去
     is_bg = any(h in title for h in _BACKGROUND_TITLE_HINTS)
+    # 技能调用与交付物：按窗口日期收敛（调用时刻即日期真值，无需估算）
+    _skill_calls, _presents, _writes = [], [], []
+    for g in groups:
+        _d = iso_to_date(g["ts"])
+        if not _d or _d < start_date or _d > end_date:
+            continue
+        for _s in g["skills"]:
+            _skill_calls.append((_s, _d))
+        for _p in g["presents"]:
+            _presents.append((_p, _d))
+        _writes.extend(g["writes"])
+
     session_meta = {
         "id": session_id,
         "cwd": cwd,
@@ -724,6 +794,10 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
         "_human_turns": len(human_texts),
         "_request_count": len(groups),
         "_synthetic_responses": synthetic_skipped,
+        # 三个新维度的原始素材，聚合在 _assemble 里做（跨会话去重才准确）
+        "_skill_calls": _skill_calls,
+        "_presents": _presents,
+        "_writes": _writes,
     }
     return traces, session_meta
 
@@ -765,13 +839,179 @@ def _iter_session_files(projects_root, start_date, end_date, db_index):
             yield f
 
 
+# ── 技能 / 交付物 / 自动化 / 后台运行 ────────────────────────────────────────
+
+def _db_connect(db_path):
+    """只读打开 agents.db；库缺失 / 被锁 / 非 sqlite 时返回 None（调用方降级）。"""
+    path = Path(db_path) if db_path else resolve_qwenwork_db()
+    if not path.exists():
+        return None
+    uri = "file:" + str(path).replace("\\", "/") + "?mode=ro"
+    try:
+        return sqlite3.connect(uri, uri=True, timeout=1.0)
+    except sqlite3.Error:
+        return None
+
+
+def load_automation_runs(db_path=None, start_date=None, end_date=None):
+    """定时任务运行记录 → 共享层 automation_runs 契约。
+
+    字段必须凑齐五个：`collect_usage_data` 汇总时用 `r["result_success"]` **硬索引**，
+    少一个 key 会把整次采集 KeyError 打崩（不是 .get）。`auto_status` 由
+    `scheduled_tasks.enabled` 映射成 `_auto_is_active()` 认的 ACTIVE / PAUSED。
+    本机没有定时任务时返回 []，此时报告里的「无自动化运行记录」是**真 0**。
+    """
+    con = _db_connect(db_path)
+    if con is None:
+        return []
+    runs = []
+    try:
+        cur = con.cursor()
+        cur.execute(
+            "SELECT r.task_id AS task_id, t.name AS name, t.enabled AS enabled, "
+            "       r.run_at AS run_at, r.created_at AS created_at, "
+            "       r.status AS status, r.duration_ms AS duration_ms "
+            "FROM task_run_logs r LEFT JOIN scheduled_tasks t ON t.id = r.task_id "
+            "ORDER BY r.created_at ASC")
+        for row in cur.fetchall():
+            ts_ms = _to_int(row[3]) * 1000 or _to_int(row[4]) * 1000
+            date = iso_to_date(_ms_to_iso(ts_ms))
+            if not date or (start_date and (date < start_date or date > end_date)):
+                continue
+            status = str(row[5] or "").strip().lower()
+            runs.append({
+                "automation_id": str(row[0] or "unknown"),
+                "automation_name": (row[1] or str(row[0] or "定时任务")).strip(),
+                # enabled 为 NULL（任务已删除、只剩 run 日志）时按 PAUSED 处理，
+                # 不误报成「执行中自动化」
+                "auto_status": "ACTIVE" if _to_int(row[2]) == 1 else "PAUSED",
+                "result_success": status in _AUTO_SUCCESS_STATES,
+                "created_date": date,
+                "duration_ms": _to_int(row[6]),
+                "error": "",
+            })
+    except sqlite3.Error:
+        return []
+    finally:
+        try:
+            con.close()
+        except sqlite3.Error:
+            pass
+    return runs
+
+
+def load_background_runs(db_path=None, start_date=None, end_date=None):
+    """`nudge_logs` → 后台自动运行摘要（记忆整理 / 反思等）。
+
+    **不塞进 automation_runs**：本机 317 条里只有 26 条能 join 到 sub_chats.session_id
+    （会话归因率约 8%），进 §八 分组会造出一堆 unknown 组。这里只出全局计数与失败率，
+    落 `meta.background_runs` 供 §一 那一行使用。
+    """
+    con = _db_connect(db_path)
+    if con is None:
+        return {}
+    summary = {}
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT type, duration_ms, is_error, created_at FROM nudge_logs")
+        count = err = dur = 0
+        types = {}
+        for typ, duration, is_err, created in cur.fetchall():
+            date = iso_to_date(_ms_to_iso(_to_int(created) * 1000))
+            if not date or (start_date and (date < start_date or date > end_date)):
+                continue
+            count += 1
+            dur += _to_int(duration)
+            if _to_int(is_err):
+                err += 1
+            key = str(typ or "unknown")
+            types[key] = types.get(key, 0) + 1
+        if count:
+            summary = {"count": count, "error_count": err, "total_duration_ms": dur,
+                       "types": dict(sorted(types.items(), key=lambda kv: -kv[1]))}
+    except sqlite3.Error:
+        return {}
+    finally:
+        try:
+            con.close()
+        except sqlite3.Error:
+            pass
+    return summary
+
+
+def aggregate_skill_usage(sessions, active_days=None):
+    """会话里的 `_skill_calls` → 共享层 skill_usage 契约（与 collect_skill_usage 同形）。
+
+    `usage_count_in_range` 数的是**调用次数**（不去重），`recent_dates_in_range`
+    是去重且有序的日期列表——§七 两张口径都用得到。
+    """
+    skills = {}
+    for s in sessions:
+        for skill, date in (s.get("_skill_calls") or []):
+            e = skills.setdefault(skill, {"last_used": "", "first_seen": "",
+                                           "recent_dates_in_range": [],
+                                           "usage_count_in_range": 0})
+            e["usage_count_in_range"] += 1
+            if date not in e["recent_dates_in_range"]:
+                e["recent_dates_in_range"].append(date)
+            e["last_used"] = max(e["last_used"], date)
+            e["first_seen"] = min(e["first_seen"], date) if e["first_seen"] else date
+    for e in skills.values():
+        e["recent_dates_in_range"] = sorted(e["recent_dates_in_range"])
+    return {"skills": dict(sorted(skills.items(), key=lambda kv: -kv[1]["usage_count_in_range"])),
+            "active_days": sorted(active_days or set())}
+
+
+def collect_deliverables(sessions, start_date, end_date):
+    """交付物清单：present_files 调用 ∪ 磁盘 <cwd>/outputs 扫描，按归一路径去重。
+
+    两源的分工不是重复计数：present_files 才等于「交付给用户」，磁盘扫描兜住
+    「写了但没走 present_files」的文件；同一文件两源都命中时保留 present_files 的
+    调用日期（比 mtime 更贴近「什么时候产出的」）。
+    """
+    out = {}
+    for s in sessions:
+        for path, date in (s.get("_presents") or []):
+            key = _norm_path_key(path)
+            if key and key not in out:
+                out[key] = _deliverable(path, date, source="present_files")
+    for s in sessions:
+        cwd = s.get("cwd")
+        if not cwd:
+            continue
+        d = Path(cwd) / _OUTPUTS_DIR_NAME
+        if not d.is_dir():
+            continue
+        try:
+            entries = sorted(p for p in d.iterdir() if p.is_file())
+        except OSError:
+            continue
+        for p in entries:
+            name = p.name
+            if name.endswith(_DISK_SKIP_SUFFIXES) or name.startswith(_DISK_SKIP_PREFIXES):
+                continue      # 备份 / 临时 / 隐藏产物不算交付物（present_files 不筛）
+            key = _norm_path_key(p)
+            if key in out:
+                continue      # 同一文件两源都命中时保留 present_files 的调用日期
+            date = iso_to_date(_ms_to_iso(int(p.stat().st_mtime * 1000)))
+            if not date or date < start_date or date > end_date:
+                continue
+            out[key] = _deliverable(p, date, source="disk_scan")
+    return sorted(out.values(), key=lambda x: (x.get("date") or "", x.get("file_name") or ""))
+
+
 # ── 对外入口 ────────────────────────────────────────────────────────────────
 
 def _assemble(start_date, end_date, home=None, projects_root=None, db_path=None,
               use_run_logs=True):
-    """解析候选会话并做 agents.db 增强，返回 (traces, sessions)。"""
+    """解析候选会话并做 agents.db 增强，返回 (traces, sessions, extras)。
+
+    extras 里是三个新维度的成品 + 供 `meta` 落盘的能力声明（渲染层读字段，
+    不靠数据形态隐式猜）。
+    """
     home = Path(home) if home else resolve_qwenwork_home()
     root = Path(projects_root) if projects_root else _projects_root(home)
+    db_path = db_path or resolve_qwenwork_db(home)
     db_index = load_db_index(db_path)
     files = list(_iter_session_files(root, start_date, end_date, db_index))
     run_usage = {}
@@ -800,38 +1040,58 @@ def _assemble(start_date, end_date, home=None, projects_root=None, db_path=None,
         traces.extend(file_traces)
         sessions.append(meta)
     traces.sort(key=lambda x: x.get("ended_at") or "")
-    return traces, sessions
+
+    active_days = {t["date"] for t in traces if t.get("date")}
+    extras = {
+        "skill_usage": aggregate_skill_usage(sessions, active_days),
+        "outputs": collect_deliverables(sessions, start_date, end_date),
+        "automation_runs": load_automation_runs(db_path, start_date, end_date),
+        "meta": {
+            "background_runs": load_background_runs(db_path, start_date, end_date),
+            # 千问办公只有一层通道（档位即入口），§3.2「按入口/通道」必然与 §3.1 同构
+            "single_channel": True,
+            "skill_usage_source": "transcript:tool_use.Skill",
+            "outputs_source": "transcript:present_files ∪ <cwd>/outputs",
+        },
+    }
+    return traces, sessions, extras
 
 
-def _finalize(sessions):
-    """预分类 task_type 并收口 db_data（与 codex / claude_code 适配器同结构）。"""
+def _finalize(sessions, extras=None):
+    """预分类 task_type 并收口 db_data（与 codex / claude_code 适配器同结构 + 新维度）。"""
+    extras = extras or {}
     out = []
     for s in sessions:
         text = s.get("_dialogue_text", "")
         s["task_type"] = classify_task(text)
         s.pop("_dialogue_text", None)
         out.append(s)
-    return {"sessions": out, "automation_runs": [], "session_credits": []}
+    return {"sessions": out,
+            "automation_runs": extras.get("automation_runs") or [],
+            "session_credits": [],
+            "skill_usage": extras.get("skill_usage") or {"skills": {}, "active_days": []},
+            "outputs": extras.get("outputs") or [],
+            "_meta": extras.get("meta") or {}}
 
 
 def collect_qwenwork_traces(start_date, end_date, home=None, projects_root=None,
                             db_path=None):
     """读取千问办公会话历史，返回统一 schema 的 trace 列表（token 为估算口径）。"""
-    traces, _ = _assemble(start_date, end_date, home=home,
-                          projects_root=projects_root, db_path=db_path)
+    traces, _, _ = _assemble(start_date, end_date, home=home,
+                             projects_root=projects_root, db_path=db_path)
     return traces
 
 
 def collect_qwenwork_sessions(start_date, end_date, home=None, projects_root=None,
                               db_path=None):
     """读取千问办公会话历史，返回合成 db_data（sessions 已预分类 task_type）。"""
-    _, sessions = _assemble(start_date, end_date, home=home,
-                            projects_root=projects_root, db_path=db_path)
-    return _finalize(sessions)
+    _, sessions, extras = _assemble(start_date, end_date, home=home,
+                                    projects_root=projects_root, db_path=db_path)
+    return _finalize(sessions, extras)
 
 
 def collect_qwenwork(start_date, end_date, home=None, projects_root=None, db_path=None):
     """一次性返回 (traces, db_data)，供 collect_usage_data.py --source qwenwork 使用。"""
-    traces, sessions = _assemble(start_date, end_date, home=home,
-                                 projects_root=projects_root, db_path=db_path)
-    return traces, _finalize(sessions)
+    traces, sessions, extras = _assemble(start_date, end_date, home=home,
+                                         projects_root=projects_root, db_path=db_path)
+    return traces, _finalize(sessions, extras)
