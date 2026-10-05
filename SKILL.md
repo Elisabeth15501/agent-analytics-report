@@ -221,7 +221,7 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 
 - **原始总 Token（含缓存命中）** = `totalTokens` = 输入 + 输出。其中 **`cached_tokens`（缓存命中）是输入 token 的子集**：它被模型读取并处理过（所以"算消耗了"），但命中了**提示词前缀缓存**，按行业惯例约 **1/10 的低价**计费，而非全新输入的全价。
 - **实际消耗 Token（计费等效）** = `原始总量 − 缓存命中 ×(1−折扣)`，折扣 `CACHE_DISCOUNT=0.1`（见 `collect_usage_data.py`）。即缓存命中只按 10% 计入实际消耗。这是报告所有排名（任务类型、Top 任务、每日趋势、成本）的**主口径**。
-- **缓存占比** = `cached_tokens / input_tokens`，越高说明该任务/会话大量复用同一段上下文（例如连续多轮生成、长 system prompt 反复重发），数字看起来大但实际成本很低——这正是"Agent 吃 token 的原因"的最佳解释。
+- **缓存占比** = `cached_tokens / input_tokens`，越高说明该任务/会话大量复用同一段上下文（例如连续多轮生成、长 system prompt 反复重发），数字看起来大但实际成本很低——这正是"Agent 吃 token 的原因"的主要解释。
 
 > 数据校验：`totalTokens ≈ input + output`（cached 是 input 子集）在 150+ 条 trace 中稳定成立（仅个别四舍五入误差），故上述折算可靠。
 
@@ -278,7 +278,7 @@ python scripts/generate_report.py data.json --output report.html --format html
      - `type=reasoning`：助手思考文本在 **`rawContent`** 字段（其 `content` 通常为空列表），需优先取 `rawContent`。
    - **生成物指纹（含已删除）**：见 `get_session_artifact_fingerprint`——即便产物文件已物理删除，以下记录在 transcript 里仍保留：
      - `function_call` 记录里的 **`ImageGen` / `VideoGen`** 工具调用（确定性内容生成证据）；
-     - `file-history-snapshot.trackedFileBackups` 的**键名**（编辑器曾跟踪的文件名，删除后键名仍保留，是"已删除生成物"的最佳来源，含 `.png/.mp4/.html` 等）。
+     - `file-history-snapshot.trackedFileBackups` 的**键名**（编辑器曾跟踪的文件名，删除后键名仍保留，是"已删除生成物"的主要来源，含 `.png/.mp4/.html` 等）。
      指纹以 `[artifacts] imagegen/videogen 媒体文件名...` 形式注入候选文本，供「内容生成」类型强判定（媒体文件名规则必须紧跟 `[artifacts]` 标记，避免"领券截图/二维码"等非创作媒体误判）。
    - 对话内容与生成物指纹均缺失时，回退到会话标题。
 
