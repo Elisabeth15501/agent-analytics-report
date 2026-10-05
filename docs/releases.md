@@ -6,7 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
-| **v1.8.0** | 2026-09-30 | 千问办公（QwenWork）数据源 + tokens_only 计价模式 + 定价刷新（V4.1-Flash 0.11x / 限免延至 10-31）+ 阶段2 代码质量收口（R4/R5） | [tag/v1.8.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.8.0) |
+| **v1.9.0** | 2026-10-03 | 百度搭子（DuMate）数据源 + 任务类型分类修复 + 归属标注与文档降级（归因红线）+ 隐私护栏（只读 SQLite / 时间窗过滤）+ 合规文案收敛 | [tag/v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0) |
 
 | **v1.7.2** | 2026-09-22 | Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）；L1 不再渲染低置信度噪音 | [tag/v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2) |
 | **v1.7.1** | 2026-09-16 | Phase B 按调用时刻应用时段定价：B4 夜间免费 / B5 峰谷双档 / B6 促销跨期 | [tag/v1.7.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.1) |
@@ -27,6 +27,20 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.0 — 2026-10-03
+
+**百度搭子（DuMate）数据源（归属未证实） · 任务类型分类修复 · 文档降级 · 合规文案收敛**
+
+- 🆕 百度搭子（DuMate）数据源：新增 `adapters/dumate.py` 与 `--source dumate`，按 WorkBuddy 布局读取数据目录，支持 `DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` 路径隔离。⚠️ **归属未证实** —— 实测 `workbuddy.db` 217 会话中百度搭子相关 0 行、1165 个 trace 无归属字段，报告内容可能完全是 WorkBuddy 的，不可当作「百度搭子用量」引用。
+- 🧭 修复任务类型分类塌进「其他」：dumate 分支改为与 workbuddy 分支同一条路径直采 `collect_task_types`（旧代码误以为适配层已预分类，实际没有，会话 dict 里也没有 `task_type` 键）。
+- 🔖 归因红线：删除「数据落点与 WorkBuddy 完全一致（实测，2026-10-02）」的过度断言；`docs/ADAPTERS.md` §6.1 / §6.4 与 `README.md` 同步降级为「按 WorkBuddy 布局读取，归属未证实」。
+- 🔒 隔离修复：`DUMATE_HOME` 此前不约束产出 / 记忆目录（`WORKBUDDY_SESSIONS` 写死 `Path.home()/"WorkBuddy"`），现由 home 的 parent 派生，并可用 `DUMATE_OUTPUTS_DIR` 单独覆盖。
+- 📝 合规文案收敛：四处绝对化「不联网」表述统一为「默认全离线；仅显式指定自有端点时才访问对应端点」，仅改文案，`--pricing-api` / `--task-llm-endpoint` 能力保留。
+- 🧪 `test_version_parity` 门禁通过。
+
+🔗 [GitHub Release v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0)
+
 
 ## v1.8.0 — 2026-09-30
 
@@ -242,7 +256,7 @@ v1.5.2 只解决了「告诉用户这是估算」；v1.6.0 解决「怎么拿到
 
 - 🔧 **SkillHub 重新发布修正**：平台禁止打包无扩展名文件（`.gitignore`、`LICENSE`），将 `LICENSE` 更名为 `LICENSE.md`（GitHub 仍识别为许可证，`license: MIT` 声明不变）；`.gitignore` 仅用于 Git，不进发布包。
 - **版本号升为 1.1.2**：覆盖平台上残留的 1.1.1 记录（首次发布因文件数超限被拒，平台仍写入了版本记录），以新版本号干净发布。
-- 发布包已剔除 `pricing.local.json` / `allure-results` / `allure-report*` / `_meta.json` / `.pytest_cache` 等隐私与测试占位文件。
+- 发布包已剔除 `pricing.local.json` / `allure-results` / `allure-report*` / `.pytest_cache` 等隐私与测试占位文件（`_meta.json` 为 metadata.json 副本，随发布包发布）。
 - 🔗 [GitHub Release v1.1.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.1.2)
 
 ## v1.1.1 — 2026-08-11

@@ -1,12 +1,12 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.8.0
+version: 1.9.0
 metadata: metadata.json
 displayName: Agent 用量分析报告
-summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 四种数据源（--source 切换）。
+summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 / 百度搭子 五种数据源（--source 切换）。
 description: |
-  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。数据源用 --source 切换：workbuddy（默认，读 ~/.workbuddy/）/ claude-code（读 ~/.claude/projects/ 的 JSONL 会话日志）/ codex（读 ~/.codex/sessions/ 的 rollout JSONL）/ qwenwork（读千问办公 ~/.qwenworkcn/ 的转录 + 调用日志 + agents.db，**在千问办公里跑就用它**）；更多 Agent 可扩展（详见 docs/ADAPTERS.md）。
+  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。数据源用 --source 切换：workbuddy（默认，读 ~/.workbuddy/）/ claude-code（读 ~/.claude/projects/ 的 JSONL 会话日志）/ codex（读 ~/.codex/sessions/ 的 rollout JSONL）/ qwenwork（读千问办公 ~/.qwenworkcn/ 的转录 + 调用日志 + agents.db，**在千问办公里跑就用它**）/ dumate（读百度搭子 ~/.workbuddy/，与 WorkBuddy 共用布局，**在百度搭子里跑就用它**）；更多 Agent 可扩展（详见 docs/ADAPTERS.md）。
 
   触发方式：当用户说「生成周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等时触发，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
@@ -18,7 +18,7 @@ description: |
 
   输出格式：Markdown（默认）/ HTML（可交互图表，浅色/深色自适应）/ JSON。
 
-  隐私与权限：只读本机 Agent 数据，不联网、不上传任何内容。
+  隐私与权限：只做本机只读采集，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。
 
   限制说明：数据来自本机，需启用 trace 记录；成本按模型公开单价估算，以实际账单为准；免费/限免期内成本口径参考意义有限，报告会自动标注并引导查看 Token 口径。
 tags:
@@ -74,10 +74,13 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 | `claude-code` | `~/.claude/projects/**/*.jsonl` | 解析 Claude Code 会话日志，产出 token / 成本 / 任务类型 / 每日趋势；无技能与自动化维度。可用 `CLAUDE_PROJECTS_DIR` 环境变量指向自定义目录 |
 | `codex` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | 解析 Codex CLI 逐轮 `turn.completed` 的 usage；可用 `CODEX_HOME` 覆盖主目录 |
 | `qwenwork` | `~/.qwenworkcn/projects/**/*.jsonl` + `~/.qwenworkcn/logs/runs/` + `agents.db` + `<cwd>/outputs/` | **千问办公专用**。调用次数 / 请求耗时 / 模型档位 / 会话真名 / **技能调用** / **交付物** / **定时任务**均为真实值；⚠️ 服务端不回传 token，token 为**字符估算**，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（金额全撤）。可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖路径 |
+| `dumate` | `~/.workbuddy/`（与 WorkBuddy 共用同一数据布局） | **百度搭子专用**。桌面客户端（qianfan-desktop-app / DuMate）数据落点与 WorkBuddy 完全一致，因此**不带适配器、默认源即可采集全部数据**；`--source dumate` 用于显式声明数据源（报告标题显示「百度搭子」）并支持 `DUMATE_HOME` 覆盖数据目录。能力维度同 WorkBuddy（token / 成本 / 技能 / 自动化 / 会话 / 产出 / 记忆） |
 
-> 各源的限制与扩展方式见 `docs/ADAPTERS.md`（千问办公见 §四）。
+> 各源的限制与扩展方式见 `docs/ADAPTERS.md`（千问办公见 §四、百度搭子见 §六）。
 > **在千问办公里替用户生成报告时，务必带 `--source qwenwork`**——默认源是 WorkBuddy，
 > 本机没有 `~/.workbuddy/` 时会采到 0 条数据，报告全是空表。
+> **在百度搭子里替用户生成报告时**：默认源（workbuddy）即可采到数据；想显示
+> 「百度搭子使用情况报告」标题则带 `--source dumate`。
 
 ### 计价模式（--cost-mode）
 
@@ -491,9 +494,9 @@ A：早期 WorkBuddy trace 可能同时缺 sessionId 与 modelInfo（被兜底�
 A：已删除对话消耗的 token/成本仍会计入总量（避免低估真实开销），但归属到「其他/未关联」，不会按会话明细展示。
 
 **Q：数据会被上传或联网吗？**
-A：不会。全部从本机 WorkBuddy 数据源读取并本地渲染，不调用任何外部 API。
+A：只做本机只读采集，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。
 
 **Q：支持其他 Agent 吗？**
-A：已支持四个数据源：WorkBuddy（默认，能力最全）、Claude Code、Codex CLI、千问办公（`--source qwenwork`）。
+A：已支持五个数据源：WorkBuddy（默认，能力最全）、Claude Code、Codex CLI、千问办公（`--source qwenwork`）、百度搭子（`--source dumate`，复用 `~/.workbuddy` 布局）。
 其中千问办公因服务端不回传 token，token 为本地估算、金额不计价（其余维度是真实值）；
 Trae 等仍在扩展清单里，接缝与验收清单见 `docs/ADAPTERS.md`。

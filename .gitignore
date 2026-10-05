@@ -13,9 +13,11 @@
 # 否则会把你的自定义模型（或测试占位）一并发布出去。
 pricing.local.json
 
-# ---- 本地评测占位（goodskills / TRACE 评测器读取，非发布物）----
-# 内容为 metadata.json 的副本，仅本地评测用，平台打包时会排除，勿提交。
+# ---- 本地评测占位（goodskills / TRACE 评测器读取，随发布包发布）----
+# 内容为 metadata.json 的副本，供本地评测 / 发版守卫使用；v1.9.0 起随发布包发布。
+# 注意：含自定义模型单价的 pricing.local.json 仍然严格忽略，严禁发布。
 _meta.json
+!_meta.json
 
 # ---- 私人 / 采集输出数据（含用量与成本，严禁上传）----
 data.json

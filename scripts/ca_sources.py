@@ -207,6 +207,21 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
                             "callCount": _recovered["calls"],
                         }
                 bare_model = models[0] if models else "default"
+                # token 三级回退：顶层 totalTokens → span 内 generation 还原 → modelInfo.totalTokens。
+                # 顶层缺失但 modelInfo 有值时旧代码会落 0，连带把该 trace 的成本也算成 0。
+                _top_tokens = _to_num(trace.get("totalTokens", 0))
+                _mi_tokens = _to_num(model_info.get("totalTokens", 0)) or (
+                    _to_num(model_info.get("totalInputTokens", 0))
+                    + _to_num(model_info.get("totalOutputTokens", 0))
+                )
+                if _top_tokens:
+                    _total_tokens, _token_source = _top_tokens, "trace"
+                elif _recovered:
+                    _total_tokens, _token_source = _recovered["total"], "span"
+                elif _mi_tokens:
+                    _total_tokens, _token_source = _mi_tokens, "fallback"
+                else:
+                    _total_tokens, _token_source = 0, "missing"
                 # 通道感知：优先用 sessions.model 的原始（带前缀）标识符，否则退回 trace 裸名。
                 # 但若 trace 实际执行模型带 SiliconFlow 等第三方 vendor 前缀（如 zai-org/GLM-5.2），
                 # 说明 sessions.model 只是选了同名官方模型做入口，真实调用走的是外部 API；
@@ -231,7 +246,8 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
                     "duration_ms": _to_num(trace.get("duration", 0)),
                     "status": trace.get("status", "unknown"),
                     "session_id": sid,
-                    "total_tokens": _to_num(trace.get("totalTokens", 0)) or (_recovered["total"] if _recovered else 0),
+                    "total_tokens": _total_tokens,
+                    "token_source": _token_source,
                     "input_tokens": _to_num(model_info.get("totalInputTokens", 0)),
                     "output_tokens": _to_num(model_info.get("totalOutputTokens", 0)),
                     "cached_tokens": _to_num(model_info.get("totalCachedTokens", 0)),
@@ -271,10 +287,25 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
         # 把调用【时刻】（日期 + 小时 + 星期）一并传进 price_of，让「夜间免费 /
         # 峰谷双档 / 限期促销」这类按时段生效的服务端规则真正生效 —— 此前只传日期，
         # 夜间调用被当成白天计费，是低置信度模型被高估的根因。
+        #
+        # ⚠️ 未知模型必须记 0，不能落到 price_of 里：raw_model / exec_model 都是字面量
+        # "default" 时，我们并不知道实际调了哪个模型，resolve_model 会把它映射成
+        # DEFAULT_MODEL(glm-5.2) 并按其真实单价计价 —— 那是凭空编造出来的费用。
+        # 判据取「两个来源都没有真名」：只要 trace.modelInfo 或 sessions.model 任一
+        # 给出了真实模型名，就不算未知（此时按真实模型计价是对的）。
+        _exec_nm = normalize_model(p.get("exec_model") or "")
+        _raw_nm = normalize_model(p.get("raw_model") or "")
+        is_unknown_model = (_exec_nm == "default" and _raw_nm == "default")
+        # 档位名（fast-model / balanced-model / deep-model）是「路由档位」不是真模型名，
+        # 单价来自倍率锚定估算，本身就该被标注口径；同时给出「按 hy3 刊例价」的对照金额，
+        # 供报告显式呈现两种口径的差额，而不是让人以为档位单价是真实账单价。
+        is_tier_name = (channel == "tier")
         pricing_model = resolve_model(p.get("exec_model") or p.get("raw_model"))
         _when = call_time_of(p.get("started_at"), p.get("date"))
         use_router_avg = (channel == "router" and router_avg_ip is not None)
-        if use_router_avg:
+        if is_unknown_model:
+            ip, op = 0.0, 0.0
+        elif use_router_avg:
             ip, op = router_avg_ip, router_avg_op
         elif is_timed_free(pricing_model, p.get("date")):
             ip, op = 0.0, 0.0
@@ -294,6 +325,16 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
         else:
             input_cost = output_cost = cost = eff_cost = 0.0
 
+        # 档位名的对照口径：同一批 token 若按 hy3 官方刊例价计，是多少。
+        # 不改 total_cost（档位价仍是本采集器的口径），只把对照金额带出去给报告标注。
+        alt_hy3_cost = None
+        if is_tier_name and not is_unknown_model:
+            _hip, _hop = price_of("hy3")
+            if _hip is not None and _hop is not None:
+                alt_hy3_cost = round(
+                    (input_tokens / PER_MILLION) * _hip
+                    + (output_tokens / PER_MILLION) * _hop, 4)
+
         # 计费等效 token：原始 token 减去缓存命中享受的折扣量（与 aggregate 口径一致）
         eff_tokens = effective_tokens_of(p["total_tokens"], cached_tokens)
         p.update({
@@ -305,6 +346,12 @@ def collect_traces(start_date, end_date, sid_to_rawmodel=None):
             # 时段规则（夜间免费等）同样算「本次调用免费」
             "is_free": is_timed_free(pricing_model, p.get("date"))
                        or is_scheduled_free(pricing_model, **_when),
+            # 未知模型 / 档位名标记：报告据此调整文案与计价口径说明
+            "is_unknown_model": is_unknown_model,
+            "is_tier_name": is_tier_name,
+            "alt_hy3_cost": alt_hy3_cost,
+            # 失败调用单独标记：报告不把它算进「有效调用」，但成本/token 如实计入
+            "is_error": p.get("status") == "error",
         })
         traces.append(p)
 
@@ -317,7 +364,26 @@ def collect_db_data(start_date, end_date):
     if not DB_PATH.exists():
         return result
 
-    db = sqlite3.connect(str(DB_PATH))
+    # 只读打开：采集器对 workbuddy.db 只读。可写连接在 WAL 模式下会创建 / 持有
+    # -wal / -shm 文件，客户端持锁时读数抛 SQLITE_BUSY。参照 adapters/qwenwork.py。
+    uri = "file:" + str(DB_PATH).replace("\\", "/") + "?mode=ro"
+    try:
+        db = sqlite3.connect(uri, uri=True, timeout=1.0)
+    except sqlite3.Error as e:
+        print(f"[WARN] workbuddy.db open(read-only): {e}", file=sys.stderr)
+        return result
+    try:
+        return _collect_db_queries(db, start_date, end_date, result)
+    finally:
+        db.close()
+
+
+def _collect_db_queries(db, start_date, end_date, result):
+    """在已打开的只读连接上跑全部查询，结果就地写入 result 后返回。
+
+    独立成函数是为了让 collect_db_data 能用 try/finally 兜住 close()——
+    否则中途异常时连接要等 GC 才释放。
+    """
     db.row_factory = sqlite3.Row
 
     start_ts = int(datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=TZ).timestamp() * 1000)
@@ -413,7 +479,6 @@ def collect_db_data(start_date, end_date):
     except (sqlite3.Error, OSError) as e:
         print(f"[WARN] session_usage query: {e}", file=sys.stderr)
 
-    db.close()
     return result
 
 def collect_skill_usage(start_date, end_date):
@@ -475,13 +540,19 @@ def collect_session_outputs(start_date, end_date):
         if mem_dir.exists():
             for mem_file in mem_dir.glob("*.md"):
                 try:
-                    content = mem_file.read_text(encoding="utf-8")
                     log_date = mem_file.stem  # YYYY-MM-DD
-                    if log_date not in memory_logs:
-                        memory_logs[log_date] = []
-                    memory_logs[log_date].append({
+                    # ⚠️ 必须按记忆文件自身日期过滤：会话目录名日期 ≠ 记忆文件日期，
+                    # 一个会话目录里可能躺着跨月的记忆。不加此过滤会把时间窗外的
+                    # 个人记忆明文读进本次采集（越权），口径与上方 dir_date 一致。
+                    if log_date < start_date or log_date > end_date:
+                        continue
+                    # 只落元信息，不读正文：下游（collect_usage_data / 报告渲染）
+                    # 只需要 file + session_dir，content 在结果组装时就被剥掉了。
+                    # 读正文等于把窗口内的个人记忆明文无谓地搬进内存。
+                    memory_logs.setdefault(log_date, []).append({
                         "file": str(mem_file),
-                        "content": content,
+                        "has_content": True,
+                        "content_chars": mem_file.stat().st_size,
                         "session_dir": session_dir.name,
                     })
                 except (OSError, IOError):

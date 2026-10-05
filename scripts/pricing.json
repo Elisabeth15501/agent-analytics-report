@@ -11,7 +11,7 @@
     "unit": "元 / 百万 tokens(CNY per 1M tokens),输入按「缓存未命中」价,不计缓存命中折扣",
     "tier_rule": "厂商按输入长度分档计价的官方内置模型(如 glm-5.1),一律取「长上下文档」(输入 > 32k)单价 —— Agent 会话上下文普遍超过 32k,取长档更贴近真实账单。",
     "auto_is_null": "auto 为 WorkBuddy 智能路由入口,无单一单价,故恒为 null;采集器对其走 router_avg(本期付费模型均价)计价,不会被判为「未配置」。",
-    "updated": "2026-09-16",
+    "updated": "2026-10-05",
     "peak_valley": "峰谷计费（如 DeepSeek-V4.1-Flash）：models 段的 input/output 统一取【空闲时段】价，高峰时段价另以 peak_input/peak_output 记录。v1.7.1 起不再需要手工覆盖 —— scheduled_pricing 段已内置「工作日 09:00-12:00 / 14:00-18:00 走 peak_*」规则，采集器按每次调用的时间戳自动选档；如需改成别的时段，在 pricing.local.json 覆盖该模型规则即可。",
     "scheduled_pricing": "v1.7.1 新增：按调用时刻（日期区间 + 星期 + 小时）改写单价，覆盖夜间免费 / 峰谷双档 / 限期促销三类规则。未命中任何规则时完全不影响既有行为（零回归）。详见同文件 scheduled_pricing 段的 _comment。"
   },
@@ -188,6 +188,11 @@
       "input": 14.4,
       "output": 57.6,
       "note": "OpenAI GPT-4.1（美元 $2.00/$8 per MTok ×7.2 估算；源 _sources.openai_cny）"
+    },
+    "space-bunny": {
+      "input": 0.27,
+      "output": 1.09,
+      "note": "WorkBuddy 官方内置匿名模型（vendor=f，1M 上下文 / 输出上限 128K / 原生多模态输入 / 仅推理模式）。官方**未公布 ¥ 刊例价**，此处为倍率锚定法推算值：官方折扣期积分倍率 x0.03（见 acc-product-config-v3.json 的 promotions[space-bunny-discount-202610]），以 deepseek-v4.1-flash 空闲档 ¥1/¥4 = 0.11x 为锚点反推 0.03/0.11 = 0.2727，得 ¥0.27/¥1.09。⚠️ 推算值，非官方报价；如需精确请用 pricing.local.json 覆盖，或按你实际积分消耗反推后改本段 input/output。"
     }
   },
   "delisted": {
@@ -345,6 +350,15 @@
         "effect": "discount",
         "factor": 0.5,
         "note": "上线前两周限时半价（实际单价 0.4/1.4），2026-09-09 到期，与 glm-5.3 同期结束。"
+      }
+    ],
+    "space-bunny": [
+      {
+        "from": "2026-10-02",
+        "until": "2026-10-07",
+        "effect": "discount",
+        "factor": 0.2727,
+        "note": "官方限时折扣（promotions[space-bunny-discount-202610]，kind=discount / badge=限时折扣 / hover 文案「10月2日-10月7日，享限时折扣。」）：2026-10-02 ~ 10-07（含）按官方积分倍率 x0.03 计费，10-08 起恢复常规倍率。本规则把 x0.03 折算为对【基础刊例价】的乘数 0.2727 —— 锚点 deepseek-v4.1-flash 空闲档 ¥1/¥4 = 0.11x（见 mode_rates.fast.anchor），0.03/0.11 = 0.2727。⚠️ 官方只公布积分倍率、不公布 ¥ 刊例价，factor 0.2727 与 models 段的 ¥ 单价同为推算值；锚点一变两个数都要跟着改。10-08 之后本规则自动失效（until 为闭区间上界，_rule_matches 用的是 as_of_date > until 才排除），届时应回填恢复后的真实倍率。"
       }
     ]
   },

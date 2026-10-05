@@ -3,6 +3,31 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.0] — 2026-10-03
+
+### 🆕 百度搭子（DuMate）数据源（⚠️ 归属未证实）
+
+新增 `adapters/dumate.py` 与 `--source dumate`，按 WorkBuddy 的布局读取数据目录，支持 `DUMATE_HOME` 覆盖数据目录、`DUMATE_OUTPUTS_DIR` 单独覆盖产出 / 记忆目录。
+
+⚠️ **数据归属未证实**：本机 `workbuddy.db` 的 217 个会话中 `cwd` / `title` 匹配 `qianfan` / `dumate` 命中 0 行、`id LIKE 'ses_%'` 命中 0 行；`traces` 下 1165 个 trace 既无 `ses_` 形态的 sessionId，也没有任何可区分来源的归属字段。`--source dumate` 产出的报告内容**可能完全是 WorkBuddy 的**，请勿当作「百度搭子用量」对外引用。本适配器定位为「读取 WorkBuddy 布局目录的通用入口」，归属由使用者自行确认，不作为「已验证支持百度搭子」的能力对外承诺。百度搭子自身数据位于 `~/.qianfan/workspace/.../.dumate/ses_*/flows/*.yml`，是 yml 流转格式，不属本技能 trace schema。
+
+### 🧭 任务类型分类修复（不再整片塌进「其他」）
+
+修复 dumate 分支漏调 `collect_task_types()` 导致全部会话落入「其他」的问题（实测 `task_type_distribution={'其他':13}`）：改为与 workbuddy 分支同一条路径直采。同时删除「适配层已基于对话文本预分类 task_type」的失效注释 —— dumate 适配器从不做预分类，会话 dict 里也没有 `task_type` 键，旧代码的 `s.get("task_type", "其他")` 恒等于「其他」。
+
+### 🔐 合规文案收敛
+
+`SKILL.md`（frontmatter 隐私说明 + FAQ）与 `metadata.json`（`core_capabilities` / `privacy`）四处绝对化「不联网」表述，统一收敛为「只做本机只读采集，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传」。仅改文案 —— `--pricing-api` / `--task-llm-endpoint` 两个联网入口的能力保留，它们只在命令行显式传参时才发起请求。
+
+### 📎 文档降级（归因红线）
+
+`docs/ADAPTERS.md` §6.1 / §6.4 与 `README.md` 数据源表同步降级：删除「数据落点与 WorkBuddy 完全一致（实测，2026-10-02）」这类过度断言 —— 当时只做过路径观察，未验证归属，改写为「当前按 WorkBuddy 布局读取该目录（数据归属未证实）」。
+
+### 🧪 验证
+
+`tests/test_publish_parity.py` 版本门禁通过（5 处版本号一致）。
+
+
 ## [1.8.0] — 2026-09-30
 
 ### 🆕 千问办公（QwenWork）数据源适配器
@@ -435,7 +460,7 @@
 ### 🔧 发布 / 工程化
 - **SkillHub 重新发布修正**：平台禁止打包无扩展名文件（`.gitignore`、`LICENSE`），将 `LICENSE` 更名为 `LICENSE.md`（GitHub 仍识别为许可证，`license: MIT` 声明不变）；`.gitignore` 仅用于 Git，不进发布包。
 - **版本号升为 1.1.2**：覆盖平台上残留的 1.1.1 记录（首次发布因文件数超限被拒，平台仍写入了版本记录），以新版本号干净发布。
-- 发布包已剔除 `pricing.local.json` / `allure-results` / `allure-report*` / `_meta.json` / `.pytest_cache` 等隐私与测试占位文件。
+- 发布包已剔除 `pricing.local.json` / `allure-results` / `allure-report*` / `.pytest_cache` 等隐私与测试占位文件（`_meta.json` 为 metadata.json 副本，随发布包发布）。
 
 ---
 

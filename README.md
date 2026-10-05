@@ -13,6 +13,7 @@
 | Claude Code | `claude-code` | ✅ | `~/.claude/projects/**/*.jsonl` |
 | OpenAI Codex CLI | `codex` | ✅ | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 | 千问办公 QwenWork | `qwenwork` | ✅（⚠️ token 为本地估算） | `~/.qwenworkcn/projects/**/*.jsonl` + `logs/runs/` + `agents.db` |
+| 百度搭子 DuMate | `dumate` | ⚠️ 通用入口（数据归属未证实） | `~/.workbuddy/`（按 WorkBuddy 布局读取），支持 `DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` 覆盖 |
 | Trae 等 | — | ⬜ 未实现 | — |
 
 **对账源**（叠加在 WorkBuddy 之上，把成本从估算升级为真值）：
@@ -29,6 +30,17 @@
   且积分订阅无公开单 token 价 → 报告自动进入 **`tokens_only` 计价模式**（金额、花费速览、
   省钱杠杆等章节整章缺席，补价后自动恢复）。详见
   [ADAPTERS.md](docs/ADAPTERS.md) §四、§4.6。
+- **百度搭子 DuMate**：`--source dumate` 是**读取 WorkBuddy 布局目录的通用
+  入口**——任何把数据写进 `~/.workbuddy/` 布局的第三方客户端都能用它采集
+  （token、成本、技能调用、自动化运行、会话、产出文件、记忆日志，维度同
+  WorkBuddy）；报告标题显示「百度搭子使用情况报告」，并支持 `DUMATE_HOME`
+  （覆盖数据目录）、`DUMATE_OUTPUTS_DIR`（单独覆盖产出 / 记忆目录）两个环境变量
+  （多账号 / 未来布局变更的隔离点）。
+  ⚠️**数据归属未证实，请勿当作「百度搭子用量」引用**：实测
+  `workbuddy.db` 217 个会话里百度搭子相关命中 0 行、1165 个 trace 无任何归属
+  字段（跑出的 16 会话 / 161 trace 100% 是 WorkBuddy 的），该客户端自有数据在
+  `~/.qianfan/` 下且为 yml 流转格式、不在本技能 trace schema 内。
+  详见 [ADAPTERS.md](docs/ADAPTERS.md) §6.1 / **§6.4（归因红线）**。
 - **官方用量导出**：本地 trace 的成本是**估算**（静态价表无法表达服务端时段减免，且漏记图像模型 / minimax-m3 约 8.7%）。
   导入官方导出后成本取「积分」字段，升为 **L1 真值**，报告新增 §3.5 双源对账。详见
   [ADAPTERS.md](docs/ADAPTERS.md) §二 / §五。

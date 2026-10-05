@@ -15,6 +15,7 @@
 注意：本文件是 CLI 编排入口 + facade，实际实现分布在
 ca_core.py / ca_sources.py / ca_sessions.py / ca_aggregate.py，由本文件统一编排并 re-export。
 """
+
 import argparse
 import calendar
 import json
@@ -162,8 +163,15 @@ import ca_sources
 import ca_sessions
 import ca_aggregate
 
-def _decide_cost_mode(requested, unconfigured, configured_rows, total_cost,
-                      total_effective_cost, has_official):
+
+def _decide_cost_mode(
+    requested,
+    unconfigured,
+    configured_rows,
+    total_cost,
+    total_effective_cost,
+    has_official,
+):
     """判定本次报告的计价模式，返回 "priced" 或 "tokens_only"。
 
     priced      ：照常输出金额（默认，历史行为）
@@ -199,63 +207,127 @@ def _decide_cost_mode(requested, unconfigured, configured_rows, total_cost,
 
 def main():
     parser = argparse.ArgumentParser(description="WorkBuddy Agent 使用数据采集器")
-    parser.add_argument("--period", choices=["day", "week", "month", "year"], default="week",
-                        help="时间窗口预设：day=今天 / week=最近7天 / month=最近30天 / year=最近365天（默认 week）")
-    parser.add_argument("--days", type=int, help="自定义滚动天数，覆盖 --period（如 --days 14）")
-    parser.add_argument("--start", type=str, help="绝对起始日期 YYYY-MM-DD（与 --end 搭配）")
-    parser.add_argument("--end", type=str, help="绝对结束日期 YYYY-MM-DD（与 --start 搭配）")
-    parser.add_argument("--output", "-o", type=str, help="输出 JSON 文件路径（默认 stdout）")
-    parser.add_argument("--realtime", action="store_true", help="实时采集模式（立即采集最新数据）")
-    parser.add_argument("--lookup-pricing", choices=["offline", "online"], default="offline",
-                        help="缺失单价模型的处理：offline=仅提示如何补写（默认，纯本地）；"
-                             "online=尝试联网检索（需 --pricing-api 指向你自己的定价镜像，"
-                             "否则仅生成可点击的搜索链接）。联网结果一律标注「网络估算价，仅供参考」")
-    parser.add_argument("--pricing-api", type=str, default=None,
-                        help="online 模式可选：指向一个返回 {\"models\": {模型名: {input,output}}} 的 JSON 端点，"
-                             "用于补全缺失模型单价（取自你自己的定价镜像，避免抓第三方页面）")
-    parser.add_argument("--source", choices=["workbuddy", "claude-code", "codex", "qwenwork"], default="workbuddy",
-                        help="数据源：workbuddy=默认（WorkBuddy traces/workbuddy.db/usage-log），"
-                             "claude-code=读取 ~/.claude/projects/ 下的 Claude Code 会话 JSONL（P2-1 适配器 MVP）。"
-                             "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算。"
-                             "codex=读取 ~/.codex/sessions/ 下的 OpenAI Codex CLI rollout JSONL，"
-                             "无需 WorkBuddy 环境，成本按 pricing.json 中 OpenAI 模型估算价计算。"
-                             "qwenwork=读取千问办公（~/.qwenworkcn/projects 转录 + logs/runs 调用日志 + "
-                             "agents.db 会话元信息），无需 WorkBuddy 环境；"
-                             "千问办公上游不回传 token，故 token 为字符估算、成本未计价")
-    parser.add_argument("--cost-mode", choices=["auto", "tokens-only", "priced"], default="auto",
-                        help="计费维度：auto=默认，本期**一个单价都没命中**时自动切 tokens_only；"
-                             "tokens-only=强制整份报告隐藏金额（只讲 Token / 调用 / 耗时 / 任务），"
-                             "适合按积分订阅计费、没有公开单 token 刊例价的数据源（如千问办公）；"
-                             "priced=无论如何都按现状输出金额（与历史行为一致）。"
-                             "注意：限免 / 本地模型那种「单价已配置且合法为 0」的情况不会被 auto 误判")
-    parser.add_argument("--task-classifier", choices=["heuristic", "llm"], default="heuristic",
-                        help="任务类型分类器：heuristic=默认加权启发式（离线、零依赖）；"
-                             "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
-                             "调用失败自动回退启发式")
-    parser.add_argument("--task-llm-endpoint", type=str, default=None,
-                        help="LLM 分类器的 OpenAI 兼容 /v1 根地址（如本地 Ollama http://localhost:11434/v1）")
-    parser.add_argument("--task-llm-model", type=str, default=None,
-                        help="LLM 分类器使用的模型名（如本地 Ollama 的 qwen2.5:7b）")
-    parser.add_argument("--task-llm-api-key", type=str, default=None,
-                        help="LLM 端点的 API Key（本地端点可省略）")
-    parser.add_argument("--import-official", type=str, default=None, metavar="XLSX",
-                        help="导入官方用量导出（官网下载的 request-usage-*.xlsx），作为**成本真值（L1）**对账源。"
-                             "纯本地只读解析，不联网、不上传。不传时成本为静态价表估算（L2）。"
-                             "仅支持 --source workbuddy")
-    parser.add_argument("--official-sheet", type=str, default=None,
-                        help="官方导出工作表名（默认取第一个工作表；官方固定为 'Usage Details'）")
+    parser.add_argument(
+        "--period",
+        choices=["day", "week", "month", "year"],
+        default="week",
+        help="时间窗口预设：day=今天 / week=最近7天 / month=最近30天 / year=最近365天（默认 week）",
+    )
+    parser.add_argument(
+        "--days", type=int, help="自定义滚动天数，覆盖 --period（如 --days 14）"
+    )
+    parser.add_argument(
+        "--start", type=str, help="绝对起始日期 YYYY-MM-DD（与 --end 搭配）"
+    )
+    parser.add_argument(
+        "--end", type=str, help="绝对结束日期 YYYY-MM-DD（与 --start 搭配）"
+    )
+    parser.add_argument(
+        "--output", "-o", type=str, help="输出 JSON 文件路径（默认 stdout）"
+    )
+    parser.add_argument(
+        "--realtime", action="store_true", help="实时采集模式（立即采集最新数据）"
+    )
+    parser.add_argument(
+        "--lookup-pricing",
+        choices=["offline", "online"],
+        default="offline",
+        help="缺失单价模型的处理：offline=仅提示如何补写（默认，纯本地）；"
+        "online=尝试联网检索（需 --pricing-api 指向你自己的定价镜像，"
+        "否则仅生成可点击的搜索链接）。联网结果一律标注「网络估算价，仅供参考」",
+    )
+    parser.add_argument(
+        "--pricing-api",
+        type=str,
+        default=None,
+        help='online 模式可选：指向一个返回 {"models": {模型名: {input,output}}} 的 JSON 端点，'
+        "用于补全缺失模型单价（取自你自己的定价镜像，避免抓第三方页面）",
+    )
+    parser.add_argument(
+        "--source",
+        choices=["workbuddy", "claude-code", "codex", "qwenwork", "dumate"],
+        default="workbuddy",
+        help="数据源：workbuddy=默认（WorkBuddy traces/workbuddy.db/usage-log），"
+        "claude-code=读取 ~/.claude/projects/ 下的 Claude Code 会话 JSONL（P2-1 适配器 MVP）。"
+        "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算。"
+        "codex=读取 ~/.codex/sessions/ 下的 OpenAI Codex CLI rollout JSONL，"
+        "无需 WorkBuddy 环境，成本按 pricing.json 中 OpenAI 模型估算价计算。"
+        "qwenwork=读取千问办公（~/.qwenworkcn/projects 转录 + logs/runs 调用日志 + "
+        "agents.db 会话元信息），无需 WorkBuddy 环境；"
+        "千问办公上游不回传 token，故 token 为字符估算、成本未计价；"
+        "dumate=百度搭子（DuMate）数据源：读 ~/.workbuddy/（与 WorkBuddy 同布局），"
+        "可用 DUMATE_HOME 环境变量覆盖数据目录",
+    )
+    parser.add_argument(
+        "--cost-mode",
+        choices=["auto", "tokens-only", "priced"],
+        default="auto",
+        help="计费维度：auto=默认，本期**一个单价都没命中**时自动切 tokens_only；"
+        "tokens-only=强制整份报告隐藏金额（只讲 Token / 调用 / 耗时 / 任务），"
+        "适合按积分订阅计费、没有公开单 token 刊例价的数据源（如千问办公）；"
+        "priced=无论如何都按现状输出金额（与历史行为一致）。"
+        "注意：限免 / 本地模型那种「单价已配置且合法为 0」的情况不会被 auto 误判",
+    )
+    parser.add_argument(
+        "--task-classifier",
+        choices=["heuristic", "llm"],
+        default="heuristic",
+        help="任务类型分类器：heuristic=默认加权启发式（离线、零依赖）；"
+        "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
+        "调用失败自动回退启发式",
+    )
+    parser.add_argument(
+        "--task-llm-endpoint",
+        type=str,
+        default=None,
+        help="LLM 分类器的 OpenAI 兼容 /v1 根地址（如本地 Ollama http://localhost:11434/v1）",
+    )
+    parser.add_argument(
+        "--task-llm-model",
+        type=str,
+        default=None,
+        help="LLM 分类器使用的模型名（如本地 Ollama 的 qwen2.5:7b）",
+    )
+    parser.add_argument(
+        "--task-llm-api-key",
+        type=str,
+        default=None,
+        help="LLM 端点的 API Key（本地端点可省略）",
+    )
+    parser.add_argument(
+        "--import-official",
+        type=str,
+        default=None,
+        metavar="XLSX",
+        help="导入官方用量导出（官网下载的 request-usage-*.xlsx），作为**成本真值（L1）**对账源。"
+        "纯本地只读解析，不联网、不上传。不传时成本为静态价表估算（L2）。"
+        "仅支持 --source workbuddy",
+    )
+    parser.add_argument(
+        "--official-sheet",
+        type=str,
+        default=None,
+        help="官方导出工作表名（默认取第一个工作表；官方固定为 'Usage Details'）",
+    )
     args = parser.parse_args()
 
     # 官方导出只对 WorkBuddy 源有意义：claude-code / codex 没有官方积分账单可对
     if args.import_official and args.source != "workbuddy":
-        print(f"[ERROR] --import-official 仅支持 --source workbuddy（当前 --source {args.source}）",
-              file=sys.stderr)
+        print(
+            f"[ERROR] --import-official 仅支持 --source workbuddy（当前 --source {args.source}）",
+            file=sys.stderr,
+        )
         sys.exit(2)
 
     if args.realtime:
         # 实时模式：立即采集最新数据（今天）
-        start_date, end_date, period_key, period_label = resolve_date_range(period="day")
-        print(f"[INFO] 实时模式：采集范围 {start_date} ~ {end_date}（当日）", file=sys.stderr)
+        start_date, end_date, period_key, period_label = resolve_date_range(
+            period="day"
+        )
+        print(
+            f"[INFO] 实时模式：采集范围 {start_date} ~ {end_date}（当日）",
+            file=sys.stderr,
+        )
     else:
         # 记录显式指定的参数，用于提示用户实际生效的参数
         explicit_params = []
@@ -263,33 +335,47 @@ def main():
             explicit_params.append("--start/--end")
         if args.days is not None:
             explicit_params.append(f"--days {args.days}")
-        if args.period != "week" or explicit_params:  # 只有显式指定了非默认值，或其他参数覆盖时才提示
+        if (
+            args.period != "week" or explicit_params
+        ):  # 只有显式指定了非默认值，或其他参数覆盖时才提示
             if args.period != "week" and not (args.days or args.start):
                 explicit_params.append(f"--period {args.period}")
-        
+
         try:
             start_date, end_date, period_key, period_label = resolve_date_range(
-                period=args.period, days=args.days, start=args.start, end=args.end)
+                period=args.period, days=args.days, start=args.start, end=args.end
+            )
         except ValueError as e:
             print(f"[ERROR] {e}", file=sys.stderr)
             sys.exit(2)
 
         # 详细提示：显式指定参数 vs 默认值
         if explicit_params:
-            print(f"[INFO] 采集范围[{period_label}]：{start_date} ~ {end_date}（生效参数：{', '.join(explicit_params)}）", file=sys.stderr)
+            print(
+                f"[INFO] 采集范围[{period_label}]：{start_date} ~ {end_date}（生效参数：{', '.join(explicit_params)}）",
+                file=sys.stderr,
+            )
         else:
-            print(f"[INFO] 采集范围[{period_label}]：{start_date} ~ {end_date}（默认一周，可用 --period/--days/--start/--end 自定义）", file=sys.stderr)
+            print(
+                f"[INFO] 采集范围[{period_label}]：{start_date} ~ {end_date}（默认一周，可用 --period/--days/--start/--end 自定义）",
+                file=sys.stderr,
+            )
 
     # 任务分类器：默认启发式零依赖；llm 仅在显式提供端点时启用
     task_classifier = None
     if args.task_classifier == "llm":
         try:
             from task_classifier_llm import build_llm_classifier
+
             task_classifier = build_llm_classifier(
-                args.task_llm_endpoint, args.task_llm_model,
-                api_key=args.task_llm_api_key)
-            print(f"[INFO] 任务分类器：LLM 增强（{args.task_llm_model} @ {args.task_llm_endpoint}，失败自动回退启发式）",
-                  file=sys.stderr)
+                args.task_llm_endpoint,
+                args.task_llm_model,
+                api_key=args.task_llm_api_key,
+            )
+            print(
+                f"[INFO] 任务分类器：LLM 增强（{args.task_llm_model} @ {args.task_llm_endpoint}，失败自动回退启发式）",
+                file=sys.stderr,
+            )
         except (ValueError, ImportError) as e:
             print(f"[WARN] LLM 分类器不可用（{e}），回退加权启发式", file=sys.stderr)
 
@@ -306,35 +392,53 @@ def main():
         # 无需 WorkBuddy 环境，直接读 ~/.claude/projects/ 下的会话 JSONL；
         # 适配器产出与 WorkBuddy 同源的 trace / sessions，任务类型已预分类。
         from adapters.claude_code import collect_claude_code
+
         traces, db_data = collect_claude_code(start_date, end_date)
-        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        sid_to_rawmodel = {
+            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
+        }
         skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
         outputs, memory_logs = ([], {})
         # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源）；
         # 若启用 LLM 分类器则基于 _dialogue_text 重分类，否则直接收口预分类结果。
         if task_classifier is not None:
-            task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+            task_types = collect_task_types(
+                db_data["sessions"], classifier=task_classifier
+            )
         else:
-            task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
-        print(f"[INFO] Claude Code 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
-              file=sys.stderr)
+            task_types = {
+                s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]
+            }
+        print(
+            f"[INFO] Claude Code 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
+            file=sys.stderr,
+        )
     elif args.source == "codex":
         # ── OpenAI Codex CLI 数据源 ──
         # 无需 WorkBuddy 环境，直接读 ~/.codex/sessions/ 下的 rollout JSONL（按日期分目录）；
         # 适配器产出与 WorkBuddy 同源的 trace / sessions，任务类型已预分类。
         from adapters.codex import collect_codex
+
         traces, db_data = collect_codex(start_date, end_date)
-        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        sid_to_rawmodel = {
+            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
+        }
         skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
         outputs, memory_logs = ([], {})
         # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源）；
         # 若启用 LLM 分类器则基于 _dialogue_text 重分类，否则直接收口预分类结果。
         if task_classifier is not None:
-            task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+            task_types = collect_task_types(
+                db_data["sessions"], classifier=task_classifier
+            )
         else:
-            task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
-        print(f"[INFO] Codex CLI 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
-              file=sys.stderr)
+            task_types = {
+                s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]
+            }
+        print(
+            f"[INFO] Codex CLI 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
+            file=sys.stderr,
+        )
     elif args.source == "qwenwork":
         # ── 千问办公（QwenWork）数据源 ──
         # 无需 WorkBuddy 环境：读 ~/.qwenworkcn/projects 转录 + logs/runs 调用日志 +
@@ -342,31 +446,84 @@ def main():
         # model.response.completed 的四个 token 字段全为 0），故 token 为字符估算、
         # 档位无公开刊例价 → 成本不计价；调用次数 / 耗时 / 标题 / 档位为真实值。
         from adapters.qwenwork import collect_qwenwork, SUPPORTS_COST
+
         # 能力声明（不是「这次恰好没单价」）：千问办公在语义上不支持计费维度，
         # 报告端据此压制「缺失单价 + 补价 stub」整块。见 generate_report._show_unconfigured_block
         cost_supported = SUPPORTS_COST
         traces, db_data = collect_qwenwork(start_date, end_date)
-        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        sid_to_rawmodel = {
+            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
+        }
         skill_usage = db_data.get("skill_usage") or {
-            "skills": {}, "active_days": sorted({t["date"] for t in traces})}
+            "skills": {},
+            "active_days": sorted({t["date"] for t in traces}),
+        }
         outputs = db_data.get("outputs") or []
         # memory_logs 保持空：千问办公的记忆写进 awareness/*.md（由 file-history 快照承载），
         # 没有 WorkBuddy 那种「按日期归集的会话记忆日志目录」可映射，硬凑会造假结构。
         memory_logs = {}
         source_meta.update(db_data.get("_meta") or {})
         if task_classifier is not None:
-            task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+            task_types = collect_task_types(
+                db_data["sessions"], classifier=task_classifier
+            )
         else:
-            task_types = {s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]}
+            task_types = {
+                s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]
+            }
         _est = sum(1 for t in traces if t.get("_tokens_estimated"))
-        print(f"[INFO] 千问办公数据源：{len(traces)} 条 trace / "
-              f"{len(db_data['sessions'])} 个会话"
-              f"（{_est}/{len(traces)} 条 token 为字符估算，档位无刊例价故未计价）",
-              file=sys.stderr)
+        print(
+            f"[INFO] 千问办公数据源：{len(traces)} 条 trace / "
+            f"{len(db_data['sessions'])} 个会话"
+            f"（{_est}/{len(traces)} 条 token 为字符估算，档位无刊例价故未计价）",
+            file=sys.stderr,
+        )
+    elif args.source == "dumate":
+        # ── 百度搭子（DuMate）数据源 ──
+        # 百度搭子桌面客户端（qianfan-desktop-app）的数据落点与 WorkBuddy
+        # 完全一致（~/.workbuddy：traces/ + workbuddy.db + usage-log.json +
+        # 会话目录），因此适配器复用同一采集链路，仅显式声明数据源身份，
+        # 并支持 DUMATE_HOME 环境变量覆盖数据目录（测试 / 多账号 / 未来迁移）。
+        from adapters.dumate import collect_dumate, SUPPORTS_COST, DUMATE_HOME
+
+        # 能力声明：百度搭子与 WorkBuddy 同布局，token 为上游真值 -> 支持计费
+        cost_supported = SUPPORTS_COST
+        traces, db_data = collect_dumate(start_date, end_date)
+        sid_to_rawmodel = {
+            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
+        }
+        skill_usage = db_data.get("skill_usage") or {
+            "skills": {},
+            "active_days": sorted({t["date"] for t in traces}),
+        }
+        outputs = db_data.get("outputs") or []
+        memory_logs = db_data.get("memory_logs") or {}
+        # 任务类型：与 WorkBuddy 源同一条路径（collect_task_types，默认启发式加权），
+        # 有 LLM 分类器时当作 classifier 传入，没有就不传。
+        # ⚠️ 不要再走「收口适配器预分类结果」的老路：dumate 适配器不做任何预分类，
+        # 会话 dict 里也没有 task_type 键，直接收口会把全部会话塌成「其他」。
+        task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+        source_meta.update(
+            {
+                "dumate_home": str(DUMATE_HOME),
+                # 实测结论：百度搭子默认 home 与 WorkBuddy 同在 ~/.workbuddy 这棵树下，
+                # 但并没有往 ~/.workbuddy 写用量数据（db/trace 里无归属字段可区分），
+                # 因此只声明「目录布局同源」，不再声称数据可区分。
+                "dumate_home_is_workbuddy": True,
+            }
+        )
+        print(
+            f"[INFO] 百度搭子数据源：{len(traces)} 条 trace / "
+            f"{len(db_data['sessions'])} 个会话"
+            f"（数据目录 {DUMATE_HOME}）",
+            file=sys.stderr,
+        )
     else:
         # ── WorkBuddy 默认数据源 ──
         db_data = collect_db_data(start_date, end_date)
-        sid_to_rawmodel = {s["id"]: (s.get("model") or "default") for s in db_data["sessions"]}
+        sid_to_rawmodel = {
+            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
+        }
         traces = collect_traces(start_date, end_date, sid_to_rawmodel)
 
         # 补全会话：窗口内有 trace 但创建于窗口外的会话，确保 token 统计能关联到任务类型
@@ -375,20 +532,37 @@ def main():
             existing_ids = {s["id"] for s in db_data["sessions"]}
             missing = trace_sids - existing_ids
             if missing:
-                cdb = sqlite3.connect(str(DB_PATH))
-                cdb.row_factory = sqlite3.Row
-                ph = ",".join("?" * len(missing))
-                for r in cdb.execute(
-                    f"SELECT * FROM sessions WHERE id IN ({ph}) AND deleted_at IS NULL", list(missing)
-                ).fetchall():
-                    db_data["sessions"].append({
-                        "id": r["id"], "cwd": r["cwd"], "title": r["title"] or "",
-                        "custom_title": r["custom_title"] or "", "status": r["status"],
-                        "created_at": r["created_at"], "created_date": ts_to_date(r["created_at"]),
-                        "updated_at": r["updated_at"], "mode": r["mode"], "model": r["model"],
-                        "is_background_automation": bool(r["is_background_automation"]),
-                    })
-                cdb.close()
+                # 只读打开：采集器只读 sessions 表，不需要写权限——可写连接会因 WAL
+                # 模式生成/持有 -wal -shm 文件，客户端持锁时读数会抛 SQLITE_BUSY。
+                cdb = sqlite3.connect(
+                    f"file:{DB_PATH.as_posix()}?mode=ro", uri=True
+                )
+                try:
+                    cdb.row_factory = sqlite3.Row
+                    ph = ",".join("?" * len(missing))
+                    for r in cdb.execute(
+                        f"SELECT * FROM sessions WHERE id IN ({ph}) AND deleted_at IS NULL",
+                        list(missing),
+                    ).fetchall():
+                        db_data["sessions"].append(
+                            {
+                                "id": r["id"],
+                                "cwd": r["cwd"],
+                                "title": r["title"] or "",
+                                "custom_title": r["custom_title"] or "",
+                                "status": r["status"],
+                                "created_at": r["created_at"],
+                                "created_date": ts_to_date(r["created_at"]),
+                                "updated_at": r["updated_at"],
+                                "mode": r["mode"],
+                                "model": r["model"],
+                                "is_background_automation": bool(
+                                    r["is_background_automation"]
+                                ),
+                            }
+                        )
+                finally:
+                    cdb.close()
         except (sqlite3.Error, OSError) as e:
             print(f"[WARN] supplementary sessions query: {e}", file=sys.stderr)
 
@@ -410,8 +584,10 @@ def main():
         meta_days = args.days
     elif args.start and args.end:
         try:
-            meta_days = (datetime.strptime(args.end, "%Y-%m-%d")
-                         - datetime.strptime(args.start, "%Y-%m-%d")).days + 1
+            meta_days = (
+                datetime.strptime(args.end, "%Y-%m-%d")
+                - datetime.strptime(args.start, "%Y-%m-%d")
+            ).days + 1
         except (ValueError, TypeError):
             meta_days = PERIOD_DAYS.get(period_key, 7)
     else:
@@ -442,8 +618,10 @@ def main():
         "session_credits": db_data["session_credits"],
         "skill_usage": skill_usage,
         "outputs": outputs,
-        "memory_logs": {k: [{"file": v["file"], "session_dir": v["session_dir"]} for v in vals]
-                        for k, vals in memory_logs.items()},
+        "memory_logs": {
+            k: [{"file": v["file"], "session_dir": v["session_dir"]} for v in vals]
+            for k, vals in memory_logs.items()
+        },
         "task_types": task_types,
     }
 
@@ -470,6 +648,7 @@ def main():
     total_input_cost = sum(t["input_cost"] for t in traces)
     total_output_cost = sum(t["output_cost"] for t in traces)
     total_effective_cost = round(sum(t.get("effective_cost", 0.0) for t in traces), 2)
+
     # 请求数反推（估算）：trace 是 generation 粒度，与官方「请求数」差一个量级
     # （实测约 11.9x）。按 session_id + 时间窗聚类启发式反推「估算请求数」：同一会话内
     # 两次 trace 间隔超过阈值（默认 15 分钟）视为新的用户请求；无 session_id 的 trace
@@ -486,11 +665,13 @@ def main():
             if not s:
                 return None
             try:
-                return ts_to_dt(int(s))          # 数值毫秒时间戳
+                return ts_to_dt(int(s))  # 数值毫秒时间戳
             except ValueError:
                 pass
             try:
-                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone(timedelta(hours=8)))
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(
+                    timezone(timedelta(hours=8))
+                )
             except ValueError:
                 return None
         return None
@@ -514,12 +695,32 @@ def main():
                     req += 1
                 prev = d
         return req
+
     estimated_request_count = _cluster_requests(traces, gap_min=15)
     # 缓存占比：缓存命中 token 占输入 token 的比例（越高说明越多重复上下文被廉价复用）
     cache_rate = (total_cached / total_input * 100) if total_input else 0
 
+    # —— 计价口径的三个透明度计数（报告据此出文案，勿在渲染层硬编码比例）——
+    # 1) 未知模型：raw_model 与 exec_model 都是字面量 "default"，即采集器根本不知道
+    #    实际调了哪个模型。这批 cost 已在ca_sources 里强制记 0（不按 DEFAULT_MODEL 编造）。
+    unknown_model_traces = sum(1 for t in traces if t.get("is_unknown_model"))
+    # 2) 档位名（fast-model 等）：是「路由档位」不是真模型名，单价来自倍率锚定估算。
+    #    同时给出按 hy3 刊例价的对照金额，供报告显式标注两种口径的差额。
+    tier_traces = [t for t in traces if t.get("is_tier_name")]
+    tier_name_cost = round(sum(t.get("total_cost", 0.0) for t in tier_traces), 4)
+    tier_alt_hy3_cost = round(
+        sum(t.get("alt_hy3_cost") or 0.0 for t in tier_traces), 4)
+    # 3) 失败调用：选「单独成列」而非剔除——失败调用同样消耗了 token / 可能计费，
+    #    从 token 与成本里剔除会掩盖真实消耗；只在「有效调用」口径里排除，另立 error 列。
+    error_traces = sum(1 for t in traces if t.get("is_error"))
+
     result["summary"] = {
         "total_traces": len(traces),
+        # 有效调用 = 总 trace - 失败调用。total_traces 保留原样（历史口径不动），
+        # 报告要谈「调用次数」时用total_effective_traces 并同时披露 error_traces。
+        "total_effective_traces": len(traces) - error_traces,
+        "error_traces": error_traces,
+        "unknown_model_traces": unknown_model_traces,
         "total_sessions": len(db_data["sessions"]),
         "total_tokens": total_tokens,
         "total_input_tokens": total_input,
@@ -531,7 +732,9 @@ def main():
         "active_days": sorted(active_days),
         "active_day_count": len(active_days),
         "total_automation_runs": len(db_data["automation_runs"]),
-        "successful_automation_runs": sum(1 for r in db_data["automation_runs"] if r["result_success"]),
+        "successful_automation_runs": sum(
+            1 for r in db_data["automation_runs"] if r["result_success"]
+        ),
         "total_outputs": len(outputs),
         "skills_used": len(skill_usage["skills"]),
         "task_type_distribution": {},
@@ -551,7 +754,9 @@ def main():
         if s.get("id") not in _traced_ids:
             continue
         tt = s.get("task_type", "其他")
-        result["summary"]["task_type_distribution"][tt] = result["summary"]["task_type_distribution"].get(tt, 0) + 1
+        result["summary"]["task_type_distribution"][tt] = (
+            result["summary"]["task_type_distribution"].get(tt, 0) + 1
+        )
 
     # 任务 token 消耗统计（按任务类型聚合 traces）
     result["task_token_stats"] = aggregate_task_token_stats(traces, db_data["sessions"])
@@ -573,10 +778,15 @@ def main():
     if args.import_official:
         try:
             from adapters.official_usage import (
-                OfficialUsageError, collect_official_usage, reconcile_with_trace,
+                OfficialUsageError,
+                collect_official_usage,
+                reconcile_with_trace,
             )
+
             official = collect_official_usage(
-                args.import_official, start_date=start_date, end_date=end_date,
+                args.import_official,
+                start_date=start_date,
+                end_date=end_date,
                 sheet=args.official_sheet,
             )
         except (OfficialUsageError, ImportError) as e:
@@ -588,18 +798,22 @@ def main():
         # 「迁走」建议不会误导用户多花钱，故不过滤低置信度（low_confidence_filter=False）。
         # 归并变体（hy3-x→hy3 等）使 §4.4 与 §3.5 对账口径一致。
         result["savings_insights"] = build_savings_insights_from_official(
-            official["by_model"], alias_map=dict(DISPLAY_MERGE))
+            official["by_model"], alias_map=dict(DISPLAY_MERGE)
+        )
 
         # 被报告窗口过滤掉的行数（导出通常是「最近30日」，报告窗口可能只有 7 天）
         _all_rows = official["meta"].get("parsed_rows", 0) or 0
         official["meta"]["rows_in_window"] = official["totals"]["requests"]
-        official["meta"]["rows_out_of_window"] = max(0, _all_rows - official["totals"]["requests"])
+        official["meta"]["rows_out_of_window"] = max(
+            0, _all_rows - official["totals"]["requests"]
+        )
 
         result["official_usage"] = official
         # 官方侧先按 display_merge 归拢（hy3-x → hy3 等），与 trace 侧显示口径对齐。
         # 否则变体会因精确匹配不上而被误判成「trace 盲区」——实测 30 日会虚报 410.95 积分。
         result["reconciliation"] = reconcile_with_trace(
-            official, result["model_stats"], alias_map=dict(DISPLAY_MERGE))
+            official, result["model_stats"], alias_map=dict(DISPLAY_MERGE)
+        )
         result["meta"]["cost_source"] = "official"
         result["meta"]["official_import"] = {
             "file": official["meta"]["file"],
@@ -612,45 +826,79 @@ def main():
         }
         result["summary"]["total_cost_official"] = official["totals"]["credits"]
         result["summary"]["official_requests"] = official["totals"]["requests"]
-        result["summary"]["official_free_requests"] = official["totals"]["free_requests"]
-        print(f"[INFO] 官方导出已导入：{official['totals']['requests']} 请求 / "
-              f"{official['totals']['credits']:.2f} 积分（窗口 {official['meta']['window']['first']}"
-              f" ~ {official['meta']['window']['last']}）→ 成本口径 L1 真值", file=sys.stderr)
+        result["summary"]["official_free_requests"] = official["totals"][
+            "free_requests"
+        ]
+        print(
+            f"[INFO] 官方导出已导入：{official['totals']['requests']} 请求 / "
+            f"{official['totals']['credits']:.2f} 积分（窗口 {official['meta']['window']['first']}"
+            f" ~ {official['meta']['window']['last']}）→ 成本口径 L1 真值",
+            file=sys.stderr,
+        )
         if official["meta"]["rows_out_of_window"]:
-            print(f"[WARN] 官方导出共 {_all_rows} 行，其中 "
-                  f"{official['meta']['rows_out_of_window']} 行不在报告窗口 "
-                  f"{start_date}~{end_date} 内，已排除", file=sys.stderr)
+            print(
+                f"[WARN] 官方导出共 {_all_rows} 行，其中 "
+                f"{official['meta']['rows_out_of_window']} 行不在报告窗口 "
+                f"{start_date}~{end_date} 内，已排除",
+                file=sys.stderr,
+            )
         if official["totals"]["requests"] == 0:
-            print(f"[WARN] 官方导出在窗口 {start_date}~{end_date} 内没有记录，"
-                  f"对账章节可能为空", file=sys.stderr)
+            print(
+                f"[WARN] 官方导出在窗口 {start_date}~{end_date} 内没有记录，"
+                f"对账章节可能为空",
+                file=sys.stderr,
+            )
 
     # 收集本期「未配置单价」的模型名（排除路由别名 auto，其本就无单一单价），供报告给出可补写片段
     unconfigured = set()
     for stats in (result["model_stats"], result["model_exec_stats"]):
         for m in stats:
             # 已下架官方模型不算「缺失单价」——它们本就无需用户补写，仅标注即可
-            if not m.get("configured") and m.get("model") not in ROUTER_ALIASES and not m.get("is_delisted"):
+            if (
+                not m.get("configured")
+                and m.get("model") not in ROUTER_ALIASES
+                and not m.get("is_delisted")
+            ):
                 unconfigured.add(m["model"])
     # 「入口维度」与「执行维度」可能对同一个底层模型各记一次（如 `qwenwork:flash`
     # 与 `flash`），而补价只需在 pricing.local.json 写一条裸名（price_of 会剥通道前缀
     # 查表）→ 一律折成裸名去重，避免报告里出现「flash、qwenwork:flash」这种重复提示。
     unconfigured = {m.split(":", 1)[-1] if ":" in m else m for m in unconfigured}
     result["meta"]["unconfigured_models"] = sorted(unconfigured)
+    # 档位名计价口径：fast-model / balanced-model / deep-model 是路由档位而非真模型名，
+    # 单价来自 pricing.json 的「倍率锚定法」估算。报告必须显式标注该口径，并同时给出
+    # 「按 hy3 刊例价」的对照金额——同一批调用在两种口径下金额不同，不能只报一个数。
+    result["meta"]["tier_pricing_basis"] = {
+        "note": "档位名（fast-model 等）为路由档位，非真实模型名；单价为倍率锚定估算值",
+        "tier_traces": len(tier_traces),
+        "tier_cost": tier_name_cost,
+        "alt_hy3_cost": tier_alt_hy3_cost,
+    }
 
     cost_mode = _decide_cost_mode(
         requested=args.cost_mode,
         unconfigured=unconfigured,
-        configured_rows=[m for st in (result["model_stats"], result["model_exec_stats"])
-                         if st for m in st if m.get("configured")],
+        configured_rows=[
+            m
+            for st in (result["model_stats"], result["model_exec_stats"])
+            if st
+            for m in st
+            if m.get("configured")
+        ],
         total_cost=total_cost,
         total_effective_cost=total_effective_cost,
-        has_official=str(result["meta"].get("cost_source") or "") == "official")
+        has_official=str(result["meta"].get("cost_source") or "") == "official",
+    )
     result["meta"]["cost_mode"] = cost_mode
     if cost_mode == "tokens_only":
-        print("[INFO] 计价模式=tokens_only：本期无任何命中单价（未配置："
-              + "、".join(sorted(unconfigured)[:6]) + ("…" if len(unconfigured) > 6 else "")
-              + "），报告将隐藏金额维度；要出金额请在 scripts/pricing.local.json 补单价，"
-                "或加 --cost-mode priced 强制保留现状。", file=sys.stderr)
+        print(
+            "[INFO] 计价模式=tokens_only：本期无任何命中单价（未配置："
+            + "、".join(sorted(unconfigured)[:6])
+            + ("…" if len(unconfigured) > 6 else "")
+            + "），报告将隐藏金额维度；要出金额请在 scripts/pricing.local.json 补单价，"
+            "或加 --cost-mode priced 强制保留现状。",
+            file=sys.stderr,
+        )
     # 限时免费截止日（来自 pricing.json 的 timed_free），供报告渲染「限时免费至 X」标签，
     # 避免在渲染器里硬编码日期——用户改了 pricing.json 后标签会自动跟随。
     result["meta"]["timed_free"] = dict(TIMED_FREE)
@@ -665,10 +913,16 @@ def main():
     # 档位维度元信息：档位估算标记、官方倍率缓存是否生效、最终档位单价表。
     # 供报告 §3.4 透明标注「估算值」并提示可配置。
     result["meta"]["mode_rates"] = dict(MODE_RATES_META.get("rates", {}))
-    result["meta"]["mode_cost_estimated"] = bool(MODE_RATES_META.get("auto_estimate", False))
-    result["meta"]["mode_config_cache_loaded"] = bool(MODE_RATES_META.get("config_cache_loaded", False))
+    result["meta"]["mode_cost_estimated"] = bool(
+        MODE_RATES_META.get("auto_estimate", False)
+    )
+    result["meta"]["mode_config_cache_loaded"] = bool(
+        MODE_RATES_META.get("config_cache_loaded", False)
+    )
     result["meta"]["mode_config_cache_path"] = MODE_RATES_META.get("config_cache_path")
-    result["meta"]["mode_config_cache_mtime"] = MODE_RATES_META.get("config_cache_mtime")
+    result["meta"]["mode_config_cache_mtime"] = MODE_RATES_META.get(
+        "config_cache_mtime"
+    )
 
     # 可选联网检索（--lookup-pricing online）：仅生成搜索链接，或拉取用户自有定价镜像。
     # ⚠️ 联网拿到的单价一律视为「网络估算价，仅供参考」，绝不用于权威成本总额。
@@ -681,17 +935,20 @@ def main():
     if args.lookup_pricing == "online" and unconfigured:
         for model in sorted(unconfigured):
             pricing_lookup["search_links"][model] = (
-                "https://duckduckgo.com/html/?q=" + urllib.parse.quote(f"{model} API pricing")
+                "https://duckduckgo.com/html/?q="
+                + urllib.parse.quote(f"{model} API pricing")
             )
             if args.pricing_api:
                 try:
                     with urllib.request.urlopen(args.pricing_api, timeout=10) as resp:
                         remote = json.loads(resp.read().decode("utf-8"))
-                    rm = (remote.get("models", {}).get(normalize_model(model))
-                          or remote.get("models", {}).get(model))
+                    rm = remote.get("models", {}).get(
+                        normalize_model(model)
+                    ) or remote.get("models", {}).get(model)
                     if rm and "input" in rm and "output" in rm:
                         pricing_lookup["network_estimates"][model] = {
-                            "input": float(rm["input"]), "output": float(rm["output"]),
+                            "input": float(rm["input"]),
+                            "output": float(rm["output"]),
                         }
                 except (requests.RequestException, ValueError, KeyError) as e:
                     print(f"[WARN] 联网检索 {model} 失败：{e}", file=sys.stderr)
@@ -711,9 +968,16 @@ def main():
         d = t["date"]
         if d not in daily_tokens:
             daily_tokens[d] = {
-                "total": 0, "input": 0, "output": 0, "cached": 0, "calls": 0,
-                "total_cost": 0, "input_cost": 0, "output_cost": 0,
-                "effective": 0, "effective_cost": 0,
+                "total": 0,
+                "input": 0,
+                "output": 0,
+                "cached": 0,
+                "calls": 0,
+                "total_cost": 0,
+                "input_cost": 0,
+                "output_cost": 0,
+                "effective": 0,
+                "effective_cost": 0,
             }
         daily_tokens[d]["total"] += t["total_tokens"]
         daily_tokens[d]["input"] += t["input_tokens"]
@@ -728,7 +992,9 @@ def main():
     result["daily_tokens"] = daily_tokens
 
     # 成本异常检测（依赖 daily_tokens 与 session_stats，故置于每日统计之后）
-    result["cost_anomalies"] = detect_cost_anomalies(result["daily_tokens"], result["session_stats"])
+    result["cost_anomalies"] = detect_cost_anomalies(
+        result["daily_tokens"], result["session_stats"]
+    )
 
     output_json = json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -737,6 +1003,7 @@ def main():
         print(f"[OK] 数据已保存到 {args.output}", file=sys.stderr)
     else:
         print(output_json)
+
 
 if __name__ == "__main__":
     main()
