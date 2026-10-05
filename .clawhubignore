@@ -1,0 +1,13 @@
+# ClawHub 发布忽略规则
+#
+# 背景：ClawHub 全站强制 MIT-0 许可证，不支持按技能覆盖许可证。官方原文要求
+# "Do not add conflicting license terms in SKILL.md"，仓库里的 MIT LICENSE 与
+# 平台条款冲突，故排除。
+#
+# 实证依据（2026-10-06）：加入本文件前，CLI --dry-run 报 fileCount=68，
+# 而本地按「仅点号段排除」复算为 69，差 1 —— 唯一差异就是 LICENSE.md。
+#
+# 注意：本文件是隐藏文件（点号起始路径段），ClawHub CLI 自身会忽略它；
+#    走目录拷贝 / 手工 zip 发 SkillHub 时它是多余的未知文件，发布前应删掉。
+
+LICENSE.md
