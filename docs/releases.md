@@ -6,7 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
-| **v1.9.0** | 2026-10-03 | 百度搭子（DuMate）数据源 + 任务类型分类修复 + 归属标注与文档降级（归因红线）+ 隐私护栏（只读 SQLite / 时间窗过滤）+ 合规文案收敛 | [tag/v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0) |
+| **v1.9.0** | 2026-10-06 | 百度搭子（DuMate）数据源 + 任务类型分类修复 + 归属标注与文档降级（归因红线）+ 隐私护栏（只读 SQLite / 时间窗过滤）+ 合规文案收敛 | [tag/v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0) |
 
 | **v1.7.2** | 2026-09-22 | Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）；L1 不再渲染低置信度噪音 | [tag/v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2) |
 | **v1.7.1** | 2026-09-16 | Phase B 按调用时刻应用时段定价：B4 夜间免费 / B5 峰谷双档 / B6 促销跨期 | [tag/v1.7.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.1) |
@@ -28,7 +28,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 ---
 
-## v1.9.0 — 2026-10-03
+## v1.9.0 — 2026-10-06
 
 **百度搭子（DuMate）数据源（归属未证实） · 任务类型分类修复 · 文档降级 · 合规文案收敛**
 
