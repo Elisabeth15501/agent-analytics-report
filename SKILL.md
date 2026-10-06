@@ -74,7 +74,7 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 | `claude-code` | `~/.claude/projects/**/*.jsonl` | 解析 Claude Code 会话日志，产出 token / 成本 / 任务类型 / 每日趋势；无技能与自动化维度。可用 `CLAUDE_PROJECTS_DIR` 环境变量指向自定义目录 |
 | `codex` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | 解析 Codex CLI 逐轮 `turn.completed` 的 usage；可用 `CODEX_HOME` 覆盖主目录 |
 | `qwenwork` | `~/.qwenworkcn/projects/**/*.jsonl` + `~/.qwenworkcn/logs/runs/` + `agents.db` + `<cwd>/outputs/` | **千问办公专用**。调用次数 / 请求耗时 / 模型档位 / 会话真名 / **技能调用** / **交付物** / **定时任务**均为真实值；⚠️ 服务端不回传 token，token 为**字符估算**，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（金额全撤）。可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖路径 |
-| `dumate` | `~/.workbuddy/`（与 WorkBuddy 共用同一数据布局） | **百度搭子专用**。桌面客户端（qianfan-desktop-app / DuMate）数据落点与 WorkBuddy 完全一致，因此**不带适配器、默认源即可采集全部数据**；`--source dumate` 用于显式声明数据源（报告标题显示「百度搭子」）并支持 `DUMATE_HOME` 覆盖数据目录。能力维度同 WorkBuddy（token / 成本 / 技能 / 自动化 / 会话 / 产出 / 记忆） |
+| `dumate` | `~/.workbuddy/`（**按 WorkBuddy 布局读取，归属未证实**） | **通用入口，非已验证的百度搭子源**。按 WorkBuddy 布局读取该目录，**这些记录里没有任何字段能区分它来自百度搭子还是 WorkBuddy**（实测 `workbuddy.db` 217 会话中 `cwd`/`title` 匹配 `qianfan`/`dumate` 命中 0 行、`id LIKE 'ses_%'` 命中 0 行；1165 个 trace 无任何归属字段）→ `--source dumate` 报告内容**可能完全是 WorkBuddy 的，勿当作「百度搭子用量」引用**。百度搭子自有数据在 `~/.qianfan/workspace/.../.dumate/ses_*/flows/*.yml`（yml，非本技能 trace schema，无映射）。支持 `DUMATE_HOME` 覆盖数据目录、`DUMATE_OUTPUTS_DIR` 覆盖产出/记忆目录。详见 `docs/ADAPTERS.md` §6.1/§6.4 |
 
 > 各源的限制与扩展方式见 `docs/ADAPTERS.md`（千问办公见 §四、百度搭子见 §六）。
 > **在千问办公里替用户生成报告时，务必带 `--source qwenwork`**——默认源是 WorkBuddy，

@@ -23,6 +23,20 @@
 
 `docs/ADAPTERS.md` §6.1 / §6.4 与 `README.md` 数据源表同步降级：删除「数据落点与 WorkBuddy 完全一致（实测，2026-10-02）」这类过度断言 —— 当时只做过路径观察，未验证归属，改写为「当前按 WorkBuddy 布局读取该目录（数据归属未证实）」。
 
+
+### 🔒 隐私护栏与数据完整性加固
+
+- **记忆日志时间窗过滤**：`memory/*.md` 此前**无日期过滤**（同函数的会话产出文件是有 `dir_date` 过滤的），时间窗设 08-10~08-16 仍会读进 7 月 / 9 月的个人记忆明文。现按记忆文件自身日期 `log_date` 过滤 —— 注意**会话目录名日期 ≠ 记忆文件日期**，一个会话目录里可能躺着跨月的记忆。audit hook 实测越权 `open` 从 10 次降为 0。
+- **记忆正文不再外发**：`content` 字段经核实无任何消费方（组装结果时本就被剥掉、报告端是死赋值），改为只落 `has_content` + `content_chars`，不再 `read_text()` 把明文搬进内存。
+- **SQLite 统一只读**：`ca_sources.py` / `collect_usage_data.py` / `adapters/dumate.py` 三处连接改为 `file:...?mode=ro`（`close()` 进 `finally`），采集进程拿不到写句柄。WAL 模式下可写连接会额外创建 `-wal` / `-shm`，客户端持锁时还会 `SQLITE_BUSY`。
+- **token 三级回退**：`totalTokens` 缺失时按 顶层 → span 内 generation 还原 → `modelInfo` 分项之和 逐级回退，并落 `token_source` 标记（`trace` / `span` / `fallback` / `missing`）。此前顶层缺失且无 span 时直接落 0，连带把该 trace 的成本也算成 0。
+
+### 💰 计价准确性（三条口径修正）
+
+- **未知模型不再编造费用**：`exec_model` 与 `raw_model` **都**归一为 `default` 时判为未知，强制计 0 并计入 `summary.unknown_model_traces`。此前会映射到 `DEFAULT_MODEL`（glm-5.2）按其单价计费，等于凭空造出成本。
+- **档位名双口径披露**：`raw_model` 是路由档位名（`fast-model` 等）而非真模型名，单价来自倍率锚定估算。`total_cost` 口径**不变**，但额外算出同批 token 按 hy3 刊例价的金额，随 `meta.tier_pricing_basis` 披露，报告显式标注两种口径 —— 避免把估算价当成真实账单。
+- **失败调用单独成列**：`status == "error"` 的调用**不剔除**（失败调用照样烧 token、可能计费，剔了会掩盖真实消耗），而是新增 `summary.error_traces` 与 `summary.total_effective_traces`，报告的「调用次数」改用**有效调用**并披露失败数。
+
 ### 🧪 验证
 
 `tests/test_publish_parity.py` 版本门禁通过（5 处版本号一致）。

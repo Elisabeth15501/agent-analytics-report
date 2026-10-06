@@ -37,6 +37,9 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 - 🔖 归因红线：删除「数据落点与 WorkBuddy 完全一致（实测，2026-10-02）」的过度断言；`docs/ADAPTERS.md` §6.1 / §6.4 与 `README.md` 同步降级为「按 WorkBuddy 布局读取，归属未证实」。
 - 🔒 隔离修复：`DUMATE_HOME` 此前不约束产出 / 记忆目录（`WORKBUDDY_SESSIONS` 写死 `Path.home()/"WorkBuddy"`），现由 home 的 parent 派生，并可用 `DUMATE_OUTPUTS_DIR` 单独覆盖。
 - 📝 合规文案收敛：四处绝对化「不联网」表述统一为「默认全离线；仅显式指定自有端点时才访问对应端点」，仅改文案，`--pricing-api` / `--task-llm-endpoint` 能力保留。
+- 🔒 隐私与完整性：记忆日志补时间窗过滤（会话目录日期 ≠ 记忆文件日期）、记忆正文不再外发、SQLite 三处改只读、token 三级回退（顶层 → span → modelInfo）+ `token_source` 标记。
+- 💰 计价三条：未知模型强制计 0（不再映射到 glm-5.2 编造费用）、档位名双口径披露（`total_cost` 不变 + `tier_pricing_basis` 给出 hy3 刊例价对照）、失败调用单独成列（`error_traces` / `total_effective_traces`，报告「调用次数」改用有效调用并披露失败数）。
+
 - 🧪 `test_version_parity` 门禁通过。
 
 🔗 [GitHub Release v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0)

@@ -115,3 +115,11 @@ week_*.json
 scripts/pricing.candidate.json
 pricing-diff.md
 scripts/pricing.json.bak-*
+
+# ---- pytest 临时目录（P0 隐私门禁）----
+# 2026-10-06 实测：basetemp 残留目录路径含 Windows 用户名（如 C:////Users////<user>////...），
+# 留在仓库根会被 git 视作未跟踪文件，有被打包进公开仓库的隐私风险。
+# 判据：任何 .pt_* / .pytest_tmp* 目录都不得提交。
+.pt_*
+.pytest_tmp*
+.pytest_cache/
