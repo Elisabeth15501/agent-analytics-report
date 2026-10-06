@@ -27,7 +27,6 @@ tags:
   - token
   - cost-analysis
   - analytics
-license: MIT
 ---
 
 # Agent 使用情况报告生成器（支持日/周/月/年）
