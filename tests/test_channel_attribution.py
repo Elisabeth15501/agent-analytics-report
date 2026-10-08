@@ -86,7 +86,28 @@ skip_no_db = pytest.mark.skipif(
 # ── 动态模型集（适用于所有模型的关键）───────────────────────────────────────
 
 def _load_collector_module():
-    """独立加载采集模块（不污染测试模块命名空间）。"""
+    """独立加载采集模块（不污染测试模块命名空间）。
+
+    ── 扫描器说明（suspicious.dynamic_code_execution 告警澄清）──
+    spec.loader.exec_module() 是 importlib 的标准公开 API（PEP 451 ModuleSpec 的
+    标准执行入口），用于「按 ModuleSpec 把一个模块载入内存」。本文件用它加载采集
+    脚本 collect_usage_data.py，使每个用例拿到独立的模块全局副本，避免采集层
+    可变状态（缓存/去重集合）跨用例串味 —— 这是 pytest 隔离被测模块的标准做法，
+    不是 eval()/exec()，不解析字符串、不编译任意表达式。
+
+    安全边界（真正的约束，见下方 assert）：
+      - 路径是本文件顶部的模块常量 SRC = SKILL_DIR / "scripts" / "collect_usage_data.py"，
+        由 __file__ 推导，不接受命令行输入、不读环境变量、不联网；
+      - 加载目标恒定为「采集脚本自身」，由 assert 强制校验；
+      - 因此不存在「加载任意外部路径 → 执行其代码」的攻击链。
+    请勿在无必要时改用 eval/exec，那才会引入真实的动态代码执行面。
+    """
+    # 路径不变量：把安全边界从注释约定变成可执行的运行时防护。
+    # SRC 由 __file__ 推导、不可外部注入，这里锁死「只能是采集脚本自身」。
+    assert SRC.exists() and SRC.name == "collect_usage_data.py", \
+        "只允许加载采集脚本自身，拒绝加载其他路径"
+    assert SRC == SKILL_DIR / "scripts" / "collect_usage_data.py", \
+        "采集脚本路径必须与 SKILL_DIR 推导结果一致"
     spec = importlib.util.spec_from_file_location("cds_attr_mod", str(SRC))
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)

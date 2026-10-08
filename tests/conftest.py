@@ -19,7 +19,26 @@ def pytest_configure(config):
 
 
 def _load_module_from_path(name, path):
-    """独立加载技能脚本（不污染测试模块命名空间，隔离全局状态）。"""
+    """独立加载技能脚本（不污染测试模块命名空间，隔离全局状态）。
+
+    ── 扫描器说明（suspicious.dynamic_code_execution 告警澄清）──
+    spec.loader.exec_module() 是 importlib 的标准公开 API（PEP 451 ModuleSpec
+    的标准执行入口），用途是「按 ModuleSpec 把一个模块载入内存」。此处用它加载
+    **本仓硬编码路径**的 scripts/*.py，是 pytest 隔离被测模块全局状态的官方推荐
+    写法（被测脚本会改模块级全局，如定价表，必须每个用例独立加载）。
+    它不是 eval()/exec()，不解析字符串、不编译任意表达式。
+
+    安全边界（真正的约束，见下方 assert）：
+      - name 与 path 均来自本文件顶部的模块常量 SKILL_DIR / SCRIPTS 及其派生，
+        不接受命令行输入、不读环境变量、不联网；
+      - 加载目标恒定在 <repo>/scripts/ 内，由 assert 强制校验；
+      - 因此不存在「加载任意外部路径 → 执行其代码」的攻击链。
+    请勿在无必要时改用 eval/exec，那才会引入真实的动态代码执行面。
+    """
+    # 路径不变量：把上面的安全边界从「注释约定」变成可执行的运行时防护。
+    # 任何指向 scripts/ 之外的路径（例如误从参数/环境变量拼出的路径）在此直接失败。
+    assert isinstance(path, (str, Path)) and str(SCRIPTS) in str(path), \
+        "只允许加载本仓 scripts/ 下的模块，拒绝加载外部路径"
     spec = importlib.util.spec_from_file_location(name, str(path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)

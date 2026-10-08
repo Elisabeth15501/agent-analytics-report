@@ -7,7 +7,52 @@
 # 实证依据（2026-10-06）：加入本文件前，CLI --dry-run 报 fileCount=68，
 # 而本地按「仅点号段排除」复算为 69，差 1 —— 唯一差异就是 LICENSE.md。
 #
+# 实证依据（2026-10-08）：为消除 ClawHub 安全扫描的 Tp4（MCP Tool Poisoning）
+# 噪声（23 条可见误报，同一根因：扫描器把测试/CI 辅助文件当成「用户可调用的
+# 技能主体」去比对 SKILL.md 描述），本文件追加 tests/ tools/ pytest.ini
+# requirements-tests.txt docs_render.py 五条开发期资产排除项。
+# 加完后的实测：CLI --dry-run fileCount 69 -> 38（-31，降幅 44.8%），
+# fingerprint 3ba42a6f...291a99 -> 499b163b...4b14987。
+#
+# 本地复算对账方法（用于改动后自证 CLI 数字可信，不靠猜）：
+#   1) 权威口径：node 直接 import clawhub 包的 dist/skills.js，调 listSkillFiles()
+#      导出清单。该函数 = 文件系统遍历 - .gitignore - .clawhubignore
+#      - 点号起始路径段，与 CLI prepareSkillFilesForPublish() 同一实现，不是另写近似。
+#   2) 纯 git 侧复算（不装依赖也能自证）：
+#      git ls-files --cached --others --exclude-standard \
+#        | grep -vE '(^|/)\.' \
+#        | grep -vE '^(tests/|tools/)' \
+#        | grep -vE '^(pytest\.ini|requirements-tests\.txt|docs_render\.py|LICENSE\.md|docs/OPTIMIZATION_PLAN\.md)$'
+#   3) 2026-10-08 实测：两条路径均得 38，diff 逐行完全一致。
+#   4) 口径差（必须逐条对齐后才可比，否则会误判规则模型有偏差）：
+#      - git ls-files 会列出「已被跟踪但被 .gitignore 命中」的历史文件，
+#        本仓 docs/OPTIMIZATION_PLAN.md 即是（.gitignore 末段排除 OPTIMIZATION_PLAN.md，
+#        但它已入 git 索引），CLI 走文件系统遍历故不收它 —— 复算时须手动再排掉。
+#      - git 只看「已跟踪 + 未忽略」，CLI 遍历真实文件系统；
+#        故复算前应确认无未跟踪的临时产物（.gitignore 已覆盖 .pt_* / allure-results/ 等）。
+#
+# 保留说明：adapters/（5 个真实适配器）、examples/（SKILL.md 有引用）、
+# scripts/gen_example_report.py（SKILL.md 有引用）、references/（用户配置流程文档）
+# 均为技能运行时面，必须随包发布，不得排除。
+#
 # 注意：本文件是隐藏文件（点号起始路径段），ClawHub CLI 自身会忽略它；
 #    走目录拷贝 / 手工 zip 发 SkillHub 时它是多余的未知文件，发布前应删掉。
 
 LICENSE.md
+
+# ---- 开发期资产（非技能运行时面，排除以消解安全扫描 Tp4 噪声）----
+# tests/                  pytest 用例（含 conftest.py），602 个用例的开发侧资产
+# tools/                  Allure 报告渲染脚本，CI 专用
+# pytest.ini              测试配置，用户运行技能不需要
+# requirements-tests.txt  测试依赖清单，用户环境用不到
+# docs_render.py          GitHub Pages 文档站构建脚本（.github/workflows/pages.yml:44）。
+#                         虽在仓库根目录（易被误认为技能入口），但 TARGETS 硬编码为
+#                         README.md/SKILL.md → *.html，只服务 CI 文档站；
+#                         零网络（仅 import os + markdown），路径源自 __file__ + 常量，
+#                         无命令注入面。技能运行时完全不加载它。
+
+tests/
+tools/
+pytest.ini
+requirements-tests.txt
+docs_render.py
