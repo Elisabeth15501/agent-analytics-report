@@ -12,7 +12,7 @@
 | WorkBuddy | `workbuddy`（默认） | ✅ | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） |
 | Claude Code | `claude-code` | ✅ | `~/.claude/projects/**/*.jsonl` |
 | OpenAI Codex CLI | `codex` | ✅ | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
-| 千问办公 QwenWork | `qwenwork` | ✅（⚠️ token 为本地估算） | `~/.qwenworkcn/projects/**/*.jsonl` + `logs/runs/` + `agents.db` |
+| 千问办公 QwenWork | `qwenwork` | ✅（⚠️ token 为本地估算，**不可对账**） | `~/.qwenworkcn/projects/**/*.jsonl` + `logs/runs/` + `agents.db` |
 | 百度搭子 DuMate | `dumate` | ⚠️ 通用入口（数据归属未证实） | `~/.workbuddy/`（按 WorkBuddy 布局读取），支持 `DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` 覆盖 |
 | Trae 等 | — | ⬜ 未实现 | — |
 
@@ -27,8 +27,9 @@
 - **千问办公**：调用次数、请求耗时、模型档位、会话真名、**技能调用**、**交付物**、**定时任务**
   都是**真实值**（技能取自转录里的 `Skill` 工具调用、交付物取 `present_files` ∪ `outputs/` 目录、
   定时任务取 `agents.db` 的 `task_run_logs`）；但服务端**不回传 token**，token 由本地字符估算，
-  且积分订阅无公开单 token 价 → 报告自动进入 **`tokens_only` 计价模式**（金额、花费速览、
-  省钱杠杆等章节整章缺席，补价后自动恢复）。详见
+  且积分订阅无公开单 token 价 → 报告自动进入 **`tokens_only` 计价模式**（撤掉所有 ¥ 金额，
+  金额、花费速览、省钱杠杆等章节整章缺席，补价后自动恢复）。
+  ⚠️ **千问办公服务端不回传 token，报告中的 token 为字符估算；估算值不可用于对账或账单核对**，真实消耗请以千问办公官方账单为准。详见
   [ADAPTERS.md](docs/ADAPTERS.md) §四、§4.6。
 - **百度搭子 DuMate**：`--source dumate` 是**读取 WorkBuddy 布局目录的通用
   入口**——任何把数据写进 `~/.workbuddy/` 布局的第三方客户端都能用它采集
@@ -199,8 +200,14 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 你自己的第三方 / 自建模型（OpenRouter 免费、硅基流动、自建 Ollama 等）写在**本机** `scripts/pricing.local.json`——
 该文件已被 `.gitignore` 排除，**不进发布包，`skillhub upgrade` 升级也不会覆盖**，单价自动保留。
 
-下载技能后首次生成报告时，Agent 会自动扫描本机用过的 `custom-local:*` 模型及 `~/.workbuddy/models.json`
-中配置的自定义 / 外部 / Ollama 端点，问你单价后写入本地文件；之后用自然语言告诉 Agent 新增模型即可。
+下载技能后首次生成报告时，Agent 会扫描本机用过的 `custom-local:*` 模型及 `~/.workbuddy/models.json`
+中配置的自定义 / 外部 / Ollama 端点，**逐个问你单价；只有你明确给出单价数字、
+并确认过待写入条目清单之后**，才写入本地文件。之后用自然语言告诉 Agent 新增模型即可。
+
+> **授权边界**：上述扫描**仅限 `~/.workbuddy` 这一个目录**，写入**仅限 `scripts/pricing.local.json` 这一个文件**。
+> **生成报告本身不触发这两个动作**——报告的默认流程是只读采集 + 只写报告产物。
+> 你也可以只要清单、先不写入（明说「先只列出来给我看，不要写文件」即可）；拿不到单价的模型会标「待补」跳过。
+> 详见 [`references/on-download-inject.md`](references/on-download-inject.md) 与 [`references/add-custom-models.md`](references/add-custom-models.md)。
 
 ---
 

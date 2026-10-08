@@ -1,4 +1,11 @@
 # agent-analytics-report — 测试依赖
+#
+# ⚠️ pytest 启动硬依赖 allure-pytest —— 它不是「可选的报告插件」，而是能不能跑起来的前提：
+#    pytest.ini 的 addopts 里带了 `--alluredir=allure-results`，而这个参数由 allure-pytest 提供。
+#    缺它时 pytest 直接以 `unrecognized arguments: --alluredir=allure-results` 报错退出，
+#    **不会**提示「你少装了一个包」——排查成本很高（容易误以为是 pytest 版本或用例写坏了）。
+#    遇到这个报错，先确认 allure-pytest 装没装，再看别的。
+#
 # 安装（建议隔离 venv）：
 #   python -m venv .venv && .venv/Scripts/pip install -r requirements-tests.txt
 # 版本与本地验证通过的 venv 保持一致（312 用例全绿），避免 CI 拉到不兼容的新版本

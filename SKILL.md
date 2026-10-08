@@ -11,14 +11,14 @@ description: |
   触发方式：当用户说「生成周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等时触发，无需手动指定参数；也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
   报告包含：
-  - Token 消耗与成本：按实际计费模型对账，跟后台账单一致；每日趋势、缓存占比、成本货币化
+  - Token 消耗与成本：按实际计费模型对账，跟后台账单一致（⚠️ 千问办公等服务端不回传 token 的数据源除外：该源 token 为字符估算、金额一律以 `tokens_only` 呈现，估算值不可用于对账，见数据源表）；每日趋势、缓存占比、成本货币化
   - 任务与技能：这段时间主要在干哪类活、哪些技能被反复调用
   - 自动化运行：每个任务跑了几次、成功还是失败、失败浪费了多少钱
   - 异常检测：成本 + Token 双口径，免费期高流量也不漏报；脏数据显式警告
 
   输出格式：Markdown（默认）/ HTML（可交互图表，浅色/深色自适应）/ JSON。
 
-  隐私与权限：只做本机只读采集，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。
+  隐私与权限（分阶段）：**采集阶段只做本机只读采集**，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。**配置阶段：仅在你明确确认单价后**，可写入你自己下载副本里的 `scripts/pricing.local.json`（补自定义模型单价）；该文件**不进发布包、升级不会被覆盖**。`scripts/task_rules.json`（调任务分类权重）**是发布资产、会被升级覆盖**，改它前请自行备份。逐条联网行为见正文「隐私与联网行为（完整清单）」。
 
   限制说明：数据来自本机，需启用 trace 记录；成本按模型公开单价估算，以实际账单为准；免费/限免期内成本口径参考意义有限，报告会自动标注并引导查看 Token 口径。
 tags:
@@ -72,7 +72,7 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 | `workbuddy`（默认） | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） | 完整能力：技能调用、自动化运行、任务分类全部可用 |
 | `claude-code` | `~/.claude/projects/**/*.jsonl` | 解析 Claude Code 会话日志，产出 token / 成本 / 任务类型 / 每日趋势；无技能与自动化维度。可用 `CLAUDE_PROJECTS_DIR` 环境变量指向自定义目录 |
 | `codex` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | 解析 Codex CLI 逐轮 `turn.completed` 的 usage；可用 `CODEX_HOME` 覆盖主目录 |
-| `qwenwork` | `~/.qwenworkcn/projects/**/*.jsonl` + `~/.qwenworkcn/logs/runs/` + `agents.db` + `<cwd>/outputs/` | **千问办公专用**。调用次数 / 请求耗时 / 模型档位 / 会话真名 / **技能调用** / **交付物** / **定时任务**均为真实值；⚠️ 服务端不回传 token，token 为**字符估算**，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（金额全撤）。可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖路径 |
+| `qwenwork` | `~/.qwenworkcn/projects/**/*.jsonl` + `~/.qwenworkcn/logs/runs/` + `agents.db` + `<cwd>/outputs/` | **千问办公专用**。调用次数 / 请求耗时 / 模型档位 / 会话真名 / **技能调用** / **交付物** / **定时任务**均为真实值；⚠️ 服务端不回传 token，token 为**字符估算**，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（撤掉所有 ¥ 金额）。**估算值不可用于对账或账单核对**，真实消耗请以千问办公官方账单为准。可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖路径 |
 | `dumate` | `~/.workbuddy/`（**按 WorkBuddy 布局读取，归属未证实**） | **通用入口，非已验证的百度搭子源**。按 WorkBuddy 布局读取该目录，**这些记录里没有任何字段能区分它来自百度搭子还是 WorkBuddy**（实测 `workbuddy.db` 217 会话中 `cwd`/`title` 匹配 `qianfan`/`dumate` 命中 0 行、`id LIKE 'ses_%'` 命中 0 行；1165 个 trace 无任何归属字段）→ `--source dumate` 报告内容**可能完全是 WorkBuddy 的，勿当作「百度搭子用量」引用**。百度搭子自有数据在 `~/.qianfan/workspace/.../.dumate/ses_*/flows/*.yml`（yml，非本技能 trace schema，无映射）。支持 `DUMATE_HOME` 覆盖数据目录、`DUMATE_OUTPUTS_DIR` 覆盖产出/记忆目录。详见 `docs/ADAPTERS.md` §6.1/§6.4 |
 
 > 各源的限制与扩展方式见 `docs/ADAPTERS.md`（千问办公见 §四、百度搭子见 §六）。
@@ -143,10 +143,10 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 
 **两种加模型的方式（都只写 `pricing.local.json`，不碰发布版）：**
 
-- **① 下载后首次 · 自动发现注入**：你从 SkillHub 下载技能、第一次生成报告（或主动说"把我的自定义模型加进报告"）时，Agent 会**自动扫描你本机 WorkBuddy 用过的 `custom-local:*` 模型**，问你单价后写进本地 `pricing.local.json`。全程照 [`references/on-download-inject.md`](references/on-download-inject.md) 的 Prompt 走，你只需回答每个模型的单价即可。
+- **① 下载后首次 · 扫描发现注入（需你逐个确认单价）**：你从 SkillHub 下载技能、第一次生成报告（或主动说"把我的自定义模型加进报告"）时，Agent 会**在你同意后**扫描你本机 WorkBuddy 用过的 `custom-local:*` 模型（**仅限 `~/.workbuddy` 目录**），**逐个问你单价；只有你给出单价数字并确认过待写入条目清单后**才写进本地 `pricing.local.json`。全程照 [`references/on-download-inject.md`](references/on-download-inject.md) 的 Prompt 走，你只需回答每个模型的单价即可。
 - **② 以后新加模型 · 大白话告诉 Agent**：之后你在 WorkBuddy 里新加了一个自定义模型，不用再全量扫描——照 [`references/add-custom-models.md`](references/add-custom-models.md)，用大白话把"模型名 + 单价"告诉 Agent，它直接写进 `pricing.local.json`。
 
-**写入规则（Agent 会自动遵守）：**
+**写入规则（须在你逐个确认单价、且确认过待写入清单后才执行）：**
 - 走 `custom-local:` 通道的模型（WorkBuddy 里配成 OpenAI 兼容端点，名如 `custom-local:deepseek-r1`）→ 写进 `custom_local` 段，键为**去掉 `custom-local:` 前缀、小写**的底层名。例（自建 DeepSeek，单价按你自托管/API 实际成本填，写入 `pricing.local.json`）：
   ```json
   {
@@ -162,6 +162,33 @@ python scripts/generate_report.py data.json --output 千问办公_周报.html --
 > 这样每个用户各自的自定义模型只在自己机器上生效，报告就能把自建接口的真实花费算进去，而发布版始终保持官方模型干净。只要写在 `pricing.local.json`（而非 `pricing.json`），`skillhub upgrade` 升级技能时它就不会被覆盖、无需备份或重注入。
 >
 > ⚠️ **开发者发布提醒**：`pricing.local.json` 是用户本机产物，**发布前务必确认你本机没有该文件**（它不进 Git、也不在 `.gitignore` 之外的打包豁免列表里），否则会把你的自定义模型一并发布出去。本技能当前发布态为官方模型干净版。
+
+## 隐私与联网行为（完整清单）
+
+**分阶段口径**：
+- **采集阶段：只做本机只读采集**，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。
+- **配置阶段：仅在你明确确认单价后**，可写入你自己下载副本里的 `scripts/pricing.local.json`（补自定义模型单价）。该文件**不进发布包、升级不会被覆盖**。
+- **配置阶段（续）**：`scripts/task_rules.json`（调任务分类权重）**是发布资产、升级会被覆盖**——改它属于改发布内容，请先自行备份。
+
+### 会写文件的地方只有这两处，且都必须由你点头
+
+| 文件 | 写什么 | 触发条件 |
+|---|---|---|
+| `scripts/pricing.local.json` | `models` / `timed_free` / `custom_local` 三段 | 你明确给出某个模型的 RMB 单价（或明确说「按 `references/add-custom-models.md` 的提示词执行」）后；Agent 须**先回显待写入条目清单、等你确认才落盘** |
+| `scripts/task_rules.json` | 任务分类的关键词与权重 | 你明确要求调整分类规则时。⚠️ **该文件进发布包、`skillhub upgrade` 会覆盖它**（无本地覆盖机制），改前请自行备份 |
+
+除此之外，本技能**不写任何其它文件**；采集器打开 SQLite 时使用只读连接，报告只写你指定的输出路径。
+
+### 联网行为逐条清单
+
+| 行为 | 触发条件 | 请求目标 | 说明 |
+|---|---|---|---|
+| 定价查价 | **仅当**显式传 `--pricing-api <URL>` | **你自己**的定价镜像端点 | 脚本**不内置任何默认端点**；URL 只来自命令行参数，**不从 trace / 会话内容派生**。拉到的价一律标 🌐 网络估算价、**不计入**任何成本总额 |
+| 任务分类 | **仅当**显式传 `--task-classifier llm` 且给了 `--task-llm-endpoint <URL>`（+ `--task-llm-api-key`） | **你自己**的 OpenAI 兼容端点 | 同样**不内置任何默认端点**；每条会话调用失败自动回退启发式，不中断采集 |
+| 搜索链接生成 | `--lookup-pricing online` | **不发起任何网络请求** | 为缺失单价的模型**生成** DuckDuckGo 搜索链接（`urllib.parse.quote` 纯字符串拼接，**不 fetch**），链接交给你自己点 |
+| **默认路径** | 以上参数**都不传** | **零网络** | 纯本机只读采集 + 本地渲染报告，不上传任何数据 |
+
+> `scripts/fetch_pricing.py` 是**独立的、手动触发**的定价更新助手：默认只出候选与差异报告、不落盘，**不抓取任何厂商网页**；数据源同样由你自备（`--file <本地 JSON>` 或 `--url <你的镜像>`）。
 
 ## 报告结构
 
@@ -493,7 +520,7 @@ A：早期 WorkBuddy trace 可能同时缺 sessionId 与 modelInfo（被兜底�
 A：已删除对话消耗的 token/成本仍会计入总量（避免低估真实开销），但归属到「其他/未关联」，不会按会话明细展示。
 
 **Q：数据会被上传或联网吗？**
-A：只做本机只读采集，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。
+A：分两个阶段——**采集阶段只做本机只读采集**，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传（`--pricing-api` / `--task-llm-endpoint` 都是显式传参才请求、不内置默认端点，`--lookup-pricing online` 只本地拼接搜索链接、不发请求）。**配置阶段仅在你明确确认单价后**，才可能写你自己副本里的 `scripts/pricing.local.json`（不进发布包、升级不覆盖）；`scripts/task_rules.json` 属发布资产、改动会被升级覆盖。完整清单见「隐私与联网行为（完整清单）」。
 
 **Q：支持其他 Agent 吗？**
 A：已支持五个数据源：WorkBuddy（默认，能力最全）、Claude Code、Codex CLI、千问办公（`--source qwenwork`）、百度搭子（`--source dumate`，复用 `~/.workbuddy` 布局）。
