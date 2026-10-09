@@ -21,6 +21,9 @@ description: |
   隐私与权限（分阶段）：**采集阶段只做本机只读采集**，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。**配置阶段：仅在你明确确认单价后**，可写入你自己下载副本里的 `scripts/pricing.local.json`（补自定义模型单价）；该文件**不进发布包、升级不会被覆盖**。`scripts/task_rules.json`（调任务分类权重）**是发布资产、会被升级覆盖**，改它前请自行备份。逐条联网行为见正文「隐私与联网行为（完整清单）」。
 
   限制说明：数据来自本机，需启用 trace 记录；成本按模型公开单价估算，以实际账单为准；免费/限免期内成本口径参考意义有限，报告会自动标注并引导查看 Token 口径。
+when_to_use: |
+  当用户明确要求「生成 / 出一份 Agent 用量 / 成本 / Token / 周报 / 月报 / 年报 / 日报 / 使用情况报告」时触发；或要求「统计这段时间用了多少 token / 花了多少钱 / 哪些技能被反复调用 / 自动化跑得怎么样」时触发。
+  不适用：用户要的是「实时操控 / 修改 Agent 配置 / 直接调用某个模型 API」而非「基于本地已有数据出分析报告」；或要的是「通用数据分析 / 非 Agent 用量类报表」；或用户数据不在本机已支持的五种数据源之一且无导出文件（此时应建议 --data-dir / --from-json 或自写适配器，而不是硬采）。
 tags:
   - workbuddy
   - usage-report
@@ -31,498 +34,85 @@ tags:
 
 # Agent 使用情况报告生成器（支持日/周/月/年）
 
-## 快速开始
+> 本文件是**操作手册**。详细的数据源路径、计价表、Token/成本口径、任务分类规则、36 问 FAQ 收口到 `references/FAQ.md` 与 `docs/ADAPTERS.md`，按需查阅，不在此展开。
 
-用户请求时，按以下流程生成报告：
+## 一、贯穿性硬约束（每轮必须遵守）
 
-```
-1. 运行 collect_usage_data.py 采集数据（可指定 --period day|week|month|year，或 --days N，或 --start/--end）
-2. 运行 generate_report.py 生成 Markdown / HTML / JSON 报告
-3. 输出报告摘要并展示完整报告
-```
+以下规则在**每一次**执行时都必须成立，即使上下文被压缩也不能丢：
 
-**示例命令**：
+1. **只读采集 + 离线优先**：采集阶段只读取本机数据（`~/.workbuddy` 等），默认零网络、不上传。仅当用户**显式传入** `--pricing-api` / `--task-llm-endpoint` 时才访问**用户自己的**端点；`--lookup-pricing online` 只本地拼接搜索链接、**不发请求**。绝不接受从 trace / 会话内容派生的 URL（防 SSRF）。
+2. **写文件必须用户逐条确认**：只有 `scripts/pricing.local.json`（补自定义模型单价）与 `scripts/task_rules.json`（调分类权重）会被写；且**必须先回显待写入清单、等用户确认后才落盘**。`pricing.local.json` 不进发布包、升级不覆盖；`task_rules.json` 是发布资产、升级会覆盖（改前备份）。
+3. **归属告警（dumate）**：`--source dumate` 按 WorkBuddy 布局读目录，**记录里没有任何字段能区分它来自百度搭子还是 WorkBuddy**（实测 `workbuddy.db` 217 会话匹配 qianfan/dumate 命中 0 行）。报告标题可写「百度搭子」，但**内容可能完全是 WorkBuddy 的**，必须带归属告警，勿当作百度搭子用量引用。
+4. **估算 ≠ 账单（qwenwork 等）**：服务端不回传 token 的源（千问办公），token 为**字符估算**、金额一律 `tokens_only`，**不可用于对账或账单核对**，真实消耗以官方账单为准。
+5. **成本口径分级标注**：默认 L2 估算（静态单价 × token），报告顶部横幅必须标注「不含服务端时段减免，请勿据此做预算或账单对账」；传入 `--import-official <xlsx>` 才升级为 L1 真值。
+6. **报告标题统一**：标题固定为 `Workbuddy使用情况报告`，周期由报告头部「报告类型」行以日历日期标识（日报/周报/月报/年报/自定义），不随周期带后缀。
 
-```bash
-# 采集最近 7 天数据（默认周报窗口）
-python scripts/collect_usage_data.py --period week --output data.json
+## 二、单次执行流程（5 步闭环）
 
-# 生成月报（最近 30 天）
-python scripts/generate_report.py --period month --output Agent_使用情况月报.md
+**输入**：用户的自然语言请求（如「出本周报告」）或显式参数。
+**输出**：报告文件（默认 Markdown）+ 3–5 条核心发现的摘要。
 
-# 自定义滚动天数（覆盖 --period）
-python scripts/collect_usage_data.py --days 14 --output data.json
+1. **确定时间范围**
+   - 输入：用户说的周期或参数。
+   - 行为：默认 `--period week`；用户可给 `--period day|week|month|year`、`--days N`、或 `--start/--end` 绝对范围（优先级：绝对 > `--days` > `--period`）。
+   - 兜底：用户没说就按周（最近 7 天）；无法解析时回问用户而非猜。
+2. **确定数据源**
+   - 输入：用户在哪个 Agent 里跑。
+   - 行为：`--source` 默认 `workbuddy`；在千问办公内跑必须 `--source qwenwork`；想显示「百度搭子」标题用 `--source dumate`（见硬约束 3）。
+   - 兜底：默认源采到 0 条数据时，提示可能选错源并列出可用源。
+3. **采集数据**
+   - 命令：`python scripts/collect_usage_data.py --source <src> --period week --output data.json`（或实时模式：不传 data_file 直接进第 4 步）。
+   - 兜底：trace 未启用 / 目录不存在 → 报错并提示开启 trace 或换 `--source`。
+4. **生成报告**
+   - 命令：`python scripts/generate_report.py data.json --output report.md`（或 `--format html|json`）；想实时生成可合并为 `generate_report.py --period week --output report.md`。
+   - 兜底：data.json 缺字段 → 提示重跑采集。
+5. **展示结果**：输出 3–5 条核心发现摘要，用 `present_files` 展示完整报告。
 
-# 绝对日期范围（最优先，覆盖 --period 与 --days）
-python scripts/generate_report.py --start 2026-06-01 --end 2026-06-30 --output 六月报告.md
+## 三、快速参考
 
-# 切换数据源：生成 Claude Code 的用量报告（读 ~/.claude/projects/）
-python scripts/collect_usage_data.py --source claude-code --period week --output data.json
-python scripts/generate_report.py data.json --output ClaudeCode_周报.html --format html
+### 数据源（`--source`）
+| 取值 | 读哪 | 注意 |
+|------|------|------|
+| `workbuddy`（默认） | `~/.workbuddy/`（traces + workbuddy.db + usage-log.json + 会话目录） | 能力最全 |
+| `claude-code` | `~/.claude/projects/**/*.jsonl` | 无技能/自动化维度；`CLAUDE_PROJECTS_DIR` 可覆盖 |
+| `codex` | `~/.codex/sessions/.../rollout-*.jsonl` | `CODEX_HOME` 可覆盖 |
+| `qwenwork` | `~/.qwenworkcn/`（转录 + runs 日志 + agents.db + outputs） | **千问办公里跑用它**；token 估算、金额 tokens_only |
+| `dumate` | `~/.workbuddy/`（按 WorkBuddy 布局） | 归属未证实，见硬约束 3；`DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` 可覆盖 |
 
-# 切换数据源：生成千问办公的用量报告（读 ~/.qwenworkcn/；在千问办公内运行时用这个）
-python scripts/collect_usage_data.py --source qwenwork --period week --output data.json
-python scripts/generate_report.py data.json --output 千问办公_周报.html --format html
-```
+### 计价模式（`--cost-mode`）
+- `auto`（默认）：一个单价都没命中时自动切 `tokens_only`。
+- `tokens-only`：强制隐藏金额维度。
+- `priced`：无论如何都按现状出金额。
 
-### 数据源（--source）
+### 时间窗口
+4 种预设（day/week/month/year）+ `--days N` + `--start/--end` 绝对范围；标题统一 `Workbuddy使用情况报告`，周期见报告头「报告类型」。
 
-| 取值 | 读取位置 | 说明 |
-|------|----------|------|
-| `workbuddy`（默认） | `~/.workbuddy/`（traces + `workbuddy.db` + `usage-log.json` + 会话目录） | 完整能力：技能调用、自动化运行、任务分类全部可用 |
-| `claude-code` | `~/.claude/projects/**/*.jsonl` | 解析 Claude Code 会话日志，产出 token / 成本 / 任务类型 / 每日趋势；无技能与自动化维度。可用 `CLAUDE_PROJECTS_DIR` 环境变量指向自定义目录 |
-| `codex` | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` | 解析 Codex CLI 逐轮 `turn.completed` 的 usage；可用 `CODEX_HOME` 覆盖主目录 |
-| `qwenwork` | `~/.qwenworkcn/projects/**/*.jsonl` + `~/.qwenworkcn/logs/runs/` + `agents.db` + `<cwd>/outputs/` | **千问办公专用**。调用次数 / 请求耗时 / 模型档位 / 会话真名 / **技能调用** / **交付物** / **定时任务**均为真实值；⚠️ 服务端不回传 token，token 为**字符估算**，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（撤掉所有 ¥ 金额）。**估算值不可用于对账或账单核对**，真实消耗请以千问办公官方账单为准。可用 `QWENWORK_HOME` / `QWENWORK_DB` 覆盖路径 |
-| `dumate` | `~/.workbuddy/`（**按 WorkBuddy 布局读取，归属未证实**） | **通用入口，非已验证的百度搭子源**。按 WorkBuddy 布局读取该目录，**这些记录里没有任何字段能区分它来自百度搭子还是 WorkBuddy**（实测 `workbuddy.db` 217 会话中 `cwd`/`title` 匹配 `qianfan`/`dumate` 命中 0 行、`id LIKE 'ses_%'` 命中 0 行；1165 个 trace 无任何归属字段）→ `--source dumate` 报告内容**可能完全是 WorkBuddy 的，勿当作「百度搭子用量」引用**。百度搭子自有数据在 `~/.qianfan/workspace/.../.dumate/ses_*/flows/*.yml`（yml，非本技能 trace schema，无映射）。支持 `DUMATE_HOME` 覆盖数据目录、`DUMATE_OUTPUTS_DIR` 覆盖产出/记忆目录。详见 `docs/ADAPTERS.md` §6.1/§6.4 |
+### 自定义模型（不碰发布版）
+只写本地 `pricing.local.json`（不进发布包、升级不丢）：`custom_local` 段（名带 `custom-local:` 前缀）或 `models` 段（裸名）。流程与确认闸门见 `references/add-custom-models.md` 与 `references/on-download-inject.md`。
 
-> 各源的限制与扩展方式见 `docs/ADAPTERS.md`（千问办公见 §四、百度搭子见 §六）。
-> **在千问办公里替用户生成报告时，务必带 `--source qwenwork`**——默认源是 WorkBuddy，
-> 本机没有 `~/.workbuddy/` 时会采到 0 条数据，报告全是空表。
-> **在百度搭子里替用户生成报告时**：默认源（workbuddy）即可采到数据；想显示
-> 「百度搭子使用情况报告」标题则带 `--source dumate`。
+## 四、隐私与联网行为（完整清单）
 
-### 计价模式（--cost-mode）
+分阶段口径（硬约束已列）：采集阶段只本机只读、默认离线；配置阶段仅确认单价后写本地 `pricing.local.json` / `task_rules.json`。
 
-| 取值 | 行为 |
-|------|------|
-| `auto`（默认） | 本期**一个单价都没命中**时自动切 `tokens_only`（如千问办公档位）；限免 / 本地模型那种「单价已配置、金额合法为 0」不会被误判 |
-| `tokens-only` | 强制隐藏金额维度：撤掉成本货币化 / 花费速览 / 省钱杠杆 / 最贵模型 / 档位与缓存可省测算，模型表退化为用量三列，§四 换成「Token 与调用深度分析」 |
-| `priced` | 无论如何都按现状输出金额章节（历史行为） |
-
-落盘的 `meta.cost_mode` 会被报告渲染层读取；想给千问办公档位出金额，
-在 `scripts/pricing.local.json` 补 `"flash": {"input":..,"output":..}` 后重跑即可（自动回到 priced）。
-
-**tokens_only 下措辞一并转成纯用量口径**（生成报告时不要留着计费术语自相矛盾）：
-「实际消耗 Token（计费等效）」→「实际消耗 Token」、§3.1 表标题
-「计费维度明细（费用结算依据）」→「Token 维度明细」、任务类型表说明去掉「（含估算成本）」、
-缓存占比不再解释「按约 1/10 价计费」、「排名按『实际消耗』排序」。
-§3.3「缺失单价 + `pricing.local.json` 补价 stub」整块在 tokens_only 下压制；
-数据源若天生不支持计费，适配器声明 `SUPPORTS_COST = False`（千问办公即是），
-采集器落 `meta.cost_supported=false`，连 priced 模式也不输出该 stub。
-顶部「要出金额可以怎么强制」那句横幅说明始终保留。
-
-### 时间窗口（可调节）
-
-支持 4 种预设周期 + 自定义，用户可自由选择按 **天/周/月/年** 计算：
-
-| 参数 | 取值 | 含义 | 报告类型（日历日期标识） |
-|------|------|------|----------|
-| `--period` | `day` | 今天（单日） | `日报 · 今日日期` |
-| `--period` | `week`（默认） | 最近 7 天 | `周报 · 第 N 周（起止）` |
-| `--period` | `month` | 最近 30 天 | `月报 · 年月` |
-| `--period` | `year` | 最近 365 天（滚动窗口，会跨年） | `年报 · 起始年`（见下方说明） |
-| `--days N` | 整数 | 自定义滚动 N 天（覆盖 `--period`） | `自定义（最近 N 天）` |
-| `--start` + `--end` | `YYYY-MM-DD` | 绝对日期范围（最高优先级，覆盖以上全部） | 自动识别：单日→日报 / 整 7 天→周报 / 整月→月报 / 1/1~今年当天→年报；其余→自定义报告 |
-
-> **报告标题统一为 `Workbuddy使用情况报告`**（Markdown / HTML / JSON 四方一致），不再随周期带「日报/周报…」后缀。周期信息改由报告头部的「**报告类型**」行以**日历日期**呈现，例如：
-> - 日报 · 2026-08-03
-> - 周报 · 2026 年第32周（2026-07-27 至 2026-08-03）
-> - 月报 · 2026年7月
-> - 年报 · 2026年（年初至今：2026-01-01 至当天）
-> - 自定义报告 · 起止日期
-
-- 三个脚本（`collect_usage_data.py` / `generate_report.py` / `analyze_tokens.py`）均支持上述参数；优先级：**绝对日期 > `--days` > `--period`**。
-- `--task-classifier heuristic|llm`：任务分类器切换（见「任务类型判定」节）。LLM 模式需自备 OpenAI 兼容端点，如 `--task-llm-endpoint http://localhost:11434/v1 --task-llm-model qwen2.5:7b`。
-- `--import-official <xlsx>`（v1.6.0 / F17）：导入官方用量导出作为**成本真值**。详见「成本口径（L1 真值 / L2 估算）」节。纯本地只读解析，不联网、不上传；仅 `--source workbuddy` 可用。
-- 报告内所有"本期/下期"措辞仍随周期自适应（日报→当日/次日，周报→本周/下周，月报→本月/下月，年报→本年/明年）。
-- 想生成「某年 / 某月的年报 / 月报」但用 `--period` 是**滚动窗口**（会跨年 / 跨月）：推荐改用 `--start/--end` 绝对日期，采集器会自动识别为对应周期类型——例如 `--start 2026-01-01 --end 2026-08-03` → `年报 · 2026年`（年初至今）；`--start 2026-07-01 --end 2026-07-31` → `月报 · 2026年7月`。整年（1/1~12/31）也同样识别为年报。
-- 原有 `--days`（仅滚动天数）仍完全兼容。
-- **缺失单价模型的处理**：`collect_usage_data.py` 先读发布版 `scripts/pricing.json`，再合并本地覆盖 `scripts/pricing.local.json`（`models` / `timed_free` / `custom_local` 三段，后者优先、不进发布包）。当遇到新模型时：
-  - **本地（默认）**：报告 §3.3 列出缺失模型名 + 可复制的 `pricing.local.json` 补写片段，不计入成本总额；
-  - **联网（`--lookup-pricing online`）**：额外生成 DuckDuckGo 搜索链接；若提供 `--pricing-api <URL>`，会尝试从你自己的定价镜像端点拉价（拉到的价一律标 🌐 网络估算价，**不计入**任何成本总额，只供补写时参考）。两份 `pricing*.json` 缺失时回退到 `collect_usage_data.py` 内置 `MODEL_PRICING` 常量，向后兼容。
-
-## 加入你自己的自定义模型（下载后本地配置，升级不丢失）
-
-> **自定义模型自动发现机制**：采集器启动时会读取 `~/.workbuddy/models.json`，自动识别你配置的自定义模型：
-> - 🏠 **本地模型**（Ollama / localhost）：零 API 成本，强制归零，不计入账单
-> - 🔧 **外部模型**（OpenRouter / 自建 API）：需你在 `pricing.local.json` 配置单价，否则报告标「未配置」
-
-发布版 `scripts/pricing.json` 只含 WorkBuddy 官方内置模型（11 个）+ `auto`，`custom_local` 段为空 `{}` —— **开发者不会把自己的自建/第三方模型带进发布包**。你本地使用的自定义模型（如自主接入外部API、自建开源模型、走第三方网关的模型、其它 GLM/MiniMax/Kimi/DeepSeek 变体、腾讯混元、OpenRouter 免费模型等）请加在**你自己下载的那份** `scripts/pricing.local.json` 里。
-
-> 🔑 **关键设计**：`pricing.local.json` 是**本地覆盖文件，不进发布包**。当你 `skillhub upgrade` 升级技能时，发布版 `pricing.json` 会被整目录覆盖重写，但 `pricing.local.json` 因为不在包里、永远不会被触碰 —— 你的自定义模型单价**自动保留、无需重注入**。
-
-**两种加模型的方式（都只写 `pricing.local.json`，不碰发布版）：**
-
-- **① 下载后首次 · 扫描发现注入（需你逐个确认单价）**：你从 SkillHub 下载技能、第一次生成报告（或主动说"把我的自定义模型加进报告"）时，Agent 会**在你同意后**扫描你本机 WorkBuddy 用过的 `custom-local:*` 模型（**仅限 `~/.workbuddy` 目录**），**逐个问你单价；只有你给出单价数字并确认过待写入条目清单后**才写进本地 `pricing.local.json`。全程照 [`references/on-download-inject.md`](references/on-download-inject.md) 的 Prompt 走，你只需回答每个模型的单价即可。
-- **② 以后新加模型 · 大白话告诉 Agent**：之后你在 WorkBuddy 里新加了一个自定义模型，不用再全量扫描——照 [`references/add-custom-models.md`](references/add-custom-models.md)，用大白话把"模型名 + 单价"告诉 Agent，它直接写进 `pricing.local.json`。
-
-**写入规则（须在你逐个确认单价、且确认过待写入清单后才执行）：**
-- 走 `custom-local:` 通道的模型（WorkBuddy 里配成 OpenAI 兼容端点，名如 `custom-local:deepseek-r1`）→ 写进 `custom_local` 段，键为**去掉 `custom-local:` 前缀、小写**的底层名。例（自建 DeepSeek，单价按你自托管/API 实际成本填，写入 `pricing.local.json`）：
-  ```json
-  {
-    "custom_local": {
-      "deepseek-r1": {"input": 2.0, "output": 8.0},
-      "deepseek-v3": {"input": 4.0, "output": 16.0}
-    }
-  }
-  ```
-  采集器遇到 `custom-local:deepseek-r1` 的 trace 会自动用这里的单价计费；若 `custom_local` 没配，则回退到同名官方模型价（DeepSeek 社区版 `deepseek-r1`/`deepseek-v3` 不在官方 `models` 内、会显示「未配置」，所以务必配上）。
-- 裸名自定义模型（没带 `custom-local:` 前缀，trace 里就是 `deepseek-r1`）→ 直接加到 `models` 段，写法同上 `{ "deepseek-r1": {"input": 2.0, "output": 8.0} }`。
-
-> 这样每个用户各自的自定义模型只在自己机器上生效，报告就能把自建接口的真实花费算进去，而发布版始终保持官方模型干净。只要写在 `pricing.local.json`（而非 `pricing.json`），`skillhub upgrade` 升级技能时它就不会被覆盖、无需备份或重注入。
->
-> ⚠️ **开发者发布提醒**：`pricing.local.json` 是用户本机产物，**发布前务必确认你本机没有该文件**（它不进 Git、也不在 `.gitignore` 之外的打包豁免列表里），否则会把你的自定义模型一并发布出去。本技能当前发布态为官方模型干净版。
-
-## 隐私与联网行为（完整清单）
-
-**分阶段口径**：
-- **采集阶段：只做本机只读采集**，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。
-- **配置阶段：仅在你明确确认单价后**，可写入你自己下载副本里的 `scripts/pricing.local.json`（补自定义模型单价）。该文件**不进发布包、升级不会被覆盖**。
-- **配置阶段（续）**：`scripts/task_rules.json`（调任务分类权重）**是发布资产、升级会被覆盖**——改它属于改发布内容，请先自行备份。
-
-### 会写文件的地方只有这两处，且都必须由你点头
-
-| 文件 | 写什么 | 触发条件 |
-|---|---|---|
-| `scripts/pricing.local.json` | `models` / `timed_free` / `custom_local` 三段 | 你明确给出某个模型的 RMB 单价（或明确说「按 `references/add-custom-models.md` 的提示词执行」）后；Agent 须**先回显待写入条目清单、等你确认才落盘** |
-| `scripts/task_rules.json` | 任务分类的关键词与权重 | 你明确要求调整分类规则时。⚠️ **该文件进发布包、`skillhub upgrade` 会覆盖它**（无本地覆盖机制），改前请自行备份 |
-
-除此之外，本技能**不写任何其它文件**；采集器打开 SQLite 时使用只读连接，报告只写你指定的输出路径。
-
-### 联网行为逐条清单
-
-| 行为 | 触发条件 | 请求目标 | 说明 |
+| 行为 | 触发条件 | 目标 | 说明 |
 |---|---|---|---|
-| 定价查价 | **仅当**显式传 `--pricing-api <URL>` | **你自己**的定价镜像端点 | 脚本**不内置任何默认端点**；URL 只来自命令行参数，**不从 trace / 会话内容派生**。拉到的价一律标 🌐 网络估算价、**不计入**任何成本总额 |
-| 任务分类 | **仅当**显式传 `--task-classifier llm` 且给了 `--task-llm-endpoint <URL>`（+ `--task-llm-api-key`） | **你自己**的 OpenAI 兼容端点 | 同样**不内置任何默认端点**；每条会话调用失败自动回退启发式，不中断采集 |
-| 搜索链接生成 | `--lookup-pricing online` | **不发起任何网络请求** | 为缺失单价的模型**生成** DuckDuckGo 搜索链接（`urllib.parse.quote` 纯字符串拼接，**不 fetch**），链接交给你自己点 |
-| **默认路径** | 以上参数**都不传** | **零网络** | 纯本机只读采集 + 本地渲染报告，不上传任何数据 |
+| 定价查价 | 显式 `--pricing-api <URL>` | 你自己的镜像端点 | 不内置默认端点；URL 只来自命令行参数，不从 trace/会话派生；价标 🌐 不计入总额 |
+| 任务分类 | 显式 `--task-classifier llm` + `--task-llm-endpoint <URL>` | 你自己的 OpenAI 兼容端点 | 不内置默认端点；失败自动回退启发式 |
+| 搜索链接 | `--lookup-pricing online` | **不发请求** | 纯字符串拼接 DuckDuckGo 链接，交你自点 |
+| 默认 | 都不传 | 零网络 | 本机只读 + 本地渲染 |
 
-> `scripts/fetch_pricing.py` 是**独立的、手动触发**的定价更新助手：默认只出候选与差异报告、不落盘，**不抓取任何厂商网页**；数据源同样由你自备（`--file <本地 JSON>` 或 `--url <你的镜像>`）。
+`scripts/fetch_pricing.py` 是**独立、手动触发**的定价维护助手（发布者用，非用户采集路径）：默认只出候选与差异报告、不落盘、不抓厂商网页；数据源由你自备。
 
-## 报告结构
+## 五、扩展与参考（按需查阅，不在此展开）
+- 详细数据源路径、已知偏差、适配器接缝与验收清单：`docs/ADAPTERS.md`
+- 36 问 FAQ（安装 / 生成 / 计价 / 分类 / 隐私 / 故障排查）：`references/FAQ.md`
+- 自定义模型注入流程与确认闸门：`references/add-custom-models.md`、`references/on-download-inject.md`
+- 报告章节结构、Token 口径（原始总量 vs 实际消耗计费等效）、成本口径（L1 真值 / L2 估算）、任务分类加权规则：随报告一起输出说明，并见代码 `scripts/` 内 docstring（如 `collect_usage_data.py` 的 `classify_task` / `collect_task_types`、`ca_core.py` 的口径常量）。
 
-生成的报告（日/周/月/年）包含以下章节：
+## 六、示例
 
-1. **概览统计** — 活跃天数、会话总数、使用技能、自动化任务、产出文件、实际消耗 Token 与成本概览
-2. **Token 消耗可视化** — 原始总 Token 与实际消耗对比、每日趋势图、缓存占比、成本货币化分析
-3. **模型使用与成本对比** — 按模型统计 **调用次数、实际消耗 Token、单价（输入/输出分开计价，元/1M）、估算实际花费与占总花费比**；高亮 **🏆 最常使用模型** 与 **💸 最贵模型**；Markdown 用纯文本横向条形图（fenced 代码块）展示花费占比、HTML 用自包含内联横向条形图，两版数据/样式一致。未配置单价的模型显示「未配置」/「—」——**用户补单价请写入本地 `scripts/pricing.local.json` 的 `models`（或 `custom_local`）节点**（该文件不进发布包、升级不丢失；参考下方「加入你自己的自定义模型」）；官方模型若缺失可一并在此覆盖。**报告会自动在 §3.3 列出**本期所有缺失单价的模型名**与可复制的 `pricing.local.json` 补写片段，一眼可见缺了谁、怎么补。**双维度**：该章节现同时提供 **3.1 按接口/通道（计费维度）** 与 **3.2 按实际执行模型（使用维度）** 两张表——前者按你配置的 API 接口/通道聚合（费用结算依据，如 `auto` 路由、`custom-local` 自建接口各自独立成行），后者按 API 实际执行的底层模型名聚合（反映你真实使用了哪些模型、各多少次，例如走 `auto` 路由实际执行 `glm-5.2` 的调用会记到 `glm-5.2`）；**免费额度版 / 收费版合并显示（`display_merge`）**：WorkBuddy 对同一模型常提供两个入口——免费额度版（trace 记 `hy4-preview` / `hy3`）与免费额度用尽后的收费版（trace 记 `hy4-preview-x` / `hy3-x`）。这两者会按 `pricing.json` 的 `display_merge` 段**合并显示为一行**（如统一显示 `hy4-preview`），避免被误读成两个模型。**注意合并只改显示分组、不碰计费**：每条 trace 仍按它自己实际执行的模型单独计价，故免费额度版用量记 ¥0、收费版按刊例价，合并行的花费就等于其中**收费版那部分**的用量费用。增删合并对只改 `pricing.json`（或本地 `pricing.local.json`）的 `display_merge` 段，不用改 Python 代码。详见 `references/FAQ.md` Q23 / Q24。
-   - **档位维度（§3.4 快速 / 均衡 / 极致）**：除 `auto` 外，WorkBuddy 自动路由还有三档档位——快速（`fast-model`，积分倍率 0.21x）/ 均衡（`balanced-model`，0.65x）/ 极致（`extreme-model`，1.20x；**配置缓存规范 id 为 `deep-model`，trace 字面量为 `extreme-model`，采集器已归一为 `deep-model` 后聚合**）。报告新增 §3.4 按档位聚合**调用次数、实际消耗 Token、估算单价（输入/输出分开计价，元/1M）、估算花费与占总花费比**；高亮档位间的相对成本差异。⚠️ **档位倍率仅作分析维度、不参与 ¥ 金额计算**：WorkBuddy 只对档位做积分倍率计费，trace 从不记录档位背后实际落地的底层模型，故按档位直接算「花费」在概念上不成立；档位 ¥ 单价用「倍率锚定法」估算（按已知模型官方倍率线性外推：快速≈¥1.91/7.64、均衡≈¥6.58/23.04、极致≈¥12.15/42.51），章节内明确标注为估算值，与 §3.1（账单口径）/ §3.2（入口视图）的真实计费完全解耦、互不影响。估算倍率**优先取本机权威倍率表** `~/.workbuddy/cache/acc-product-config-v3.json`（官方 48 模型 `credits` 倍率，缺失/解析失败则安全回退 `pricing.json` 的 `mode_rates`）；调整估算单价只改 `mode_rates` 段，不用改 Python 代码；无档位数据自动省略该章节、且不落 §3.3「未配置」假阳性。详见 `references/FAQ.md` Q36 / Q37。
-   - **定价库覆盖范围（`scripts/pricing.json`）**：① **12 个 WorkBuddy 官方内置模型**（来源：[WorkBuddy 官方模型列表](https://www.workbuddy.cn/docs/workbuddy/From-Beginner-to-Expert-Guide/Function-Description/Model)，2026-08，全部已配公开标价）：Hy3（限时免费至 2026-10-31）/ Hy4 preview 与 hy4-preview-x（2026-08 发布，hy4-preview 限时免费至 2026-09-10）/ GLM-5.3（与 GLM-5.2 同价）/ GLM-5.3-Flash（2026-08 发布，约 GLM-5.3 的 1/10）/ GLM-5.2 / GLM-5.1 / GLM-5v-Turbo / MiniMax-M3 / MiniMax-m2.7 / Kimi-K3 / Kimi-K2.7-Code / Kimi-K2.6 / Deepseek-V4-Flash / Deepseek-V4-Pro；外加 `auto` 智能路由别名（无单一单价，记为 `null`，报告内走 router_avg 均价估算）。② 你在 WorkBuddy 里**自行接入的第三方模型**（其它 GLM/MiniMax/Kimi/DeepSeek 变体、腾讯混元、OpenRouter 免费模型等）与 `custom-local:*` 自建接口**均不在此发布包内**——它们走 `pricing.json` 的 `custom_local` 段（**发布版为空 `{}`，需你下载后把单价写入自己的 `pricing.local.json`**，详见下方「加入你自己的自定义模型」）或回退到同名模型单价。报告会自动在 §3.3 列出所有缺失单价的模型名与可复制的补写片段。③ **已下架官方模型（`delisted` 段）**：WorkBuddy 会持续调整可选模型——历史上提供过、现已下架的官方模型（如早期免费 Flash、曾上架的社区/第三方模型）应放入 `pricing.json` 的 `delisted` 段而非删除。它们是官方模型，可随发布版走；放入后历史 trace 中这些模型的调用会被正常统计与计价（单价未知则标「已下架·未知」、不计成本），并在报告里以 🗄️ 标注，不会出现在 §3.3「缺失单价」清单。这样周报既能覆盖「当前可选模型」，也能覆盖「以前被调用过的模型」，符合「Agent 使用情况周报应包含任何曾发生过的调用」的目标。**核心原则**：发布版 `pricing.json` = 当前官方内置 `models` + 已下架官方 `delisted`；用户自己的第三方/自建模型只进 `pricing.local.json`（不进发布包）。报告模型清单由实际 trace 数据驱动，不在上述任一白名单里做硬过滤——因此即使某模型已从 WorkBuddy 下架或从未在定价库登记，只要历史 trace 里有调用，就会出现在报告里（下架官方模型标 🗄️，其它未登记模型标「未配置」并列入 §3.3）。**注意 `:free` 模型**：以 `:free` 结尾的 OpenRouter 免费模型（如 `nvidia/nemotron-3-nano-30b-a3b:free`、`poolside/laguna-xs-2.1:free`）走 `openrouter-free` 通道，自动免费（¥0），**无需在 `delisted` 登记**也会在报告里正常显示为「免费」——它们若是你自己的 OpenRouter 免费模型，本身就不在发布包里、也不影响公开版；若你确认某 `:free` 变体是 WorkBuddy 曾官方提供、现已下架的，把它的**完整模型名**（含 `:free` 后缀）写进 `delisted` 即可。
-4. **成本深度分析（每会话 / 异常 / 省钱）** — 覆盖行业调研头号诉求「每任务/每会话成本」；含 **4.1 每会话成本 Top 10**（按会话聚合 effective_cost，含任务类型、实际消耗、调用次数、主要模型）、**4.2 每会话成本分布**（按单会话成本分桶：¥0–1/¥1–5/¥5–20/¥20–50/¥50+）、**4.3 异常/飙升检测（成本 + Token 双口径）**——同时跑「💰成本口径」与「📊Token 口径」两套独立检测：成本口径仅在确有真实成本时启用；**Token 口径始终运行**，避免免费/限时免费模型拉低成本口径时漏报真实 Token 峰值（例如某日 11.43M token 环比 +315%）。免费主导期（免费 Token 占比≥80% 或总成本为 0）会在 §4 顶部插入免责声明，提示 §4.4/4.5/4.6 成本类洞察在免费期参考有限，应优先看 §4.3 Token 口径与 §4.6 缓存、**4.4 省钱杠杆自动洞察**（基于实际执行维度，对高占比付费模型给出更便宜替代与预计月省估算，如 glm-5.2→glm-4.5-air 预计月省 ¥7+）
-5. **任务类型统计** — 按任务类型分类的会话数量和占比、任务类型分布图
-6. **任务 Token 消耗统计** — 按任务类型聚合的 **实际消耗（计费等效）Token** 与估算成本（排名按实际消耗而非原始总量），定位真正吃 token 的任务类型；含**缓存占比**列解释"为什么原始数字大但实际便宜"；占比图：**Markdown 报告用纯文本横向条形图**（fenced 代码块，主题安全、窄项不糊、永不重叠），**HTML 报告仍用自包含内联 SVG 环形图**（currentColor + CSS 变量，双主题兼容）；并列出 **Top 10 实际消耗最高的任务对话框**（含自动化任务会话，按会话实际消耗排序，含任务类型、原始总量、缓存占比与估算成本）
-7. **技能使用统计** — 技能使用次数、最近使用时间
-8. **自动化任务运行情况** — 各自动化任务状态（执行中/已暂停/已删除）、运行次数、成功/失败、最近一次结果、最近一次运行日期（无论任务是否已停止均显示）
-9. **产出物清单** — 产出文件列表
-10. **核心洞察与建议** — 高峰日分析、任务类型洞察、缓存效率评估（钱优先视角）
-11. **下期展望** — 基于 Token 消耗趋势与自动化运行概况动态生成的建议（如检查 token 额度、处理待审核任务）。**注意**：「下期展望」中的自动化建议仅统计「执行中（ACTIVE）」的自动化；已停止（已暂停/已删除）的自动化即便有 PENDING_REVIEW 运行也**不计入待审核**，亦不出现在自动化建议中。
+**✅ 触发（应启用本技能）**
+> 「帮我出一份本周的 Agent 使用情况报告，看看这周 token 花在哪了」
 
-## 数据源说明
-
-默认数据源为 WorkBuddy（`--source workbuddy`）：
-
-| 数据源 | 路径 | 内容 |
-|--------|------|------|
-| Traces | `~/.workbuddy/traces/` | Token 消耗、模型信息、会话时长 |
-| SQLite DB | `~/.workbuddy/workbuddy.db` | 会话元数据、自动化运行、信用消耗 |
-| Usage Log | `~/.workbuddy/usage-log.json` | 技能使用记录、活跃天数 |
-| 会话目录 | `~/WorkBuddy/` | 产出文件、记忆日志 |
-
-切换到 Claude Code（`--source claude-code`）时读取：
-
-| 数据源 | 路径 | 内容 |
-|--------|------|------|
-| 会话 JSONL | `~/.claude/projects/**/*.jsonl` | 每轮 assistant 消息的 `usage`（输入/输出/缓存读写 token）、模型名、`cwd`、用户提问文本 |
-
-切换到千问办公（`--source qwenwork`）时读取：
-
-| 数据源 | 路径 | 内容 |
-|--------|------|------|
-| 会话转录 | `~/.qwenworkcn/projects/<slug>/<sessionId>.jsonl` | 对话内容、`cwd`、时间戳、模型档位、`requestTokenAnchor.requestId`；**技能调用**（`tool_use name="Skill"` → `input.skill`）、**交付物**（`present_files` 的 `file_path`）、**用户提问轮数**（`humanInput`）都在这里 |
-| 运行日志 | `~/.qwenworkcn/logs/runs/<run>/qodercli.log` | 逐次模型调用（`model.request.started` / `model.response.completed`）、端到端耗时、`stop_reason` |
-| 业务库 | `%APPDATA%/QwenWorkCN/data/agents.db`（只读；缺失时自动降级） | 界面会话真名、`model_level` 档位、每轮 `durationMs` / `numTurns`、**定时任务** `scheduled_tasks` + `task_run_logs`、后台运行 `nudge_logs` |
-| 产出目录 | `<会话 cwd>/outputs/`（即 `~/.qwenworkcn/workspace/<chatId>/outputs/`） | 交付物兜底（跳过 `.bak` / `.tmp` / `~$` / 隐藏文件），与 `present_files` 去重合并 |
-
-⚠️ 千问办公**服务端不回传 token 用量**（实测四个 token 字段恒为 0），故该源的 token 是
-本地字符估算，且积分订阅无公开单 token 价 → 报告自动走 `tokens_only`（金额维度全篇撤掉）；
-调用次数 / 耗时 / 档位 / 标题 / 技能 / 交付物为真实值。机制差异与「为什么 `skill-usage.json`
-不作统计源」详见 `docs/ADAPTERS.md` §四、§4.6。
-
-适配器把 JSONL 归一化为同一套 trace schema 并现场合成会话记录，因此下游聚合、计价、任务分类与报告渲染完全复用（详见 `docs/ADAPTERS.md`）。
-
-## Token 口径：原始总量 vs 实际消耗（计费等效）
-
-报告刻意区分两种 token 口径，避免"看起来吃了很多、其实很便宜"的误读：
-
-- **原始总 Token（含缓存命中）** = `totalTokens` = 输入 + 输出。其中 **`cached_tokens`（缓存命中）是输入 token 的子集**：它被模型读取并处理过（所以"算消耗了"），但命中了**提示词前缀缓存**，按行业惯例约 **1/10 的低价**计费，而非全新输入的全价。
-- **实际消耗 Token（计费等效）** = `原始总量 − 缓存命中 ×(1−折扣)`，折扣 `CACHE_DISCOUNT=0.1`（见 `collect_usage_data.py`）。即缓存命中只按 10% 计入实际消耗。这是报告所有排名（任务类型、Top 任务、每日趋势、成本）的**主口径**。
-- **缓存占比** = `cached_tokens / input_tokens`，越高说明该任务/会话大量复用同一段上下文（例如连续多轮生成、长 system prompt 反复重发），数字看起来大但实际成本很低——这正是"Agent 吃 token 的原因"的主要解释。
-
-> 数据校验：`totalTokens ≈ input + output`（cached 是 input 子集）在 150+ 条 trace 中稳定成立（仅个别四舍五入误差），故上述折算可靠。
-
-字段映射（`traces` / `summary` / `task_token_stats` / `top_tasks` 均含）：`total_tokens`（原始）、`effective_tokens`（实际消耗）、`cached_tokens`、`effective_cost`（实际成本）、`cache_rate`（总体缓存占比）。
-
-## 成本口径：L1 真值 / L2 估算（v1.6.0 / F17）
-
-报告的成本数字有**两个可信度级别**，报告顶部横幅会明确标注当前是哪一级：
-
-| 级别 | 触发条件 | 成本来源 | 横幅 |
-|---|---|---|---|
-| **L1 真值** | 传入 `--import-official <xlsx>` | 官方用量导出的「积分消耗」字段（服务端实际计费结果） | ✅ 显示官方请求数 / 积分 / 免费次数 |
-| **L2 估算** | 未传（**默认**） | `pricing.json` 静态单价 × token 量 | ⚠️ 警告「不含服务端时段减免，请勿据此做预算或账单对账」 |
-
-**为什么默认路径的钱不可信**：静态价表在数学上**无法表达**「服务端时段减免 / 用户免费额度」。
-实测 `hy4-preview` 在 2026-09-12~09-14 的 12 次调用中，**11 次夜间调用积分 = 0、仅 1 次白天收 43.40**，
-而静态价表会把 12 次全部计成收费。另有一类**盲区**——图像模型（`hunyuan-image-*`）与 `minimax-m3`
-根本不进本地 trace，30 日窗口实测漏记 ¥251.74（8.7%）。
-
-**怎么办**：
-
-```bash
-# 官网下载用量导出后，加一个参数即可把成本升级为真值
-python scripts/collect_usage_data.py --start 2026-09-12 --end 2026-09-14 \
-  --import-official ~/Downloads/request-usage-2026-09-13.xlsx -o data.json
-python scripts/generate_report.py data.json --output report.html --format html
-```
-
-导入后报告新增 **§3.5 双源对账**：逐模型列出「官方有 / trace 无（成本被低估）」、
-「trace 有 / 官方无（本地 / 免费 / 路由，不是漏记）」与粒度倍数。
-
-**两点必须记住**：
-
-1. 「调用次数」是 **generation 粒度**（一次请求内部可含多轮生成），**不等于**官方「请求数」——
-   实测差约 11.9 倍。这是统计粒度不同，**不是用量暴涨**。
-2. 模型名**不体现是否免费**：`hy4-preview` 白天夜间都叫 `hy4-preview`。是否免费只能看官方积分。
-   `hy4-preview-x` 是「免费额度用尽后的收费变体」，夜间也照常计费，单价不得置 0。
-
-**L2 下的降级处理**：受时段减免影响的模型已写入 `pricing.json` 的 `low_confidence` 段
-（`hy4-preview` / `hy4-preview-x` / `deepseek-v4.1-flash` / `glm-5.3` / `glm-5.3-flash`），
-报告中标 ⚠、不进「最贵模型」结论，但**被剔除者会逐条列出金额**（不让最大成本项悄悄消失）。
-可用 `pricing.local.json` 覆盖。
-
-已知偏差的完整清单（trace 盲区 / trace 独有 / 实证表格）见 `docs/ADAPTERS.md` §四「数据来源与已知偏差」。
-
-## 任务类型分类规则
-
-任务类型判定分两步（见 `collect_usage_data.py` 的 `classify_task` / `collect_task_types`）：
-
-1. **后台自动化会话优先**：若会话标记为后台自动化（`is_background_automation`），直接归为「自动化配置」，不依赖关键词；
-2. **其余按「对话内容 + 生成物（含已删除）+ 会话标题」综合匹配**关键词：候选文本 = 对话内容 + 生成物指纹 + 标题，拼接后送入 `classify_task` 匹配。各部分来源：
-   - **对话内容**：从 `~/.workbuddy/projects/<cwd哈希>/<sessionId>.jsonl` 读取 transcript，**逐段剥离 `<system-reminder>` 系统注入块**后匹配（必须在计入长度前剥离，否则首条 user 消息携带的巨型 system-reminder 会让截断提前触发、只剩裸 user_query）。抽取范围：
-     - `type=message`：user/assistant 的 `content` 文本片段列表（`input_text`/`output_text`）；
-     - `type=reasoning`：助手思考文本在 **`rawContent`** 字段（其 `content` 通常为空列表），需优先取 `rawContent`。
-   - **生成物指纹（含已删除）**：见 `get_session_artifact_fingerprint`——即便产物文件已物理删除，以下记录在 transcript 里仍保留：
-     - `function_call` 记录里的 **`ImageGen` / `VideoGen`** 工具调用（确定性内容生成证据）；
-     - `file-history-snapshot.trackedFileBackups` 的**键名**（编辑器曾跟踪的文件名，删除后键名仍保留，是"已删除生成物"的主要来源，含 `.png/.mp4/.html` 等）。
-     指纹以 `[artifacts] imagegen/videogen 媒体文件名...` 形式注入候选文本，供「内容生成」类型强判定（媒体文件名规则必须紧跟 `[artifacts]` 标记，避免"领券截图/二维码"等非创作媒体误判）。
-   - 对话内容与生成物指纹均缺失时，回退到会话标题。
-
-分类采用**加权评分**（v1.5.0 / P2-3），不再「顺序命中即返回」：
-
-- **所有规则参与打分，取总分最高者**；同分按 priority（原顺序）打破平局。
-- 每条 pattern 有权重（`scripts/task_rules.json` 可编辑）：强信号（如 `skillhub install`、`SKILL.md`、`imagegen`）权重 2~2.5，弱信号（如「了解」「对比」）权重 0.5~0.8，需多条叠加才能取胜。
-- **信号密度取胜**：同类型内多个**不同** pattern 命中各自累加；同一 pattern 重复命中按几何级数衰减（`repeat_decay=0.35`），刷词无效。
-- **ASCII 词自动加词边界**：`fix` 不会误命中 `prefix` / `fixture`（旧版 `re.search` 无边界的缺陷已修复）。
-- **置信度透明**：启发式分类把 `_task_confidence`（0~1，最高分与次高分的差距比）写入会话数据；平票→0，一边倒→1。低于 0.25 视为不确定。
-- **可选 LLM 增强**：`--task-classifier llm --task-llm-endpoint <URL> --task-llm-model <模型>`。仅接受用户自备的 OpenAI 兼容端点（本地 Ollama `http://localhost:11434/v1` 或自有服务），**不内置任何第三方商业 API 默认值**；每条会话调用失败自动回退启发式，不中断采集。默认 `heuristic`，完全离线。
-
-规则表（`scripts/task_rules.json`，可增删改，文件缺失/损坏自动回退内置规则）：
-
-| 优先级 | 任务类型 | 高权重信号（示例） |
-|------|----------|-----------|
-| 1 | 技能安装 | skillhub install、技能安装 |
-| 2 | 技能开发 | SKILL.md、技能创建/开发/封装 |
-| 3 | 报告生成 | 周报/月报/年报/日报、生成报告 |
-| 4 | Bug修复 | 错误修复、bug、修复、debug、调试 |
-| 5 | 内容生成 | imagegen/videogen、短剧/剧本/分镜/小说、文生图/图生视频、创作 |
-| 6 | 代码开发 | 编写代码、实现功能、python、github |
-| 7 | 自动化配置 | 定时任务、cron 表达式、每日任务、schedule |
-| 8 | 环境搭建 | 环境搭建、虚拟环境、conda/poetry、依赖安装 |
-| 9 | 研究学习 | 第一性原理、教程、调研、学习笔记 |
-| 10 | 代码分析 | 代码分析/审查/诊断、hermes、健康检查 |
-| 11 | 文档编写 | 编写文档、操作手册、API 文档 |
-
-> **内容生成 vs 代码开发**：内容生成的权重更高（生成物指纹 `imagegen`/`videogen`/`[artifacts]` 媒体文件名是 2.0+ 的强信号），纯开发/配置会话不会被创作词 incidental 抢走。**Token 关联**：`aggregate_task_token_stats` 按 `traces.session_id → sessions.id → task_type` 聚合；`main()` 会补全会话（窗口内有 trace 但创建于窗口外的会话也纳入），确保 token 全部关联到任务类型、不出现「未关联」占位行（除非确有孤儿 trace）。
-
-## 脚本说明
-
-### scripts/collect_usage_data.py
-
-主数据采集脚本，从所有数据源聚合数据。
-
-```bash
-python scripts/collect_usage_data.py --period week --output data.json
-```
-
-**输出字段**：
-- `traces` — Token 消耗明细
-- `sessions` — 会话列表
-- `automation_runs` — 自动化运行记录
-- `session_credits` — 信用消耗
-- `skill_usage` — 技能使用统计
-- `outputs` — 产出文件列表
-- `daily_tokens` — 每日 Token 聚合
-- `summary` — 汇总统计
-
-### scripts/analyze_tokens.py
-
-Token 消耗专项分析，生成详细的可视化报告。
-
-```bash
-python scripts/analyze_tokens.py data.json --output token_report.md
-```
-
-**分析维度**：
-- 按日统计（总 Token、输入/输出/缓存）
-- 按模型统计
-- 按任务类型统计
-- ASCII 趋势图
-
-### scripts/fetch_pricing.py
-
-定价数据更新助手（P2-2）。**数据源由你自备**（你自己的定价镜像 URL / 官方机器可读端点 / 本地 JSON 文件），不抓取任何厂商网页。流程：拉取 → 校验 → 产出候选与差异报告 → 人工审核 → 落盘。
-
-```bash
-# 拉取并校验（默认只出候选，不落盘）
-python scripts/fetch_pricing.py --file ./new-prices.json
-python scripts/fetch_pricing.py --url https://your-mirror/pricing.json
-
-# 产出：scripts/pricing.candidate.json（候选）+ pricing-diff.md（差异报告）
-
-# 审核无误后落盘（自动备份为 pricing.json.bak-<时间戳>）
-python scripts/fetch_pricing.py --file ./new-prices.json --apply
-
-# CI 过期检查：定价超过 30 天未更新则退出码 1
-python scripts/fetch_pricing.py --check --stale-days 30
-```
-
-**校验规则**：单价必须为非负数字（≤10000）；与现价偏差超过 `--max-ratio`（默认 5 倍）的条目拒绝并写入差异报告，确认无误可加 `--force`；无变化的条目跳过。落盘前后均不动 `pricing.local.json`（本地覆盖始终优先）。
-
-### scripts/task_classifier_llm.py
-
-可选 LLM 任务分类器（P2-3c），默认不加载。仅当 `collect_usage_data.py` 传入 `--task-classifier llm` 且提供自备 OpenAI 兼容端点时启用；失败自动回退启发式。
-
-### scripts/generate_report.py
-
-完整报告生成器（日/周/月/年），整合所有模块，支持多种输出格式。
-
-```bash
-# 生成 Markdown 报告（默认）
-python scripts/generate_report.py data.json --output report.md
-
-# 生成 HTML 报告
-python scripts/generate_report.py data.json --output report.html --format html
-
-# 生成 JSON 报告
-python scripts/generate_report.py data.json --output report.json --format json
-
-# 实时采集并生成报告（不传 data_file 即触发实时采集，--period/--days/--start/--end 指定范围）
-python scripts/generate_report.py --period week --output report.md
-```
-
-**支持的输出格式**：
-- `markdown` - Markdown 格式（默认），适合文档阅读
-- `html` - HTML 格式，适合网页展示，包含样式和交互
-- `json` - JSON 格式，适合程序处理和数据分析
-
-## 测试与质量保障
-
-本技能附带一套 **pytest + Allure 分层回归测试**（L0 数据采集 / L1 报告生成 / L2 定价边界 / L3 CLI 端到端 / L4 发布一致性，共 13 个测试文件、318 用例全绿），全部使用合成 fixture 数据，**不含任何真实用量/个人信息**，可安全公开用于作品集展示。运行方式与 Allure 报告渲染见 [README.md](README.md) 的「测试」章节。
-
-几个关键的回归守护点：
-- `test_publish_parity.py` 校验 `config.json` 与 `metadata.json` 版本号一致，防止发布版本漂移；
-- `test_report_generation.py` 含 XSS 回归用例，确保恶意模型名在 HTML 报告中被强制转义；
-- `test_e2e_cli.py` 黑盒验证报告生成 CLI 端到端可用（仅喂合成数据，绝不触碰真实 `workbuddy.db`）；
-- `test_pricing_boundary.py` 守卫计价边界（通道分支、已下架模型、零/负/超大值、blended 回退精度）。
-
-## 执行流程
-
-当用户请求周报时：
-
-1. **确认时间范围**
-   - 默认：最近 7 天（`--period week`）
-   - 用户可指定周期：`--period day|week|month|year`；或自定义 `--days N`；或绝对范围 `--start/--end`
-
-2. **采集数据**
-   - 运行 `collect_usage_data.py`
-   - 输出 JSON 数据文件
-
-3. **生成报告**
-   - 运行 `generate_report.py`
-   - 根据需要选择输出格式（markdown/html/json）
-   - 输出相应格式的报告文件（标题统一为 `Workbuddy使用情况报告`，周期由报告头部「报告类型」行以日历日期标识）
-
-4. **展示结果**
-   - 输出报告摘要（3-5 条核心发现）
-   - 使用 present_files 展示完整报告
-
-## 示例输出
-
-```markdown
-# Workbuddy使用情况报告   # 标题固定，不随周期变后缀；周期见下方「报告类型」
-
-> **报告周期**：2026-07-27 至 2026-08-03
-> **报告类型**：周报 · 2026 年第32周（2026-07-27 至 2026-08-03）
-> **生成时间**：2026-08-03 01:26
-
-## 一、概览统计
-
-| 指标 | 数值 |
-|------|------|
-| 活跃天数 | 7 天 |
-| 会话总数 | 18 个 |
-| 总 Token 消耗 | 14.91M |
-
-## 二、Token 消耗可视化
-
-### 每日趋势
-
-```
-2026-07-15 |████████ 4.47M
-2026-07-16 |████████████ 6.61M
-...
-```
-
-## 三、任务类型统计
-
-| 任务类型 | 会话数 | 占比 |
-|----------|--------|------|
-| 技能安装 | 17 | 35.4% |
-| 技能开发 | 7 | 14.6% |
-...
-```
-
-## 注意事项
-
-- 数据仅来自本地 WorkBuddy，不涉及云端数据
-- Token 数据来自 traces 目录，需确保 trace 功能已启用
-- 任务类型分类基于关键词匹配，可能存在误分类
-- 自动化运行数据来自 workbuddy.db，仅包含本地创建的任务
-- HTML 格式报告包含样式美化，适合在浏览器中查看；报告采用 CSS 变量 + `data-theme` 属性，**支持手动切换浅色/深色/系统三态**（页头按钮，偏好持久化到 localStorage，刷新不丢失，无闪烁）；未手动选择时通过 `prefers-color-scheme: dark` 媒体查询**自动跟随系统深色模式**。背景/文字/表格/卡片/图表对比度均按主题切换。
-- Markdown 格式报告的图表：**第 5 章任务类型占比** 与 **4.2 每会话成本分布** 均用 **fenced ```` ``` ```` 纯文本横向条形图**（与 3.1/3.2 模型条形图同风格），主题安全（文字取查看器代码块前景色，切换浅/深外观绝不消失）、每类一行永不重叠、窄项只是短条不糊。早期尝试过内联 SVG 环形图（被 .md 预览器剥离不显示）与 mermaid 饼图（窄扇区标签糊、强制 theme 在深色下不可靠），均弃用。**HTML 报告** 对应位置保留彩色 SVG 环形图（currentColor + CSS 变量、标签在侧边图例，已满足双主题要求；`build_donut_chart` 通过 `value_key`/`unit`/`center_label` 参数同时服务「任务类型 Token 占比」与「每会话成本分布（按会话数）」）。两版数据/标题/颜色语义一致，仅可视化类型因 Markdown 不能渲染内联 SVG 而不同（此为必要差异）。两版表格（如五、任务类型统计的「会话数」列）保持纯数字、样式一致。
-- JSON 格式报告结构化数据，便于程序处理和集成
-- 成本货币化按**模型单价（输入/输出分别计价，元/1M）**计算，单价表见 `collect_usage_data.py` 的 `MODEL_PRICING`。键名为本机真实模型名（已联网查证 2026-07-29 填入）：
-  - `hy3` 腾讯混元官方 RMB：输入 1 / 输出 4；`deepseek-v4-pro` DeepSeek 官方永久价 RMB：输入 3 / 输出 6；
-  - 智谱 GLM 系列（**bigmodel.cn 国内官方 RMB 价**，用户接口走 bigmodel.cn，非 Z.ai 美元折算）：`glm-5.3` 8/28（与 glm-5.2 同价，2026-08 发布，思考模式强制开启）、`glm-5.2` 8/28、`glm-5` 6/22、`glm-4.6v` 2/6、`glm-4.5-air` 1.2/8、`glm-4.7-flash` 免费（0/0）、`glm-5.2-x` 暂按 glm-5.2（均为 agent 长上下文档代表值，短上下文更低）；
-  - 免费 `:free` 模型已标 0；
-  - `auto` 为**智能路由别名**（执行时自动调配最适合模型，类似 openrouter/free），无单一单价——代码自动取「所有计费模型（单价>0）的均价」做代表性估算，报告中以 ℹ️ 注明「估算值」；若想精确，可在 `MODEL_PRICING` 给 `auto` 直接填 `{"input":..,"output":..}` 覆盖。
-  - 未配置 / 未知模型显示「未配置」且不计入花费占比。以上为公开标价估算，请以 WorkBuddy 实际账单为准。
-- **费用计算按「模型实际走的 API 接口（通道）」决定**（2026-07-29 改造）：模型标识符字符串本身编码了接口位置，由 `parse_channel()` 解析为四种通道——`gateway`（裸名，WorkBuddy 默认网关，GLM→bigmodel.cn / hy3→腾讯 / deepseek→DeepSeek）、`openrouter-free`（`org/model:free`，价 0）、`custom-local`（用户自建本地接口，前缀 `custom-local:`）、`router`（`auto`）。通道真相源是 `workbuddy.db` 的 `sessions.model`（带前缀），采集器按 `session_id` 关联 trace 并打上通道，因此 `custom-local:glm-4.6v` 与裸 `glm-4.6v` 会被**分作两行、分别计价**（修复了过去混为一价的漏洞）。`custom-local` 通道默认对齐同名模型在默认网关的单价（见 `CUSTOM_LOCAL_PRICING`，留空即沿用网关价）；若你的自建接口走别的账单且单价不同，在 `CUSTOM_LOCAL_PRICING` 按底层模型名填写即可覆盖。报告「模型使用与成本对比」表格末尾附免责备注：「以上计算只供参考，如果是外部自建接口（custom-local），请往接口相关网站查看账单」。
-
-## 常见问题（FAQ）
-
-> 完整版（36 问，覆盖安装 / 生成 / 计价 / 自定义模型 / 标记与合并 / 档位维度 / 数据源隐私 / 分类异常 / 故障排查）见 **[references/FAQ.md](references/FAQ.md)**，单篇自足。下方只保留最高频的几条。
-
-**Q：报告里的花费和 WorkBuddy 后台对不上？**
-A：报告按「实际计费模型」（exec_model / 接口通道）聚合，与后台口径一致；若你的模型单价未配置或走了 `custom-local` 自建接口，报告按公开标价估算，请以接口方账单为准。
-
-**Q：我用了自己的自定义模型（如自建 DeepSeek），报告里显示「未配置」怎么办？**
-A：发布版只带官方模型，你的自建模型需加在本地 `scripts/pricing.local.json`（不进发布包、升级不丢失）的 `custom_local` 段（模型名带 `custom-local:` 前缀时）或 `models` 段（裸名时）。填好单价后重跑即可正常计费，详见上方「加入你自己的自定义模型」。嫌麻烦就直接把模型名+单价贴给 Agent，让它照 `references/add-custom-models.md` 模板写进去。
-
-**Q：免费期为什么花费显示很低甚至为 0？**
-A：`hy3` 等限免入口和 `:free` 免费模型拉低了成本口径。报告会自动标注免费期，此时请优先看 §4.3 的 **Token 口径**（始终运行）和缓存占比，别只看钱。
-
-**Q：报告里出现「幽灵调用 / 未解析调用」警告是什么？**
-A：早期 WorkBuddy trace 可能同时缺 sessionId 与 modelInfo（被兜底记为 `default`、token 全 0），无法归属到任何模型/会话，报告会显式警告并单独统计，不影响可计费数据。
-
-**Q：删除的对话还会出现在报告里吗？**
-A：已删除对话消耗的 token/成本仍会计入总量（避免低估真实开销），但归属到「其他/未关联」，不会按会话明细展示。
-
-**Q：数据会被上传或联网吗？**
-A：分两个阶段——**采集阶段只做本机只读采集**，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传（`--pricing-api` / `--task-llm-endpoint` 都是显式传参才请求、不内置默认端点，`--lookup-pricing online` 只本地拼接搜索链接、不发请求）。**配置阶段仅在你明确确认单价后**，才可能写你自己副本里的 `scripts/pricing.local.json`（不进发布包、升级不覆盖）；`scripts/task_rules.json` 属发布资产、改动会被升级覆盖。完整清单见「隐私与联网行为（完整清单）」。
-
-**Q：支持其他 Agent 吗？**
-A：已支持五个数据源：WorkBuddy（默认，能力最全）、Claude Code、Codex CLI、千问办公（`--source qwenwork`）、百度搭子（`--source dumate`，复用 `~/.workbuddy` 布局）。
-其中千问办公因服务端不回传 token，token 为本地估算、金额不计价（其余维度是真实值）；
-Trae 等仍在扩展清单里，接缝与验收清单见 `docs/ADAPTERS.md`。
+**❌ 不触发（不应启用本技能）**
+> 「帮我把 Claude 的配置改成用 GLM-5.2 跑」——这是修改 Agent 配置 / 实时操控，不是基于本地已有数据出报告，本技能不做。
