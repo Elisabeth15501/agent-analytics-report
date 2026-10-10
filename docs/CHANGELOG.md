@@ -3,6 +3,16 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.1] — 2026-10-11
+
+### 🔒 安全扫描加固（P2/P3 残留项收口）
+
+- P2-1：SKILL.md 中 `scripts/task_rules.json` 引用补「纯 pattern 列表、不含可执行代码」声明，消除 SkillSpector `Ae1` 盲区（被引用 artifact 未被完整检查）。
+- P2-2：`scripts/collect_usage_data.py` 的 `--pricing-api` / `--task-llm-endpoint` 两处新增「防 SSRF、不内置任何默认端点、不传则完全离线」安全边界注释（无逻辑改动）；经审计确认全仓唯一 `urlopen` 仅使用显式 CLI 参数，无从 trace / 会话内容派生 URL 再请求的路径。
+- P3-1：SKILL.md 与 README.md 开头新增「文件角色说明」段，明确 `tests/` 与 `tools/` 为开发期资产、不进发布包，降低后续扫描误报率。
+
+- 🧪 `test_version_parity` 门禁通过（五处版本号一致）。
+
 ## [1.9.0] — 2026-10-06
 
 ### 🆕 百度搭子（DuMate）数据源（⚠️ 归属未证实）

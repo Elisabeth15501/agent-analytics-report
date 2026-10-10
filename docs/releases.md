@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.1** | 2026-10-11 | 安全扫描加固（P2/P3 残留项）：task_rules.json 声明消 Ae1 盲区 + 防 SSRF 注释 + 文件角色说明段 | [tag/v1.9.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.1) |
 | **v1.9.0** | 2026-10-06 | 百度搭子（DuMate）数据源 + 任务类型分类修复 + 归属标注与文档降级（归因红线）+ 隐私护栏（只读 SQLite / 时间窗过滤）+ 合规文案收敛 | [tag/v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0) |
 
 | **v1.7.2** | 2026-09-22 | Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）；L1 不再渲染低置信度噪音 | [tag/v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2) |
@@ -27,6 +28,19 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.1 — 2026-10-11
+
+**安全扫描加固（P2/P3 残留项收口）**
+
+- 🔒 P2-1：SKILL.md 中 `scripts/task_rules.json` 引用补「纯 pattern 列表、不含可执行代码」声明，消除 SkillSpector `Ae1` 盲区（被引用 artifact 未被完整检查）。
+- 🔒 P2-2：`scripts/collect_usage_data.py` 的 `--pricing-api` / `--task-llm-endpoint` 两处新增「防 SSRF、不内置任何默认端点、不传则完全离线」安全边界注释（无逻辑改动）；经审计确认全仓唯一 `urlopen` 仅使用显式 CLI 参数。
+- 📝 P3-1：SKILL.md 与 README.md 开头新增「文件角色说明」段，明确 `tests/` 与 `tools/` 为开发期资产、不进发布包。
+
+- 🧪 `test_version_parity` 门禁通过（五处版本号一致）。
+
+🔗 [GitHub Release v1.9.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.1)
+
 
 ## v1.9.0 — 2026-10-06
 

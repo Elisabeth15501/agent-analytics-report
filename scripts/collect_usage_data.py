@@ -236,6 +236,8 @@ def main():
         "online=尝试联网检索（需 --pricing-api 指向你自己的定价镜像，"
         "否则仅生成可点击的搜索链接）。联网结果一律标注「网络估算价，仅供参考」",
     )
+    # 安全边界：--pricing-api 只接受用户显式传入的 URL，不内置任何默认端点；
+    # 不传则完全离线。URL 仅来自命令行参数，绝不接受从 trace / 会话内容派生的 URL（防 SSRF）。
     parser.add_argument(
         "--pricing-api",
         type=str,
@@ -276,6 +278,8 @@ def main():
         "llm=可选增强，须同时提供 --task-llm-endpoint（本地 Ollama 或自有 OpenAI 兼容端点），"
         "调用失败自动回退启发式",
     )
+    # 安全边界：--task-llm-endpoint 只接受用户显式传入的 URL，不内置任何默认端点；
+    # 不传则完全离线。URL 仅来自命令行参数，绝不接受从 trace / 会话内容派生的 URL（防 SSRF）。
     parser.add_argument(
         "--task-llm-endpoint",
         type=str,

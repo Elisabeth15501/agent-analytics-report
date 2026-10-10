@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.9.0
+version: 1.9.1
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 四种数据源，以及按 WorkBuddy 布局读取目录的通用入口 dumate（--source 切换，归属未证实）。
@@ -36,12 +36,14 @@ tags:
 
 > 本文件是**操作手册**。详细的数据源路径、计价表、Token/成本口径、任务分类规则、36 问 FAQ 收口到 `references/FAQ.md` 与 `docs/ADAPTERS.md`，按需查阅，不在此展开。
 
+> **文件角色**：本技能 = 1 个声明（本 SKILL.md）+ 5 个数据源适配器（`adapters/`）+ 核心引擎（`scripts/`）。`tests/` 与 `tools/` 是开发期资产（测试 / CI 渲染），**不在用户运行路径上、也不进发布包**；`docs/` 与 `examples/` 是文档与示例，不含可执行逻辑。
+
 ## 一、贯穿性硬约束（每轮必须遵守）
 
 以下规则在**每一次**执行时都必须成立，即使上下文被压缩也不能丢：
 
 1. **只读采集 + 离线优先**：采集阶段只读取本机数据（`~/.workbuddy` 等），默认零网络、不上传。仅当用户**显式传入** `--pricing-api` / `--task-llm-endpoint` 时才访问**用户自己的**端点；`--lookup-pricing online` 只本地拼接搜索链接、**不发请求**。绝不接受从 trace / 会话内容派生的 URL（防 SSRF）。
-2. **写文件必须用户逐条确认**：只有 `scripts/pricing.local.json`（补自定义模型单价）与 `scripts/task_rules.json`（调分类权重）会被写；且**必须先回显待写入清单、等用户确认后才落盘**。`pricing.local.json` 不进发布包、升级不覆盖；`task_rules.json` 是发布资产、升级会覆盖（改前备份）。
+2. **写文件必须用户逐条确认**：只有 `scripts/pricing.local.json`（补自定义模型单价）与 `scripts/task_rules.json`（调分类权重）会被写；且**必须先回显待写入清单、等用户确认后才落盘**。`pricing.local.json` 不进发布包、升级不覆盖；`task_rules.json` 是发布资产、升级会覆盖（改前备份）—— **该文件为纯 pattern 列表、不含可执行代码**，改动后任务分类结果会在报告标注 `_task_confidence`。
 3. **归属告警（dumate）**：`--source dumate` 按 WorkBuddy 布局读目录，**记录里没有任何字段能区分它来自百度搭子还是 WorkBuddy**（实测 `workbuddy.db` 217 会话匹配 qianfan/dumate 命中 0 行）。报告标题可写「百度搭子」，但**内容可能完全是 WorkBuddy 的**，必须带归属告警，勿当作百度搭子用量引用。
 4. **估算 ≠ 账单（qwenwork 等）**：服务端不回传 token 的源（千问办公），token 为**字符估算**、金额一律 `tokens_only`，**不可用于对账或账单核对**，真实消耗以官方账单为准。
 5. **成本口径分级标注**：默认 L2 估算（静态单价 × token），报告顶部横幅必须标注「不含服务端时段减免，请勿据此做预算或账单对账」；传入 `--import-official <xlsx>` 才升级为 L1 真值。
