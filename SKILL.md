@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.9.1
+version: 1.9.2
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 四种数据源，以及按 WorkBuddy 布局读取目录的通用入口 dumate（--source 切换，归属未证实）。
@@ -48,6 +48,12 @@ tags:
 4. **估算 ≠ 账单（qwenwork 等）**：服务端不回传 token 的源（千问办公），token 为**字符估算**、金额一律 `tokens_only`，**不可用于对账或账单核对**，真实消耗以官方账单为准。
 5. **成本口径分级标注**：默认 L2 估算（静态单价 × token），报告顶部横幅必须标注「不含服务端时段减免，请勿据此做预算或账单对账」；传入 `--import-official <xlsx>` 才升级为 L1 真值。
 6. **报告标题统一**：标题固定为 `Workbuddy使用情况报告`，周期由报告头部「报告类型」行以日历日期标识（日报/周报/月报/年报/自定义），不随周期带后缀。
+
+## 一·附 权限与作用域声明（最小权限）
+- **默认能力（始终成立）**：本机只读采集 + 完全离线；不写文件、不发任何网络请求、不上传任何数据。
+- **可选网络（仅显式启用）**：仅当用户传入 `--pricing-api <URL>` 或 `--task-llm-endpoint <URL>`（均指向**用户自己的**端点）时才联网；`--lookup-pricing online` 只本地拼接搜索链接、**绝不发请求**。无内置默认端点，URL 绝不从 trace / 会话内容派生（防 SSRF）。
+- **可选写（仅确认后）**：仅 `scripts/pricing.local.json` / `scripts/task_rules.json`，且必须先回显待写清单、用户确认后才落盘；`pricing.local.json` 不进发布包、升级不覆盖。
+- **维护工具隔离**：`scripts/fetch_pricing.py` 为**发布者专用**的定价维护助手，**不在用户采集 / 报告生成路径上**；默认只出候选与差异、不落盘、不抓厂商网页（须显式 apply 选项才写）。
 
 ## 二、单次执行流程（5 步闭环）
 

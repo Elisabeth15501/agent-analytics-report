@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import sys
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -73,6 +74,15 @@ __all__ = [
 CODEX_CHANNEL = "codex"
 
 _UNKNOWN_MODEL = "codex-default"
+
+
+_REDACT_RE = re.compile(r"(sk-[A-Za-z0-9]{12,}|https?://\S+|[\w.+-]+@[\w-]+\.[\w.-]+)")
+
+
+def _minimize_dialogue(parts, limit=120):
+    """把会话对话正文压成短样本（任务分类输入），不保留完整消息体，并对明显凭据脱敏。"""
+    text = " ".join(p for p in parts if p)[:limit]
+    return _REDACT_RE.sub("[REDACTED]", text)
 
 
 def resolve_codex_sessions_root():
@@ -283,7 +293,7 @@ def _parse_codex_file(path, start_date, end_date):
         "model": f"{CODEX_CHANNEL}:{first_model}" if first_model else CODEX_CHANNEL,
         "is_background_automation": False,
         "version": _UNKNOWN_MODEL,
-        "_dialogue_text": " ".join(dialogue_parts),
+        "_dialogue_text": _minimize_dialogue(dialogue_parts),
     }
     return traces, session_meta
 

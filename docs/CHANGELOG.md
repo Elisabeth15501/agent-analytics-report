@@ -3,6 +3,12 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.2] — 2026-10-11
+### 安全加固（回应 ClawHub 扫描 need review）
+- **SDI-4 修复**：`collect_usage_data.py` 联网检索改用 `urllib` 自身异常（`URLError` / `HTTPError`）兜底，目标不可达时优雅降级而非崩溃（原 `except` 只接 `requests.RequestException`）；逻辑抽为 `fetch_remote_pricing()` 并加单测。
+- **隐私面收敛（SQP-2）**：`adapters/codex.py` / `adapters/claude_code.py` 的会话正文抽取改为**截断 + 脱敏短样本**（上限 120 字符），不再把完整对话正文并入 `_dialogue_text` 供任务分类；采集入口新增本机只读 / 离线告知。
+- **声明锚点（LP3 / TP4）**：SKILL.md 新增「权限与作用域声明（最小权限）」块——默认本机只读 + 完全离线；可选网络仅显式端点、可选写仅确认后；`fetch_pricing.py` 为发布者专用、不在用户采集路径。
+
 ## [1.9.1] — 2026-10-11
 
 ### 🔒 安全扫描加固（P2/P3 残留项收口）

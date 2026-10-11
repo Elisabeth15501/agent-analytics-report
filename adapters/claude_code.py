@@ -75,6 +75,15 @@ CLAUDE_CHANNEL = "claude-code"
 _UNKNOWN_VERSION = "unknown"
 
 
+_REDACT_RE = re.compile(r"(sk-[A-Za-z0-9]{12,}|https?://\S+|[\w.+-]+@[\w-]+\.[\w.-]+)")
+
+
+def _minimize_dialogue(parts, limit=120):
+    """把会话对话正文压成短样本（任务分类输入），不保留完整消息体，并对明显凭据脱敏。"""
+    text = " ".join(p for p in parts if p)[:limit]
+    return _REDACT_RE.sub("[REDACTED]", text)
+
+
 def resolve_claude_projects_root():
     """定位 Claude Code projects 根目录。
 
@@ -300,7 +309,7 @@ def _parse_claude_file(path, start_date, end_date):
         "model": f"{CLAUDE_CHANNEL}:{first_model}" if first_model else CLAUDE_CHANNEL,
         "is_background_automation": False,
         "version": _UNKNOWN_VERSION,
-        "_dialogue_text": " ".join(dialogue_parts),
+        "_dialogue_text": _minimize_dialogue(dialogue_parts),
     }
     return traces, session_meta
 

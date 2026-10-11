@@ -6,7 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
-| **v1.9.1** | 2026-10-11 | 安全扫描加固（P2/P3 残留项）：task_rules.json 声明消 Ae1 盲区 + 防 SSRF 注释 + 文件角色说明段 | [tag/v1.9.1](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.1) |
+| **v1.9.2** | 2026-10-11 | 安全加固（回应 ClawHub 扫描 need review）：SDI-4 修复 + SQP-2 截断脱敏 + 最小权限声明 | [tag/v1.9.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.2) |
 | **v1.9.0** | 2026-10-06 | 百度搭子（DuMate）数据源 + 任务类型分类修复 + 归属标注与文档降级（归因红线）+ 隐私护栏（只读 SQLite / 时间窗过滤）+ 合规文案收敛 | [tag/v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0) |
 
 | **v1.7.2** | 2026-09-22 | Phase C · L1 真值下 §4.4 省钱建议改用官方真实积分（C7）；L1 不再渲染低置信度噪音 | [tag/v1.7.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.7.2) |
@@ -28,6 +28,12 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.2 — 2026-10-11
+### 安全加固（回应 ClawHub 扫描 need review）
+- **SDI-4 修复**：联网检索改 `urllib` 异常兜底，抽 `fetch_remote_pricing()` 并加单测。
+- **SQP-2 收敛**：会话正文抽取改截断 + 脱敏短样本（≤120 字符），采集入口加只读/离线告知。
+- **LP3 / TP4 声明**：SKILL.md 新增最小权限作用域声明块。
 
 ## v1.9.1 — 2026-10-11
 

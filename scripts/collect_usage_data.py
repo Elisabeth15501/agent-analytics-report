@@ -25,6 +25,7 @@ import sqlite3
 import sys
 import urllib.parse
 import urllib.request
+import urllib.error
 from datetime import datetime, timedelta, timezone, date
 from pathlib import Path
 from collections import defaultdict
@@ -942,20 +943,12 @@ def main():
                 "https://duckduckgo.com/html/?q="
                 + urllib.parse.quote(f"{model} API pricing")
             )
-            if args.pricing_api:
-                try:
-                    with urllib.request.urlopen(args.pricing_api, timeout=10) as resp:
-                        remote = json.loads(resp.read().decode("utf-8"))
-                    rm = remote.get("models", {}).get(
-                        normalize_model(model)
-                    ) or remote.get("models", {}).get(model)
-                    if rm and "input" in rm and "output" in rm:
-                        pricing_lookup["network_estimates"][model] = {
-                            "input": float(rm["input"]),
-                            "output": float(rm["output"]),
-                        }
-                except (requests.RequestException, ValueError, KeyError) as e:
-                    print(f"[WARN] 联网检索 {model} 失败：{e}", file=sys.stderr)
+    # ── 安全守卫（防 SSRF + 默认离线）──
+    # 仅当用户「显式传入 --pricing-api <URL>」时才拉取**用户自己的**定价镜像；
+    # URL 只来自命令行参数，绝不从 trace / 会话内容派生。目标不可达时由
+    # fetch_remote_pricing 统一接 urllib 自身异常并优雅降级（修复 SDI-4）。
+    if args.lookup_pricing == "online" and args.pricing_api and unconfigured:
+        pricing_lookup["network_estimates"] = fetch_remote_pricing(args.pricing_api, unconfigured)
     result["meta"]["pricing_lookup"] = pricing_lookup
 
     # 成本深度分析：每会话成本 / 省钱杠杆（cost_anomalies 依赖 daily_tokens，在下方构建后计算）
@@ -1007,6 +1000,31 @@ def main():
         print(f"[OK] 数据已保存到 {args.output}", file=sys.stderr)
     else:
         print(output_json)
+
+
+def fetch_remote_pricing(api_url, unconfigured_models, timeout=10):
+    """拉取用户自有定价镜像（仅当 --pricing-api 显式传入时调用；默认路径不调用，零网络）。
+
+    返回 {model: {"input": float, "output": float}}；任何网络/解析异常均吞掉并返回空 dict，
+    保证目标不可达时优雅降级而非崩溃（修复 SDI-4：原实现 except 只接 requests.RequestException，
+    urllib 抛出的 URLError/HTTPError 会逃逸导致采集器崩溃）。URL 只来自命令行参数，不从 trace/
+    会话内容派生（防 SSRF）。
+    """
+    network_estimates = {}
+    for model in sorted(unconfigured_models):
+        try:
+            with urllib.request.urlopen(api_url, timeout=timeout) as resp:
+                remote = json.loads(resp.read().decode("utf-8"))
+            rm = (
+                remote.get("models", {}).get(normalize_model(model))
+                or remote.get("models", {}).get(model)
+            )
+            if rm and "input" in rm and "output" in rm:
+                network_estimates[model] = {"input": float(rm["input"]),
+                                           "output": float(rm["output"])}
+        except (urllib.error.URLError, urllib.error.HTTPError, ValueError, KeyError) as e:
+            print(f"[WARN] 联网检索 {model} 失败（已降级，不影响报告）：{e}", file=sys.stderr)
+    return network_estimates
 
 
 if __name__ == "__main__":
