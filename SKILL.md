@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.9.2
+version: 1.9.3
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 四种数据源，以及按 WorkBuddy 布局读取目录的通用入口 dumate（--source 切换，归属未证实）。
@@ -53,7 +53,7 @@ tags:
 - **默认能力（始终成立）**：本机只读采集 + 完全离线；不写文件、不发任何网络请求、不上传任何数据。
 - **可选网络（仅显式启用）**：仅当用户传入 `--pricing-api <URL>` 或 `--task-llm-endpoint <URL>`（均指向**用户自己的**端点）时才联网；`--lookup-pricing online` 只本地拼接搜索链接、**绝不发请求**。无内置默认端点，URL 绝不从 trace / 会话内容派生（防 SSRF）。
 - **可选写（仅确认后）**：仅 `scripts/pricing.local.json` / `scripts/task_rules.json`，且必须先回显待写清单、用户确认后才落盘；`pricing.local.json` 不进发布包、升级不覆盖。
-- **维护工具隔离**：`scripts/fetch_pricing.py` 为**发布者专用**的定价维护助手，**不在用户采集 / 报告生成路径上**；默认只出候选与差异、不落盘、不抓厂商网页（须显式 apply 选项才写）。
+- **维护工具隔离**：`scripts/fetch_pricing.py` 为**发布者专用**的定价维护助手，**不在用户采集 / 报告生成路径上**、**也不随 ClawHub / SkillHub 发布包分发**（仅源码仓库 `scripts/` 提供）；默认只出候选与差异、不落盘、不抓厂商网页（须显式 apply 选项才写）。
 
 ## 二、单次执行流程（5 步闭环）
 
@@ -109,7 +109,7 @@ tags:
 | 搜索链接 | `--lookup-pricing online` | **不发请求** | 纯字符串拼接 DuckDuckGo 链接，交你自点 |
 | 默认 | 都不传 | 零网络 | 本机只读 + 本地渲染 |
 
-`scripts/fetch_pricing.py` 是**独立、手动触发**的定价维护助手（发布者用，非用户采集路径）：默认只出候选与差异报告、不落盘、不抓厂商网页；数据源由你自备。
+`scripts/fetch_pricing.py` 是**独立、手动触发**的定价维护助手（发布者用，非用户采集路径）：默认只出候选与差异报告、不落盘、不抓厂商网页；数据源由你自备。**该脚本不随发布包分发**，仅源码仓库提供，终端用户无需它即可生成报告。
 
 ## 五、扩展与参考（按需查阅，不在此展开）
 - 详细数据源路径、已知偏差、适配器接缝与验收清单：`docs/ADAPTERS.md`

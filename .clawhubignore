@@ -32,8 +32,10 @@
 #        故复算前应确认无未跟踪的临时产物（.gitignore 已覆盖 .pt_* / allure-results/ 等）。
 #
 # 保留说明：adapters/（5 个真实适配器）、examples/（SKILL.md 有引用）、
-# scripts/gen_example_report.py（SKILL.md 有引用）、references/（用户配置流程文档）
-# 均为技能运行时面，必须随包发布，不得排除。
+# references/（用户配置流程文档）均为技能运行时面，必须随包发布，不得排除。
+# 注：scripts/gen_example_report.py 原属运行时面候选，但它是维护者用来
+# 「重新生成示例报告」的开发脚本（终端用户运行报告不需它，示例已静态入库），
+# 故本轮移入下方「开发/维护者脚本」排除块；SKILL.md 并未引用它，移出不破坏文档一致性。
 #
 # 注意：本文件是隐藏文件（点号起始路径段），ClawHub CLI 自身会忽略它；
 #    走目录拷贝 / 手工 zip 发 SkillHub 时它是多余的未知文件，发布前应删掉。
@@ -56,3 +58,13 @@ tools/
 pytest.ini
 requirements-tests.txt
 docs_render.py
+
+# ---- 追加：开发/维护者脚本，移出终端用户 ClawHub 发布包 ----
+# 这些脚本仅服务开发者/维护者（CI、发布者定价维护、示例生成、隐私对账），
+# 终端用户运行用量报告完全不需要；移出包后消除 skillspector 的 TP4 信任错配
+# （包内不再含「联网抓取 + 写文件」工具），并修掉 gen_report.py 在包内依赖未发包
+# tools/ 的坏链（SDI-1 HIGH）。它们保留在 git 仓库供维护者使用。
+scripts/fetch_pricing.py
+gen_report.py
+verify_privacy_parity.py
+scripts/gen_example_report.py

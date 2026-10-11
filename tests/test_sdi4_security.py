@@ -110,3 +110,47 @@ def test_minimize_dialogue_redacts_secrets():
 def test_minimize_dialogue_preserves_short_clean():
     text = "帮我用 python 写代码实现一个爬虫"
     assert _minimize_dialogue([text]) == text
+
+
+# ── SDI-4：越窗会话元数据收集修复 ─────────────────────────────────────────────
+
+@allure.feature("安全加固（回应 ClawHub need review）")
+@allure.story("SDI-4 越窗收集修复")
+@allure.title("collect_*_sessions 仅纳入窗口内会话（越窗且无窗内 trace 排除）")
+def test_sessions_window_filter(monkeypatch):
+    import adapters.claude_code as cc
+    import adapters.codex as cx
+    from pathlib import Path as _P
+
+    in_meta = {"id": "in", "created_date": "2026-09-01", "_dialogue_text": "写代码"}
+    out_meta = {"id": "out", "created_date": "2020-01-01", "_dialogue_text": "旧会话"}
+    unk_meta = {"id": "unk", "created_date": None, "_dialogue_text": "无日期"}
+
+    def _fake_claude(f, sd, ed):
+        name = _P(f).name
+        if name == "in.jsonl":
+            return [{"t": 1}], dict(in_meta)
+        if name == "out.jsonl":
+            return [], dict(out_meta)
+        return [], dict(unk_meta)
+
+    def _fake_codex(f, sd, ed):
+        name = _P(f).name
+        if name == "in.jsonl":
+            return [{"t": 1}], dict(in_meta)
+        if name == "out.jsonl":
+            return [], dict(out_meta)
+        return [], dict(unk_meta)
+
+    monkeypatch.setattr(cc, "_parse_claude_file", _fake_claude)
+    monkeypatch.setattr(cc, "_iter_jsonl_files", lambda root: ["in.jsonl", "out.jsonl", "unk.jsonl"])
+    monkeypatch.setattr(cx, "_parse_codex_file", _fake_codex)
+    monkeypatch.setattr(cx, "_iter_jsonl_files", lambda root: ["in.jsonl", "out.jsonl", "unk.jsonl"])
+
+    cc_sessions = cc.collect_claude_code_sessions("2026-09-01", "2026-09-07", projects_root="x")["sessions"]
+    cx_sessions = cx.collect_codex_sessions("2026-09-01", "2026-09-07", sessions_root="x")["sessions"]
+    for sessions in (cc_sessions, cx_sessions):
+        ids = {s["id"] for s in sessions}
+        assert "in" in ids        # 窗口内（或窗内有 trace）→ 纳入
+        assert "out" not in ids   # 越窗且无 trace → 排除
+        assert "unk" not in ids   # 日期未知且无 trace → 排除

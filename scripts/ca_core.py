@@ -644,22 +644,22 @@ def _hour_in(hour, ranges):
     return False
 
 
-def _rule_matches(rule, as_of_date=None, as_of_hour=None, as_of_dow=None):
+def _schedule_matches(sched, as_of_date=None, as_of_hour=None, as_of_dow=None):
     """判断一条时段规则是否命中该调用时刻。
 
     缺失的维度按「不命中」处理：规则声明了 hours 但拿不到 as_of_hour 时不生效，
     避免把白天的调用误判进夜间免费。
     """
-    if not isinstance(rule, dict):
+    if not isinstance(sched, dict):
         return False
-    if rule.get("from") and (not as_of_date or as_of_date < str(rule["from"])):
+    if sched.get("from") and (not as_of_date or as_of_date < str(sched["from"])):
         return False
-    if rule.get("until") and (not as_of_date or as_of_date > str(rule["until"])):
+    if sched.get("until") and (not as_of_date or as_of_date > str(sched["until"])):
         return False
-    dows = _dow_set(rule.get("dow"))
+    dows = _dow_set(sched.get("dow"))
     if dows and as_of_dow not in dows:
         return False
-    hrs = _hour_ranges(rule.get("hours"))
+    hrs = _hour_ranges(sched.get("hours"))
     if hrs and not _hour_in(as_of_hour, hrs):
         return False
     return True
@@ -670,24 +670,24 @@ def scheduled_rule_for(model_name, as_of_date=None, as_of_hour=None, as_of_dow=N
 
     规则按配置顺序判定，故更特殊的规则应写在前面。
     """
-    rules = SCHEDULED_PRICING.get(normalize_model(model_name)) or []
-    if isinstance(rules, dict):  # 容错：允许配置成单条规则而非列表
-        rules = [rules]
-    for rule in rules:
-        if _rule_matches(rule, as_of_date, as_of_hour, as_of_dow):
-            return rule
+    schedules = SCHEDULED_PRICING.get(normalize_model(model_name)) or []
+    if isinstance(schedules, dict):  # 容错：允许配置成单条规则而非列表
+        schedules = [schedules]
+    for sched in schedules:
+        if _schedule_matches(sched, as_of_date, as_of_hour, as_of_dow):
+            return sched
     return None
 
 
 def is_scheduled_free(model_name, as_of_date=None, as_of_hour=None, as_of_dow=None):
     """该模型在该时刻是否被时段规则判为免费（effect=free）。"""
-    rule = scheduled_rule_for(model_name, as_of_date, as_of_hour, as_of_dow)
-    return bool(rule) and str(rule.get("effect") or "").strip().lower() == "free"
+    sched = scheduled_rule_for(model_name, as_of_date, as_of_hour, as_of_dow)
+    return bool(sched) and str(sched.get("effect") or "").strip().lower() == "free"
 
 
 def resolve_scheduled_price(ip, op, model_name, as_of_date=None, as_of_hour=None,
                             as_of_dow=None, model_entry=None):
-    """按命中规则改写静态单价，返回 (ip, op, rule)；未命中/单价缺失时原样返回 (ip, op, None)。
+    """按命中规则改写静态单价，返回 (ip, op, sched)；未命中/单价缺失时原样返回 (ip, op, None)。
 
     effect 语义：
       free     → (0.0, 0.0)
@@ -695,24 +695,24 @@ def resolve_scheduled_price(ip, op, model_name, as_of_date=None, as_of_hour=None
       discount → 基础价 × factor（缺省 1.0，即不变）
     未识别的 effect 视为不生效，返回 (ip, op, None)。
     """
-    rule = scheduled_rule_for(model_name, as_of_date, as_of_hour, as_of_dow)
-    if not rule or ip is None or op is None:
+    sched = scheduled_rule_for(model_name, as_of_date, as_of_hour, as_of_dow)
+    if not sched or ip is None or op is None:
         return ip, op, None
-    effect = str(rule.get("effect") or "").strip().lower()
+    effect = str(sched.get("effect") or "").strip().lower()
     try:
-        factor = float(rule.get("factor")) if rule.get("factor") is not None else None
+        factor = float(sched.get("factor")) if sched.get("factor") is not None else None
     except (TypeError, ValueError):
         factor = None
     if effect == "free":
-        return 0.0, 0.0, rule
+        return 0.0, 0.0, sched
     if effect == "peak":
         entry = model_entry if isinstance(model_entry, dict) else {}
         pip, pop = entry.get("peak_input"), entry.get("peak_output")
         if pip is not None and pop is not None:
-            return float(pip), float(pop), rule
-        return ip * (factor if factor is not None else 2.0), op * (factor if factor is not None else 2.0), rule
+            return float(pip), float(pop), sched
+        return ip * (factor if factor is not None else 2.0), op * (factor if factor is not None else 2.0), sched
     if effect == "discount":
-        return ip * (factor if factor is not None else 1.0), op * (factor if factor is not None else 1.0), rule
+        return ip * (factor if factor is not None else 1.0), op * (factor if factor is not None else 1.0), sched
     return ip, op, None
 
 
@@ -758,7 +758,7 @@ def price_of(model_name, channel=None, as_of_date=None, as_of_hour=None, as_of_d
 
     时段定价：as_of_hour(0-23) 与 as_of_dow(1=周一…7=周日) 让「夜间免费 /
     峰谷双档 / 限期促销」这类**按时刻变化**的服务端规则得以生效（见 SCHEDULED_PRICING）。
-    三者可只传部分；缺失维度按「不套用该维度规则」处理（见 _rule_matches）。
+    三者可只传部分；缺失维度按「不套用该维度规则」处理（见 _schedule_matches）。
     """
     model_name = resolve_model(model_name)
     if channel is None:
@@ -790,7 +790,7 @@ def price_of(model_name, channel=None, as_of_date=None, as_of_hour=None, as_of_d
     if ip is None or op is None:
         return (ip, op)
     # —— 时段定价：夜间免费 / 峰谷双档 / 限期促销 ——
-    ip, op, _rule = resolve_scheduled_price(
+    ip, op, _matched = resolve_scheduled_price(
         ip, op, model_name, as_of_date, as_of_hour, as_of_dow, model_entry=entry)
     return (ip, op)
 

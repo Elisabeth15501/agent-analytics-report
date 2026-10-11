@@ -351,9 +351,13 @@ def collect_claude_code_sessions(start_date, end_date, projects_root=None):
     root = Path(projects_root) if projects_root else resolve_claude_projects_root()
     sessions = []
     for f in _iter_jsonl_files(root):
-        _, meta = _parse_claude_file(f, start_date, end_date)
-        # 仅当会话在窗口内有活动（created_date 落在范围内，或窗口内有 trace）才纳入
+        file_traces, meta = _parse_claude_file(f, start_date, end_date)
         cd = meta.get("created_date") or ""
+        # 契约：仅纳入「created_date 落在窗口内」或「窗口内有 trace」的会话；
+        # 越窗（或日期未知且无窗内活动）的会话元数据不进报告，防止越权收集。
+        in_window = (bool(cd) and start_date <= cd <= end_date) or bool(file_traces)
+        if not in_window:
+            continue
         # 任务类型分类：基于对话文本（复用统一 classify_task，与 WorkBuddy 同源）
         text = meta.get("_dialogue_text", "")
         meta["task_type"] = classify_task(text)

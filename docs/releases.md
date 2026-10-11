@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.3** | 2026-10-11 | 安全加固翻盘：移出发布/CI/开发脚本出包 + P6 误报消除 + SDI-4 越窗收集修复 | [tag/v1.9.3](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.3) |
 | **v1.9.2** | 2026-10-11 | 安全加固（回应 ClawHub 扫描 need review）：SDI-4 修复 + SQP-2 截断脱敏 + 最小权限声明 | [tag/v1.9.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.2) |
 | **v1.9.0** | 2026-10-06 | 百度搭子（DuMate）数据源 + 任务类型分类修复 + 归属标注与文档降级（归因红线）+ 隐私护栏（只读 SQLite / 时间窗过滤）+ 合规文案收敛 | [tag/v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0) |
 
@@ -28,6 +29,12 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.3 — 2026-10-11
+### 安全加固翻盘（回应 ClawHub 扫描 need review）
+- **P0 打包口径（TP4 / SDI-1）**：`.clawhubignore` 移出 `scripts/fetch_pricing.py` / `gen_report.py` / `verify_privacy_parity.py` / `scripts/gen_example_report.py` 出终端用户发布包（保留 git）。
+- **P0 误报消除（P6）**：`ca_core.py` 时段定价术语重命名，消除 `return rule` 误判为系统提示词泄露。
+- **P1 真 bug 修复（SDI-4）**：`collect_*_sessions` 落实窗口过滤契约，越窗会话元数据不再越权纳入；补回归测试。
 
 ## v1.9.2 — 2026-10-11
 ### 安全加固（回应 ClawHub 扫描 need review）

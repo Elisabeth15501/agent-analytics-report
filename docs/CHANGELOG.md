@@ -3,6 +3,12 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.3] — 2026-10-11
+### 安全加固（回应 ClawHub 扫描 need review · 翻盘）
+- **P0 打包口径（TP4 / SDI-1）**：`.clawhubignore` 新增 `scripts/fetch_pricing.py` / `gen_report.py` / `verify_privacy_parity.py` / `scripts/gen_example_report.py` 移出终端用户发布包（保留 git 供维护者）；包内不再含「联网抓取 + 写文件」工具，消除 skillspector 信任错配，并修掉 `gen_report.py` 在包内依赖未发包 `tools/` 的坏链。
+- **P0 误报消除（P6）**：`scripts/ca_core.py` 时段定价术语 `rule` / `_rule_matches` 重命名为 `sched` / `_schedule_matches`，消除 `return rule` 被误判为「系统提示词泄露」的 HIGH 误报（零行为变更）。
+- **P1 真 bug 修复（SDI-4）**：`adapters/claude_code.py` 与 `adapters/codex.py` 的 `collect_*_sessions` 落实注释所述契约——仅纳入「created_date 在窗口内」或「窗口内有 trace」的会话，越窗（或日期未知且无窗内活动）的会话元数据不再越权进入报告；补回归测试 `tests/test_sdi4_security.py::test_sessions_window_filter`。
+
 ## [1.9.2] — 2026-10-11
 ### 安全加固（回应 ClawHub 扫描 need review）
 - **SDI-4 修复**：`collect_usage_data.py` 联网检索改用 `urllib` 自身异常（`URLError` / `HTTPError`）兜底，目标不可达时优雅降级而非崩溃（原 `except` 只接 `requests.RequestException`）；逻辑抽为 `fetch_remote_pricing()` 并加单测。

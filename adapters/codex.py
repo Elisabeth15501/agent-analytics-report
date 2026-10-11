@@ -386,7 +386,13 @@ def collect_codex_sessions(start_date, end_date, sessions_root=None):
     root = Path(sessions_root) if sessions_root else resolve_codex_sessions_root()
     sessions = []
     for f in _iter_jsonl_files(root):
-        _, meta = _parse_codex_file(f, start_date, end_date)
+        file_traces, meta = _parse_codex_file(f, start_date, end_date)
+        cd = meta.get("created_date") or ""
+        # 契约：仅纳入「created_date 落在窗口内」或「窗口内有 trace」的会话；
+        # 越窗（或日期未知且无窗内活动）的会话元数据不进报告，防止越权收集。
+        in_window = (bool(cd) and start_date <= cd <= end_date) or bool(file_traces)
+        if not in_window:
+            continue
         text = meta.get("_dialogue_text", "")
         meta["task_type"] = classify_task(text)
         meta.pop("_dialogue_text", None)
