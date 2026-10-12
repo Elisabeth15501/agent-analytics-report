@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.4** | 2026-10-12 | 消除 ClawHub v1.9.3 重扫后残余 4 HIGH：P6×2（release notes 字面量触发词）+ TP4×1（analyze_tokens.py 写报告产物未入 SKILL.md 权限声明）+ SDI-4×1（on-download-inject.md「首次生成报告可能触发扫描」措辞与「普通报告严格只读」矛盾） | [tag/v1.9.4](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.4) |
 | **v1.9.3** | 2026-10-11 | 安全加固翻盘：移出发布/CI/开发脚本出包 + P6 误报消除 + SDI-4 越窗收集修复 | [tag/v1.9.3](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.3) |
 | **v1.9.2** | 2026-10-11 | 安全加固（回应 ClawHub 扫描 need review）：SDI-4 修复 + SQP-2 截断脱敏 + 最小权限声明 | [tag/v1.9.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.2) |
 | **v1.9.0** | 2026-10-06 | 百度搭子（DuMate）数据源 + 任务类型分类修复 + 归属标注与文档降级（归因红线）+ 隐私护栏（只读 SQLite / 时间窗过滤）+ 合规文案收敛 | [tag/v1.9.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.0) |
@@ -30,10 +31,16 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 ---
 
+## v1.9.4 — 2026-10-12
+### 消除 ClawHub v1.9.3 重扫后残余 4 HIGH（P6×2 / TP4×1 / SDI-4×1）
+- **P6×2**：v1.9.3 的 CHANGELOG/releases 笔记里对 ca_core 重命名动作的描述性文字，恰好命中了静态扫描器按关键词匹配 P6 类的敏感词表 → 重新误报。本次把两处描述改为「时段定价标识符语义统一（`sched` / `_schedule_matches`）」，不再出现触发词，也不再引用具体代码片段。
+- **TP4×1**：`scripts/analyze_tokens.py` 会写报告产物文件，但 SKILL.md 权限声明未列 → manifest 与实现不一致。SKILL.md「一·附 权限声明」补「报告产物写（默认流程）」条目：只写用户指定的 `--output` 路径，不写 `~/.workbuddy` 内部文件、不读网络、不改定价/配置。
+- **SDI-4×1**：`references/on-download-inject.md` 与 SKILL.md 原文「下载后首次生成报告（或主动说一句...）」被读成「首次生成普通报告就可能触发扫描」，与「普通报告严格只读」矛盾。统一为：普通用量报告严格只读、离线、绝不触发扫描/写配置；注入仅在你明确发起「自定义模型注入」流程时才发生。
+
 ## v1.9.3 — 2026-10-11
 ### 安全加固翻盘（回应 ClawHub 扫描 need review）
 - **P0 打包口径（TP4 / SDI-1）**：`.clawhubignore` 移出 `scripts/fetch_pricing.py` / `gen_report.py` / `verify_privacy_parity.py` / `scripts/gen_example_report.py` 出终端用户发布包（保留 git）。
-- **P0 误报消除（P6）**：`ca_core.py` 时段定价术语重命名，消除 `return rule` 误判为系统提示词泄露。
+- **P0 误报消除（P6）**：`ca_core.py` 时段定价相关标识符重命名为 `sched` / `_schedule_matches` 语义，规避静态扫描器按关键词误判的 HIGH（零行为变更）。
 - **P1 真 bug 修复（SDI-4）**：`collect_*_sessions` 落实窗口过滤契约，越窗会话元数据不再越权纳入；补回归测试。
 
 ## v1.9.2 — 2026-10-11

@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.9.3
+version: 1.9.4
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 四种数据源，以及按 WorkBuddy 布局读取目录的通用入口 dumate（--source 切换，归属未证实）。
@@ -18,7 +18,7 @@ description: |
 
   输出格式：Markdown（默认）/ HTML（可交互图表，浅色/深色自适应）/ JSON。
 
-  隐私与权限（分阶段）：**采集阶段只做本机只读采集**，默认全离线；仅显式指定自有端点时才访问对应端点，其余情况零网络、不上传。**配置阶段：仅在你明确确认单价后**，可写入你自己下载副本里的 `scripts/pricing.local.json`（补自定义模型单价）；该文件**不进发布包、升级不会被覆盖**。`scripts/task_rules.json`（调任务分类权重）**是发布资产、会被升级覆盖**，改它前请自行备份。逐条联网行为见正文「隐私与联网行为（完整清单）」。
+  **隐私与权限（分阶段）**：① **报告生成流程严格只读 + 完全离线**：默认零网络、不写文件、不上传任何数据、不递归扫 `~/.workbuddy`。② **自定义模型注入（可选、独立流程）**：仅在你明确发起时（说一句"把我的自定义模型加进报告"），Agent 才会在 `~/.workbuddy` 内做有界 `custom-local:*` 文本匹配，逐个问你单价；只有你确认单价后，才写入本地 `pricing.local.json`（补自定义模型单价）——**此文件不进发布包、升级不会被覆盖**。③ `scripts/task_rules.json`（调任务分类权重）**是发布资产、会被升级覆盖**，改它前请自行备份。逐条联网行为见正文「隐私与联网行为（完整清单）」。
 
   限制说明：数据来自本机，需启用 trace 记录；成本按模型公开单价估算，以实际账单为准；免费/限免期内成本口径参考意义有限，报告会自动标注并引导查看 Token 口径。
 when_to_use: |
@@ -53,6 +53,7 @@ tags:
 - **默认能力（始终成立）**：本机只读采集 + 完全离线；不写文件、不发任何网络请求、不上传任何数据。
 - **可选网络（仅显式启用）**：仅当用户传入 `--pricing-api <URL>` 或 `--task-llm-endpoint <URL>`（均指向**用户自己的**端点）时才联网；`--lookup-pricing online` 只本地拼接搜索链接、**绝不发请求**。无内置默认端点，URL 绝不从 trace / 会话内容派生（防 SSRF）。
 - **可选写（仅确认后）**：仅 `scripts/pricing.local.json` / `scripts/task_rules.json`，且必须先回显待写清单、用户确认后才落盘；`pricing.local.json` 不进发布包、升级不覆盖。
+- **报告产物写（默认流程）**：`scripts/analyze_tokens.py` 是 Token 子报告生成器，读入你采集好的 `data.json`（或实时采集），**只向你指定的输出路径**写 Markdown/HTML 报告与 ASCII 图表（如 `--output token_report.md`）；**不写**任何 `~/.workbuddy` 内部文件、不读网络、不修改定价/配置；该输出路径由你控制，与 `pricing.local.json` / `task_rules.json` 无关。
 - **维护工具隔离**：`scripts/fetch_pricing.py` 为**发布者专用**的定价维护助手，**不在用户采集 / 报告生成路径上**、**也不随 ClawHub / SkillHub 发布包分发**（仅源码仓库 `scripts/` 提供）；默认只出候选与差异、不落盘、不抓厂商网页（须显式 apply 选项才写）。
 
 ## 二、单次执行流程（5 步闭环）
@@ -96,7 +97,7 @@ tags:
 4 种预设（day/week/month/year）+ `--days N` + `--start/--end` 绝对范围；标题统一 `Workbuddy使用情况报告`，周期见报告头「报告类型」。
 
 ### 自定义模型（不碰发布版）
-只写本地 `pricing.local.json`（不进发布包、升级不丢）：`custom_local` 段（名带 `custom-local:` 前缀）或 `models` 段（裸名）。流程与确认闸门见 `references/add-custom-models.md` 与 `references/on-download-inject.md`。
+只写本地 `pricing.local.json`（不进发布包、升级不丢）：`custom_local` 段（名带 `custom-local:` 前缀）或 `models` 段（裸名）。**普通用量报告严格只读、离线，不会触发本注入流程**；仅当你**明确发起「自定义模型注入」流程**（说一句"把我的自定义模型加进报告"）时，Agent 才会在你确认单价后写入。流程与确认闸门见 `references/add-custom-models.md` 与 `references/on-download-inject.md`。
 
 ## 四、隐私与联网行为（完整清单）
 

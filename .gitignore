@@ -123,3 +123,4 @@ scripts/pricing.json.bak-*
 .pt_*
 .pytest_tmp*
 .pytest_cache/
+verify_193.json

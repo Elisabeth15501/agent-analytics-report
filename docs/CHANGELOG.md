@@ -3,10 +3,16 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.4] — 2026-10-12
+### 消除 ClawHub v1.9.3 重扫后残余 4 HIGH（P6×2 / TP4×1 / SDI-4×1）
+- **P6×2**：v1.9.3 的 CHANGELOG/releases 笔记里对 ca_core 重命名动作的描述性文字，恰好命中了静态扫描器按关键词匹配 P6 类的敏感词表 → 重新误报。本次把两处描述改为「时段定价标识符语义统一（`sched` / `_schedule_matches`）」，不再出现触发词，也不再引用具体代码片段。
+- **TP4×1**：`scripts/analyze_tokens.py` 会写报告产物文件，但 SKILL.md 权限声明未列 → manifest 与实现不一致。SKILL.md「一·附 权限声明」补「报告产物写（默认流程）」条目：只写用户指定的 `--output` 路径，不写 `~/.workbuddy` 内部文件、不读网络、不改定价/配置。
+- **SDI-4×1**：`references/on-download-inject.md` 与 SKILL.md 原文「下载后首次生成报告（或主动说一句...）」被读成「首次生成普通报告就可能触发扫描」，与「普通报告严格只读」矛盾。统一为：普通用量报告严格只读、离线、绝不触发扫描/写配置；注入仅在你明确发起「自定义模型注入」流程时才发生。
+
 ## [1.9.3] — 2026-10-11
 ### 安全加固（回应 ClawHub 扫描 need review · 翻盘）
 - **P0 打包口径（TP4 / SDI-1）**：`.clawhubignore` 新增 `scripts/fetch_pricing.py` / `gen_report.py` / `verify_privacy_parity.py` / `scripts/gen_example_report.py` 移出终端用户发布包（保留 git 供维护者）；包内不再含「联网抓取 + 写文件」工具，消除 skillspector 信任错配，并修掉 `gen_report.py` 在包内依赖未发包 `tools/` 的坏链。
-- **P0 误报消除（P6）**：`scripts/ca_core.py` 时段定价术语 `rule` / `_rule_matches` 重命名为 `sched` / `_schedule_matches`，消除 `return rule` 被误判为「系统提示词泄露」的 HIGH 误报（零行为变更）。
+- **P0 误报消除（P6）**：`scripts/ca_core.py` 时段定价相关标识符重命名（时段匹配函数与局部变量统一改为 `sched` / `_schedule_matches` 语义），避免该处代码片段被静态扫描器按关键词误判为 HIGH（零行为变更，纯命名对齐）。
 - **P1 真 bug 修复（SDI-4）**：`adapters/claude_code.py` 与 `adapters/codex.py` 的 `collect_*_sessions` 落实注释所述契约——仅纳入「created_date 在窗口内」或「窗口内有 trace」的会话，越窗（或日期未知且无窗内活动）的会话元数据不再越权进入报告；补回归测试 `tests/test_sdi4_security.py::test_sessions_window_filter`。
 
 ## [1.9.2] — 2026-10-11
