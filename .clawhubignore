@@ -68,3 +68,8 @@ scripts/fetch_pricing.py
 gen_report.py
 verify_privacy_parity.py
 scripts/gen_example_report.py
+
+# ---- 追加：ClawHub 安全扫描快照（v1.9.6 P0 防复发）----
+# verify_194.json 曾在 v1.9.5 被文件系统遍历误带进包，携带旧告警原文 → skillspector
+# 逐行重扫又生成 4 个 HIGH 锚点，把整版打到 DO_NOT_INSTALL。通配排除 verify_*.json。
+verify_*.json

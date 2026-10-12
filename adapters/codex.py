@@ -381,17 +381,26 @@ def collect_codex_traces(start_date, end_date, sessions_root=None):
     return traces
 
 
+def _session_in_window(meta, file_traces, start_date, end_date):
+    """隐私边界：仅纳入「created_date 落在窗口内」或「窗口内有 trace」的会话。
+
+    越窗（或日期未知且无窗内活动）的会话元数据不进报告，防止越权收集。
+    合并 collector（collect_codex）与分表 collector（collect_codex_sessions）
+    共用此判断，避免两者隐私口径漂移（SDI-4 修复点）。
+    """
+    cd = meta.get("created_date") or ""
+    return (bool(cd) and start_date <= cd <= end_date) or bool(file_traces)
+
+
 def collect_codex_sessions(start_date, end_date, sessions_root=None):
     """读取 Codex 会话历史，返回合成 db_data（sessions 已预分类 task_type）。"""
     root = Path(sessions_root) if sessions_root else resolve_codex_sessions_root()
     sessions = []
     for f in _iter_jsonl_files(root):
         file_traces, meta = _parse_codex_file(f, start_date, end_date)
-        cd = meta.get("created_date") or ""
         # 契约：仅纳入「created_date 落在窗口内」或「窗口内有 trace」的会话；
         # 越窗（或日期未知且无窗内活动）的会话元数据不进报告，防止越权收集。
-        in_window = (bool(cd) and start_date <= cd <= end_date) or bool(file_traces)
-        if not in_window:
+        if not _session_in_window(meta, file_traces, start_date, end_date):
             continue
         text = meta.get("_dialogue_text", "")
         meta["task_type"] = classify_task(text)
@@ -405,12 +414,19 @@ def collect_codex_sessions(start_date, end_date, sessions_root=None):
 
 
 def collect_codex(start_date, end_date, sessions_root=None):
-    """一次性返回 (traces, db_data)，供 collect_usage_data.py --source codex 直接使用。"""
+    """一次性返回 (traces, db_data)，供 collect_usage_data.py --source codex 直接使用。
+
+    隐私边界与 collect_codex_sessions 完全一致：越窗会话（无窗内 trace 且
+    created_date 不在窗口内）整体跳过，不进 traces 也不进 sessions 元数据
+    （SDI-1 / SDI-4 修复点：合并 collector 原先漏做窗口过滤）。
+    """
     root = Path(sessions_root) if sessions_root else resolve_codex_sessions_root()
     traces = []
     sessions = []
     for f in _iter_jsonl_files(root):
         file_traces, meta = _parse_codex_file(f, start_date, end_date)
+        if not _session_in_window(meta, file_traces, start_date, end_date):
+            continue
         traces.extend(file_traces)
         text = meta.get("_dialogue_text", "")
         meta["task_type"] = classify_task(text)

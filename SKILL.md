@@ -1,7 +1,7 @@
 ---
 name: agent-analytics-report
 slug: agent-analytics-report
-version: 1.9.5
+version: 1.9.6
 metadata: metadata.json
 displayName: Agent 用量分析报告
 summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发：生成周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 四种数据源，以及按 WorkBuddy 布局读取目录的通用入口 dumate（--source 切换，归属未证实）。
@@ -50,6 +50,16 @@ tags:
 6. **报告标题统一**：标题固定为 `Workbuddy使用情况报告`，周期由报告头部「报告类型」行以日历日期标识（日报/周报/月报/年报/自定义），不随周期带后缀。
 
 ## 一·附 权限与作用域声明（最小权限）
+
+> 本节为 ClawHub 审核所需的**可执行权限 manifest**（`_meta.json` 的 `permissions` 块与此一致）。作用域严格最小：
+
+| 能力 | 作用域 | 触发条件 | 默认 |
+|------|--------|----------|------|
+| **文件读（只读）** | 本机用户数据目录：`~/.workbuddy/`、`~/.claude/projects/<cwd哈希>/*.jsonl`（仅一级工程目录）、`~/.codex/sessions/`、`~/.qwenworkcn/`、`DUMATE` 覆盖目录 | 采集阶段 | 始终；**不递归扫 `~/.workbuddy`**；claude-code/codex **仅枚举一级工程/日期目录**；**越窗会话元数据整体跳过**（见适配器日期窗口过滤） |
+| **文件写** | 仅 `--output` 指定路径（报告）；`~/.workbuddy/pricing.local.json` / `task_rules.json`（确认后） | 写配置须先回显清单 + 用户确认 | 主流程零写盘 |
+| **网络** | 仅用户自己的端点：`--pricing-api` / `--task-llm-endpoint` | **显式传入**才联网；`--lookup-pricing online` 只拼链接、绝不发请求 | **零网络**；无内置默认端点；URL 绝不从 trace/会话派生（防 SSRF） |
+| **环境变量** | `CLAUDE_PROJECTS_DIR` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` | 仅用于指向数据源根 | 不读任何密钥 |
+
 - **默认能力（始终成立）**：本机只读采集 + 完全离线；不写文件、不发任何网络请求、不上传任何数据。
 - **可选网络（仅显式启用）**：仅当用户传入 `--pricing-api <URL>` 或 `--task-llm-endpoint <URL>`（均指向**用户自己的**端点）时才联网；`--lookup-pricing online` 只本地拼接搜索链接、**绝不发请求**。无内置默认端点，URL 绝不从 trace / 会话内容派生（防 SSRF）。
 - **可选写（仅确认后）**：仅 `scripts/pricing.local.json` / `scripts/task_rules.json`，且必须先回显待写清单、用户确认后才落盘；`pricing.local.json` 不进发布包、升级不覆盖。
@@ -106,11 +116,13 @@ tags:
 | 行为 | 触发条件 | 目标 | 说明 |
 |---|---|---|---|
 | 定价查价 | 显式 `--pricing-api <URL>` | 你自己的镜像端点 | 不内置默认端点；URL 只来自命令行参数，不从 trace/会话派生；价标 🌐 不计入总额 |
-| 任务分类 | 显式 `--task-classifier llm` + `--task-llm-endpoint <URL>` | 你自己的 OpenAI 兼容端点 | 不内置默认端点；失败自动回退启发式 |
+| 任务分类 | 显式 `--task-classifier llm` + `--task-llm-endpoint <URL>` | 你自己的 OpenAI 兼容端点 | ⚠️ **高风险出站路径**：启用时**会话派生文本（可能含 prompt / 代码 / 内部推理上下文）会发往你自己的端点**，不再是纯本地；**默认关闭**，须显式开启；失败自动回退本地启发式；不内置任何默认端点 |
 | 搜索链接 | `--lookup-pricing online` | **不发请求** | 纯字符串拼接 DuckDuckGo 链接，交你自点 |
-| 默认 | 都不传 | 零网络 | 本机只读 + 本地渲染 |
+| 默认 | 都不传 | 零网络 | 本机只读 + 本地渲染（任务分类走本地启发式，零出站） |
 
 `scripts/fetch_pricing.py` 是**独立、手动触发**的定价维护助手（发布者用，非用户采集路径）：默认只出候选与差异报告、不落盘、不抓厂商网页；数据源由你自备。**该脚本不随发布包分发**，仅源码仓库提供，终端用户无需它即可生成报告。
+
+> **关于 `config.json` 的 `update_url`**：仅由 `skillhub upgrade` 在用户**手动升级**时拉取 manifest JSON（GET，无需 token，返回 200 仅含版本号），**报告生成流程永不触发任何网络访问、绝不发送本地数据**。`update_url` 是升级元数据机制，不构成数据外传或远程代码执行证据。
 
 ## 五、扩展与参考（按需查阅，不在此展开）
 - 详细数据源路径、已知偏差、适配器接缝与验收清单：`docs/ADAPTERS.md`

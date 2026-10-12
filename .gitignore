@@ -123,4 +123,8 @@ scripts/pricing.json.bak-*
 .pt_*
 .pytest_tmp*
 .pytest_cache/
-verify_193.json
+# ---- ClawHub 安全扫描快照（v1.9.6 P0 防复发）----
+# verify_194.json（5271 行扫描快照）曾在 v1.9.5 被 ClawHub 文件系统遍历误带进包，
+# 它携带 v1.9.4 旧告警原文 → skillspector 逐行重扫又生成 4 个 HIGH 锚点，
+# 把整版判定打到 DO_NOT_INSTALL。通配排除所有 verify_*.json，杜绝复发。
+verify_*.json

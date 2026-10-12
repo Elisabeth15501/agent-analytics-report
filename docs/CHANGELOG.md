@@ -3,6 +3,16 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.6] — 2026-10-13
+### 消除 ClawHub v1.9.5 复审 7 HIGH（污染 4 + 真 over-collection 2 + LP3 manifest）
+
+- **根因复盘（第一性原理）**：v1.9.5 的 7 个 HIGH 不是「扫描乱报」，分三类——① **4 个污染 HIGH** 锚在 `verify_194.json`（一份旧扫描快照，被 ClawHub `publish .` 的文件系统遍历误收进包，被逐行重扫又生成递归扫描/读全文/发往端点/update_url 等 HIGH）；② **2 个真 over-collection**：CLI 实际走的 `collect_claude_code` / `collect_codex` 合并 collector 漏做日期窗口过滤，越窗会话的标题/cwd/模型/时间戳会进报告；③ **1 个 LP3**：缺最小权限 manifest。
+- **真 over-collection 修复（SDI-1 / SDI-4 核心）**：`adapters/claude_code.py` 与 `adapters/codex.py` 新增共享 `_session_in_window` 判定，在 `collect_claude_code` / `collect_codex`（合并 collector，**CLI 实际路径**）应用与 `collect_*_sessions` 完全一致的日期窗口过滤，越窗会话整体跳过（不漏 trace、不漏元数据）；`claude_code.py._iter_jsonl_files` 移除 `rglob("projects")` 二级递归，改为只枚举 projects 根的一级工程目录（不递归更深）。两个 collector 口径统一，新增回归测试 `test_*_excludes_out_of_window_sessions` 与 `test_*_combined_and_sessions_agree_on_window` 锁死。
+- **污染封死**：`.clawhubignore` + `.gitignore` 通配排除 `verify_*.json`；发布 ClawHub 改为 `git archive HEAD` 干净树（不再 `publish .` 直接扫 dev 根），永久避免 untracked 文件误收。
+- **LP3 最小权限 manifest**：`_meta.json` 新增 `permissions` 块（file_read / file_write / network / env 最小作用域），SKILL.md「一·附」改为权限表格 + 新增 update_url 说明（仅 `skillhub upgrade` 用、报告流程绝不触发网络、不发本地数据）。
+- **TP4 强化披露**：隐私清单「任务分类」行加 ⚠️ 高风险出站警告（启用 `--task-classifier llm` 时会话派生文本发往用户自己的端点、默认关闭）；「默认」行明确零出站。
+- 五处版本号一致升 1.9.5→1.9.6（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
+
 ## [1.9.5] — 2026-10-12
 ### 消除 ClawHub v1.9.4 重扫后残余 3 HIGH（SDI-1 / SDI-4 / TP4）
 - **SDI-1（真过扫）**：`scripts/ca_sources.py` `_find_session_jsonl` 的兜底分支用 `PROJECTS_DIR.glob(f"**/{session_id}.jsonl")` 递归遍历整个 `~/.claude/projects` 树，可枚举无关会话工件（隐私面越权）。改为**只探测一级子目录**做 exact-name 匹配（`for sub in PROJECTS_DIR.iterdir(): cand = sub / f"{session_id}.jsonl"`），不递归更深，访问面收敛到「请求的那个会话」所在目录层。

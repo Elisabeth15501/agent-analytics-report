@@ -265,6 +265,52 @@ def test_collect_codex_returns_traces_and_sessions(codex_home):
     assert {t["session_id"] for t in traces} == {s["id"] for s in db["sessions"]}
 
 
+@allure.feature("Codex 适配器")
+@allure.story("隐私边界")
+@allure.title("collect_codex 排除越窗会话（SDI-1 回归）")
+@allure.severity(allure.severity_level.CRITICAL)
+def test_collect_codex_excludes_out_of_window_sessions(codex_home):
+    """回归：合并 collector 必须与 collect_codex_sessions 一致，越窗会话整体跳过，
+    不进 sessions 元数据、不泄漏 trace（clawscan SDI-1 / SDI-4）。"""
+    _write_session(codex_home, "in", [
+        _session_meta("in", "/p", "gpt-5-codex"),
+        _user_msg("2026-02-15T10:00:00.000Z", "窗内任务"),
+        _turn_completed("2026-02-15T10:00:05.000Z", 3000, 800, cache_read=1000),
+    ], datepath="2026/02/15")
+    _write_session(codex_home, "out", [
+        _session_meta("out", "/p", "gpt-4o"),
+        _user_msg("2026-01-05T10:00:00.000Z", "越窗任务，不应出现"),
+        _turn_completed("2026-01-05T10:00:05.000Z", 3000, 800),
+    ], datepath="2026/01/05")
+    traces, db = collect_codex("2026-02-01", "2026-02-28")
+
+    assert len(traces) == 1, "越窗会话的 trace 不得泄漏"
+    assert len(db["sessions"]) == 1, "越窗会话元数据不得进报告"
+    assert db["sessions"][0]["id"] == "in"
+    joined = json.dumps(db, ensure_ascii=False)
+    assert "越窗任务" not in joined, "越窗会话内容不得进报告"
+
+
+@allure.feature("Codex 适配器")
+@allure.story("隐私边界")
+@allure.title("collect_codex 与 collect_codex_sessions 窗口口径一致（SDI-4 回归）")
+def test_codex_combined_and_sessions_agree_on_window(codex_home):
+    _write_session(codex_home, "a", [
+        _session_meta("a", "/p", "gpt-5-codex"),
+        _user_msg("2026-02-15T10:00:00.000Z", "一致校验 in"),
+        _turn_completed("2026-02-15T10:00:05.000Z", 100, 50),
+    ], datepath="2026/02/15")
+    _write_session(codex_home, "b", [
+        _session_meta("b", "/p", "gpt-4o"),
+        _user_msg("2026-01-09T10:00:00.000Z", "一致校验 out"),
+        _turn_completed("2026-01-09T10:00:05.000Z", 100, 50),
+    ], datepath="2026/01/09")
+    tr_db = collect_codex("2026-02-01", "2026-02-28")
+    sess_db = collect_codex_sessions("2026-02-01", "2026-02-28")
+    assert {t["session_id"] for t in tr_db[0]} == {s["id"] for s in sess_db["sessions"]}, \
+        "合并 collector 与分表 collector 的窗口口径必须一致"
+
+
 @allure.feature("Codex CLI 适配器")
 @allure.story("会话派生")
 @allure.title("sessions 接口与 traces 接口结果一致")

@@ -246,6 +246,52 @@ def test_collect_claude_code_returns_traces_and_sessions(projects_root):
 
 
 @allure.feature("Claude Code 适配器")
+@allure.story("隐私边界")
+@allure.title("collect_claude_code 排除越窗会话（SDI-1 回归）")
+@allure.severity(allure.severity_level.CRITICAL)
+def test_collect_claude_code_excludes_out_of_window_sessions(projects_root):
+    """回归：合并 collector 必须与 collect_claude_code_sessions 一致，越窗会话
+    （created_date 不在窗口内且无窗内 trace）整体跳过，不进 sessions 元数据，
+    也不泄漏 trace。防止越权收集（clawscan SDI-1 / SDI-4）。"""
+    # 窗内会话
+    _write_session(projects_root, "in", [
+        _user("2026-02-15T10:00:00.000Z", "窗内任务"),
+        _assistant("2026-02-15T10:00:05.000Z", "claude-sonnet-4-20250514", 3000, 800, uuid="fin"),
+    ])
+    # 越窗会话：全部消息在窗口前，created_date 落在 2026-01-05，无窗内 trace
+    _write_session(projects_root, "out", [
+        _user("2026-01-05T10:00:00.000Z", "越窗任务，不应出现"),
+        _assistant("2026-01-05T10:00:05.000Z", "claude-sonnet-4-20250514", 3000, 800, uuid="fout"),
+    ])
+    traces, db = collect_claude_code("2026-02-01", "2026-02-28")
+
+    assert len(traces) == 1, "越窗会话的 trace 不得泄漏"
+    assert len(db["sessions"]) == 1, "越窗会话元数据不得进报告"
+    assert db["sessions"][0]["id"] == "in"
+    # 越窗会话的标题/内容绝不可见
+    joined = json.dumps(db, ensure_ascii=False)
+    assert "越窗任务" not in joined, "越窗会话内容不得进报告"
+
+
+@allure.feature("Claude Code 适配器")
+@allure.story("隐私边界")
+@allure.title("collect_claude_code 与 collect_claude_code_sessions 窗口口径一致（SDI-4 回归）")
+def test_claude_code_combined_and_sessions_agree_on_window(projects_root):
+    _write_session(projects_root, "a", [
+        _user("2026-02-15T10:00:00.000Z", "一致校验 in"),
+        _assistant("2026-02-15T10:00:05.000Z", "claude-sonnet-4-20250514", 100, 50, uuid="ia"),
+    ])
+    _write_session(projects_root, "b", [
+        _user("2026-01-09T10:00:00.000Z", "一致校验 out"),
+        _assistant("2026-01-09T10:00:05.000Z", "claude-sonnet-4-20250514", 100, 50, uuid="ib"),
+    ])
+    tr_db = collect_claude_code("2026-02-01", "2026-02-28")
+    sess_db = collect_claude_code_sessions("2026-02-01", "2026-02-28")
+    assert {t["session_id"] for t in tr_db[0]} == {s["id"] for s in sess_db["sessions"]}, \
+        "合并 collector 与分表 collector 的窗口口径必须一致"
+
+
+@allure.feature("Claude Code 适配器")
 @allure.story("会话派生")
 @allure.title("sessions 接口与 traces 接口结果一致")
 def test_sessions_api_consistent_with_traces(projects_root):

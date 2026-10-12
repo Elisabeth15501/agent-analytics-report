@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.6** | 2026-10-13 | 消除 ClawHub v1.9.5 复审 7 HIGH：① 污染 4（verify_194.json 误收进包，已封死）② 真 over-collection 2（collect_claude_code/collect_codex 合并 collector 补日期窗口过滤 + 移除 rglob 二级递归）③ LP3 最小权限 manifest（_meta.json permissions + SKILL.md 权限表）④ TP4 强化披露 | [tag/v1.9.6](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.6) |
 | **v1.9.5** | 2026-10-12 | 消除 ClawHub v1.9.4 重扫后残余 3 HIGH：SDI-1（ca_sources.py 递归 glob 过扫 `~/.claude/projects`，改一级目录收敛）+ SDI-4（generate_report.py dumate 标签去品牌化、强制归属告警）+ TP4（SKILL.md dumate 归属不再暗示确认） | [tag/v1.9.5](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.5) |
 | **v1.9.4** | 2026-10-12 | 消除 ClawHub v1.9.3 重扫后残余 4 HIGH：P6×2（release notes 字面量触发词）+ TP4×1（analyze_tokens.py 写报告产物未入 SKILL.md 权限声明）+ SDI-4×1（on-download-inject.md「首次生成报告可能触发扫描」措辞与「普通报告严格只读」矛盾） | [tag/v1.9.4](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.4) |
 | **v1.9.3** | 2026-10-11 | 安全加固翻盘：移出发布/CI/开发脚本出包 + P6 误报消除 + SDI-4 越窗收集修复 | [tag/v1.9.3](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.3) |
@@ -31,6 +32,16 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.6 — 2026-10-13
+### 消除 ClawHub v1.9.5 复审 7 HIGH（污染 4 + 真 over-collection 2 + LP3 manifest）
+
+- **根因复盘（第一性原理）**：v1.9.5 的 7 个 HIGH 分三类——① **4 个污染 HIGH** 锚在 `verify_194.json`（旧扫描快照，被 ClawHub `publish .` 文件系统遍历误收进包，被逐行重扫又生成递归扫描/读全文/发往端点/update_url 等 HIGH）；② **2 个真 over-collection**：CLI 实际走的 `collect_claude_code` / `collect_codex` 合并 collector 漏做日期窗口过滤，越窗会话元数据进报告；③ **1 个 LP3**：缺最小权限 manifest。
+- **真 over-collection 修复（SDI-1 / SDI-4 核心）**：`adapters/claude_code.py` 与 `adapters/codex.py` 新增共享 `_session_in_window` 判定，在 `collect_claude_code` / `collect_codex`（CLI 实际路径）应用与 `collect_*_sessions` 完全一致的日期窗口过滤，越窗会话整体跳过（不漏 trace、不漏元数据）；`claude_code.py._iter_jsonl_files` 移除 `rglob("projects")` 二级递归，改只枚举 projects 根一级工程目录。回归测试 `test_*_excludes_out_of_window_sessions` + `test_*_combined_and_sessions_agree_on_window` 锁死。
+- **污染封死**：`.clawhubignore` + `.gitignore` 通配排除 `verify_*.json`；ClawHub 改 `git archive HEAD` 干净树发布，永久避免 untracked 文件误收。
+- **LP3 最小权限 manifest**：`_meta.json` 新增 `permissions` 块（file_read / file_write / network / env 最小作用域），SKILL.md「一·附」改权限表 + 补 update_url 说明（仅 `skillhub upgrade` 用、报告流程绝不触发网络）。
+- **TP4 强化披露**：隐私清单「任务分类」行加 ⚠️ 高风险出站警告（启用 `--task-classifier llm` 时才发往用户端点、默认关闭）。
+- 五处版本号一致升 1.9.5→1.9.6（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
 
 ## v1.9.5 — 2026-10-12
 ### 消除 ClawHub v1.9.4 重扫后残余 3 HIGH（SDI-1 / SDI-4 / TP4）

@@ -116,19 +116,34 @@ def resolve_claude_projects_root():
     return home / ".claude" / "projects"
 
 
+def _session_in_window(meta, file_traces, start_date, end_date):
+    """隐私边界：仅纳入「created_date 落在窗口内」或「窗口内有 trace」的会话。
+
+    越窗（或日期未知且无窗内活动）的会话元数据不进报告，防止越权收集。
+    合并 collector（collect_claude_code）与分表 collector（collect_claude_code_sessions）
+    共用此判断，避免两者隐私口径漂移（SDI-4 修复点）。
+    """
+    cd = meta.get("created_date") or ""
+    return (bool(cd) and start_date <= cd <= end_date) or bool(file_traces)
+
+
 def _iter_jsonl_files(projects_root):
-    """遍历 projects 根下所有 *.jsonl（含嵌套 projects/ 子目录，兼容 Desktop agent 模式）。"""
+    """遍历 projects 根下「直接一级子目录」中的 *.jsonl（仅一层，不递归更深）。
+
+    隐私边界（与 SKILL.md 硬约束一致）：只枚举 projects_root 的一级子目录
+    （即 c-<cwd哈希> 这类工程目录），在其内找 *.jsonl；**不**递归整棵树，
+    也**不**搜索任意层级的 'projects' 子目录。Desktop agent 模式若为独立根目录，
+    应由 CLAUDE_PROJECTS_DIR / CLAUDE_CONFIG_DIR 显式指向，而非靠盲目递归发现
+    （SDI-1 修复点：移除原先的 rglob("projects") 二级递归）。
+    """
     if not projects_root or not projects_root.exists():
         return
-    # 直接子目录中的 .jsonl
-    for f in projects_root.rglob("*.jsonl"):
-        yield f
-    # Desktop agent 模式：任意层级名为 projects 的目录
-    for sub in projects_root.rglob("projects"):
-        if not sub.is_dir():
-            continue
-        for f in sub.rglob("*.jsonl"):
-            yield f
+    if projects_root.is_dir():
+        for sub in sorted(projects_root.iterdir()):
+            if not sub.is_dir():
+                continue
+            for f in sub.glob("*.jsonl"):
+                yield f
 
 
 def _extract_text(content):
@@ -355,8 +370,7 @@ def collect_claude_code_sessions(start_date, end_date, projects_root=None):
         cd = meta.get("created_date") or ""
         # 契约：仅纳入「created_date 落在窗口内」或「窗口内有 trace」的会话；
         # 越窗（或日期未知且无窗内活动）的会话元数据不进报告，防止越权收集。
-        in_window = (bool(cd) and start_date <= cd <= end_date) or bool(file_traces)
-        if not in_window:
+        if not _session_in_window(meta, file_traces, start_date, end_date):
             continue
         # 任务类型分类：基于对话文本（复用统一 classify_task，与 WorkBuddy 同源）
         text = meta.get("_dialogue_text", "")
@@ -372,12 +386,19 @@ def collect_claude_code_sessions(start_date, end_date, projects_root=None):
 
 
 def collect_claude_code(start_date, end_date, projects_root=None):
-    """一次性返回 (traces, db_data)，供 collect_usage_data.py --source claude-code 直接使用。"""
+    """一次性返回 (traces, db_data)，供 collect_usage_data.py --source claude-code 直接使用。
+
+    隐私边界与 collect_claude_code_sessions 完全一致：越窗会话（无窗内 trace 且
+    created_date 不在窗口内）整体跳过，不进 traces 也不进 sessions 元数据
+    （SDI-1 / SDI-4 修复点：合并 collector 原先漏做窗口过滤）。
+    """
     root = Path(projects_root) if projects_root else resolve_claude_projects_root()
     traces = []
     sessions = []
     for f in _iter_jsonl_files(root):
         file_traces, meta = _parse_claude_file(f, start_date, end_date)
+        if not _session_in_window(meta, file_traces, start_date, end_date):
+            continue
         traces.extend(file_traces)
         text = meta.get("_dialogue_text", "")
         meta["task_type"] = classify_task(text)
