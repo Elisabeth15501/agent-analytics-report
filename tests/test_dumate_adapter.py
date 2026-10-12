@@ -380,8 +380,12 @@ def test_report_title_dumate(dumate_home, tmp_path):
     )
     assert r2.returncode == 0, f"报告渲染失败: {r2.stderr[-800:]}"
     md = out_md.read_text(encoding="utf-8")
-    assert "# 百度搭子使用情况报告" in md
+    # v1.9.5：dumate 标题去品牌化（归属未证实，不再暗示确认的百度搭子归属），
+    # 但仍须与 WorkBuddy 默认标题区分（测试原意：不冒充 WorkBuddy）。
+    assert "Dumate 数据源使用情况报告" in md
     assert "Workbuddy使用情况报告" not in md
+    # 强制归属告警必须在报告里出现（SDI-4 修复点）
+    assert "归属未证实" in md
 
 
 # ── 五、隐私护栏 ────────────────────────────────────────────────────────────

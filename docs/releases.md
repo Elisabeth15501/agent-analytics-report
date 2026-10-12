@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.5** | 2026-10-12 | 消除 ClawHub v1.9.4 重扫后残余 3 HIGH：SDI-1（ca_sources.py 递归 glob 过扫 `~/.claude/projects`，改一级目录收敛）+ SDI-4（generate_report.py dumate 标签去品牌化、强制归属告警）+ TP4（SKILL.md dumate 归属不再暗示确认） | [tag/v1.9.5](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.5) |
 | **v1.9.4** | 2026-10-12 | 消除 ClawHub v1.9.3 重扫后残余 4 HIGH：P6×2（release notes 字面量触发词）+ TP4×1（analyze_tokens.py 写报告产物未入 SKILL.md 权限声明）+ SDI-4×1（on-download-inject.md「首次生成报告可能触发扫描」措辞与「普通报告严格只读」矛盾） | [tag/v1.9.4](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.4) |
 | **v1.9.3** | 2026-10-11 | 安全加固翻盘：移出发布/CI/开发脚本出包 + P6 误报消除 + SDI-4 越窗收集修复 | [tag/v1.9.3](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.3) |
 | **v1.9.2** | 2026-10-11 | 安全加固（回应 ClawHub 扫描 need review）：SDI-4 修复 + SQP-2 截断脱敏 + 最小权限声明 | [tag/v1.9.2](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.2) |
@@ -30,6 +31,13 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.5 — 2026-10-12
+### 消除 ClawHub v1.9.4 重扫后残余 3 HIGH（SDI-1 / SDI-4 / TP4）
+- **SDI-1（真过扫）**：`scripts/ca_sources.py` `_find_session_jsonl` 的兜底分支用 `PROJECTS_DIR.glob(f"**/{session_id}.jsonl")` 递归遍历整个 `~/.claude/projects` 树，可枚举无关会话工件（隐私面越权）。改为**只探测一级子目录**做 exact-name 匹配（`for sub in PROJECTS_DIR.iterdir(): cand = sub / f"{session_id}.jsonl"`），不递归更深，访问面收敛到「请求的那个会话」所在目录层。
+- **SDI-4（真误标）**：`scripts/generate_report.py` `_SOURCE_LABELS["dumate"]` 标题写「百度搭子使用情况报告」，与 metadata「归属未证实」自相矛盾（实测 217 会话 qianfan/dumate 命中 0 行，内容 100% 是 WorkBuddy）。去品牌化改「Dumate 数据源使用情况报告（数据归属未证实）」，数据来源行与清单**强制带「归属未证实、勿当作百度搭子用量引用」告警**；同步改 SKILL.md 硬约束 3 与 `tests/test_dumate_adapter.py` 标题断言。
+- **TP4（混合 messaging）**：SKILL.md 权限声明与正文把「默认只读离线」与「可选联网 / 写 dumate 归属不明」混写，被扫描器读成「用户在错误隐私假设下调用」。dumate 标签去品牌化后，SKILL.md 默认流程与可选流程的表述不再暗示确认的百度搭子归属；`analyze_tokens.py` 的「报告产物写（默认流程）」条目保留（v1.9.4 已加）。
+- 五处版本号一致升 1.9.4→1.9.5（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
 
 ## v1.9.4 — 2026-10-12
 ### 消除 ClawHub v1.9.3 重扫后残余 4 HIGH（P6×2 / TP4×1 / SDI-4×1）

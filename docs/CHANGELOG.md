@@ -3,6 +3,13 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.5] — 2026-10-12
+### 消除 ClawHub v1.9.4 重扫后残余 3 HIGH（SDI-1 / SDI-4 / TP4）
+- **SDI-1（真过扫）**：`scripts/ca_sources.py` `_find_session_jsonl` 的兜底分支用 `PROJECTS_DIR.glob(f"**/{session_id}.jsonl")` 递归遍历整个 `~/.claude/projects` 树，可枚举无关会话工件（隐私面越权）。改为**只探测一级子目录**做 exact-name 匹配（`for sub in PROJECTS_DIR.iterdir(): cand = sub / f"{session_id}.jsonl"`），不递归更深，访问面收敛到「请求的那个会话」所在目录层。
+- **SDI-4（真误标）**：`scripts/generate_report.py` `_SOURCE_LABELS["dumate"]` 标题写「百度搭子使用情况报告」，与 metadata「归属未证实」自相矛盾（实测 217 会话 qianfan/dumate 命中 0 行，内容 100% 是 WorkBuddy）。去品牌化改「Dumate 数据源使用情况报告（数据归属未证实）」，数据来源行与清单**强制带「归属未证实、勿当作百度搭子用量引用」告警**；同步改 SKILL.md 硬约束 3 与 `tests/test_dumate_adapter.py` 标题断言。
+- **TP4（混合 messaging）**：SKILL.md 权限声明与正文把「默认只读离线」与「可选联网 / 写 dumate 归属不明」混写，被扫描器读成「用户在错误隐私假设下调用」。dumate 标签去品牌化后，SKILL.md 默认流程与可选流程的表述不再暗示确认的百度搭子归属；`analyze_tokens.py` 的「报告产物写（默认流程）」条目保留（v1.9.4 已加）。
+- 五处版本号一致升 1.9.4→1.9.5（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
+
 ## [1.9.4] — 2026-10-12
 ### 消除 ClawHub v1.9.3 重扫后残余 4 HIGH（P6×2 / TP4×1 / SDI-4×1）
 - **P6×2**：v1.9.3 的 CHANGELOG/releases 笔记里对 ca_core 重命名动作的描述性文字，恰好命中了静态扫描器按关键词匹配 P6 类的敏感词表 → 重新误报。本次把两处描述改为「时段定价标识符语义统一（`sched` / `_schedule_matches`）」，不再出现触发词，也不再引用具体代码片段。

@@ -582,10 +582,16 @@ def _find_session_jsonl(session_id, cwd):
                     return cand
         except (json.JSONDecodeError, OSError):
             pass
-    # 3. 兜底：全局搜索
-    hits = list(PROJECTS_DIR.glob(f"**/{session_id}.jsonl"))
-    if hits:
-        return hits[0]
+    # 3. 兜底：仅探测 PROJECTS_DIR 下已知的一级子目录（c-<cwd哈希>），不递归整棵树
+    #    ——避免 glob("**/...") 跨目录枚举无关会话工件（隐私面收敛，SDI-1）。
+    #    只对一级子目录做 exact-name 匹配，找到即返回，找不到返回 None（不做更深递归）。
+    if PROJECTS_DIR.is_dir():
+        for sub in sorted(PROJECTS_DIR.iterdir()):
+            if not sub.is_dir():
+                continue
+            cand = sub / f"{session_id}.jsonl"
+            if cand.exists():
+                return cand
     return None
 
 def _extract_text_from_parts(raw):
