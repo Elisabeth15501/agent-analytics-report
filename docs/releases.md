@@ -7,6 +7,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
 | **v1.9.6** | 2026-10-13 | 消除 ClawHub v1.9.5 复审 7 HIGH：① 污染 4（verify_194.json 误收进包，已封死）② 真 over-collection 2（collect_claude_code/collect_codex 合并 collector 补日期窗口过滤 + 移除 rglob 二级递归）③ LP3 最小权限 manifest（_meta.json permissions + SKILL.md 权限表）④ TP4 强化披露 | [tag/v1.9.6](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.6) |
+| **v1.9.7** | 2026-10-13 | 修正 ClawHub 展示名 Pub Clawhub → Agent Analytics Report（发布漏传 --name，版本不可覆盖故升版重发；无代码变更，重扫 Moderate CLEAN） | [tag/v1.9.7](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.7) |
 | **v1.9.5** | 2026-10-12 | 消除 ClawHub v1.9.4 重扫后残余 3 HIGH：SDI-1（ca_sources.py 递归 glob 过扫 `~/.claude/projects`，改一级目录收敛）+ SDI-4（generate_report.py dumate 标签去品牌化、强制归属告警）+ TP4（SKILL.md dumate 归属不再暗示确认） | [tag/v1.9.5](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.5) |
 | **v1.9.4** | 2026-10-12 | 消除 ClawHub v1.9.3 重扫后残余 4 HIGH：P6×2（release notes 字面量触发词）+ TP4×1（analyze_tokens.py 写报告产物未入 SKILL.md 权限声明）+ SDI-4×1（on-download-inject.md「首次生成报告可能触发扫描」措辞与「普通报告严格只读」矛盾） | [tag/v1.9.4](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.4) |
 | **v1.9.3** | 2026-10-11 | 安全加固翻盘：移出发布/CI/开发脚本出包 + P6 误报消除 + SDI-4 越窗收集修复 | [tag/v1.9.3](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.3) |

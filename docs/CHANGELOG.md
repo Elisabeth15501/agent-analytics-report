@@ -13,6 +13,10 @@
 - **TP4 强化披露**：隐私清单「任务分类」行加 ⚠️ 高风险出站警告（启用 `--task-classifier llm` 时会话派生文本发往用户自己的端点、默认关闭）；「默认」行明确零出站。
 - 五处版本号一致升 1.9.5→1.9.6（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
 
+## [1.9.7] — 2026-10-13
+### 修正 ClawHub 展示名（无代码变更）
+- ClawHub 发布 v1.9.6 时漏传 `--name`，展示名被回退成发布目录名 "Pub Clawhub"。版本不可覆盖，故升 1.9.7 重发并显式传 `--name "Agent Analytics Report"`。安全内容与前版完全一致，重扫仍为 Moderate CLEAN。
+
 ## [1.9.5] — 2026-10-12
 ### 消除 ClawHub v1.9.4 重扫后残余 3 HIGH（SDI-1 / SDI-4 / TP4）
 - **SDI-1（真过扫）**：`scripts/ca_sources.py` `_find_session_jsonl` 的兜底分支用 `PROJECTS_DIR.glob(f"**/{session_id}.jsonl")` 递归遍历整个 `~/.claude/projects` 树，可枚举无关会话工件（隐私面越权）。改为**只探测一级子目录**做 exact-name 匹配（`for sub in PROJECTS_DIR.iterdir(): cand = sub / f"{session_id}.jsonl"`），不递归更深，访问面收敛到「请求的那个会话」所在目录层。
