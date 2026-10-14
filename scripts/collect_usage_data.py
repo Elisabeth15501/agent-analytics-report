@@ -206,6 +206,49 @@ def _decide_cost_mode(
     return "priced"
 
 
+def build_task_classifier_with_consent(args, _stderr=None):
+    """按 --task-classifier 与出站确认门禁构造任务分类器（TP4 合规）。
+
+    仅当 args.task_classifier == "llm" 且显式确认（--task-classifier-llm-ack
+    或环境变量 AAR_TASK_LLM_ACK=1）时，才构建会将会话派生文本外传的 LLM 分类器；
+    否则返回 None，调用方据此走内置加权启发式、零出站。
+
+    默认离线路径（heuristic）完全不受影响：直接返回 None，不打印任何警告。
+    """
+    if args.task_classifier != "llm":
+        return None
+    endpoint = args.task_llm_endpoint
+    ack = bool(getattr(args, "task_classifier_llm_ack", False)) or \
+        os.environ.get("AAR_TASK_LLM_ACK") == "1"
+    stderr = _stderr if _stderr is not None else sys.stderr
+    if not ack:
+        print(
+            "[WARN] ⚠ 出站传输未确认：--task-classifier llm 本会把会话派生文本"
+            "（会话标题 / 对话内容摘要等）\n"
+            f"       发送至你提供的端点 {endpoint or '(未提供)'}，该内容会离开本机。\n"
+            "       未检测到 --task-classifier-llm-ack 或 AAR_TASK_LLM_ACK=1，"
+            "已自动回退本地启发式分类，不做任何出站传输。",
+            file=stderr,
+        )
+        return None
+    print(
+        "[WARN] ⚠ 已确认出站：--task-classifier llm 将把会话派生文本"
+        f"（会话标题 / 对话内容摘要等）发送至端点 {endpoint}（该内容会离开本机）。",
+        file=stderr,
+    )
+    try:
+        from task_classifier_llm import build_llm_classifier
+
+        return build_llm_classifier(
+            endpoint,
+            args.task_llm_model,
+            api_key=args.task_llm_api_key,
+        )
+    except (ValueError, ImportError) as e:
+        print(f"[WARN] LLM 分类器不可用（{e}），回退加权启发式", file=stderr)
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="WorkBuddy Agent 使用数据采集器")
     parser.add_argument(
@@ -300,6 +343,14 @@ def main():
         help="LLM 端点的 API Key（本地端点可省略）",
     )
     parser.add_argument(
+        "--task-classifier-llm-ack",
+        action="store_true",
+        default=False,
+        help="确认启用 --task-classifier llm 的出站传输：会话派生文本将被发送至你提供的"
+        "自有端点（OpenAI 兼容）。未设置时，即便传了 --task-classifier llm 也只走本地启发式、"
+        "不做任何出站传输。也可设置环境变量 AAR_TASK_LLM_ACK=1 等效确认。",
+    )
+    parser.add_argument(
         "--import-official",
         type=str,
         default=None,
@@ -366,23 +417,10 @@ def main():
                 file=sys.stderr,
             )
 
-    # 任务分类器：默认启发式零依赖；llm 仅在显式提供端点时启用
-    task_classifier = None
-    if args.task_classifier == "llm":
-        try:
-            from task_classifier_llm import build_llm_classifier
-
-            task_classifier = build_llm_classifier(
-                args.task_llm_endpoint,
-                args.task_llm_model,
-                api_key=args.task_llm_api_key,
-            )
-            print(
-                f"[INFO] 任务分类器：LLM 增强（{args.task_llm_model} @ {args.task_llm_endpoint}，失败自动回退启发式）",
-                file=sys.stderr,
-            )
-        except (ValueError, ImportError) as e:
-            print(f"[WARN] LLM 分类器不可用（{e}），回退加权启发式", file=sys.stderr)
+    # 任务分类器：默认启发式零依赖、完全离线；
+    # --task-classifier llm 仅在显式确认出站（--task-classifier-llm-ack / AAR_TASK_LLM_ACK=1）
+    # 时才构建会外传文本的 LLM 分类器，否则自动回退本地启发式（TP4 合规）。
+    task_classifier = build_task_classifier_with_consent(args)
 
     # 该数据源是否在语义上支持计费维度（默认支持；qwenwork 源会置 False）
     cost_supported = True
