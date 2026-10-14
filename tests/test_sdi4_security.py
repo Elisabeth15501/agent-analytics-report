@@ -25,6 +25,7 @@ for _p in (str(SKILL_DIR), str(SCRIPTS_DIR)):
         sys.path.insert(0, _p)
 
 from adapters.codex import _minimize_dialogue  # noqa: E402
+from scripts.report_charts import build_model_cost_chart  # noqa: E402
 
 pytestmark = [pytest.mark.regression, pytest.mark.privacy]
 
@@ -154,3 +155,20 @@ def test_sessions_window_filter(monkeypatch):
         assert "in" in ids        # 窗口内（或窗内有 trace）→ 纳入
         assert "out" not in ids   # 越窗且无 trace → 排除
         assert "unk" not in ids   # 日期未知且无 trace → 排除
+
+
+# ── SDI-4：build_model_cost_chart 存储型 XSS 修复 ─────────────────────────────
+
+@allure.feature("安全加固（回应 ClawHub need review）")
+@allure.story("SDI-4 存储型 XSS")
+@allure.title("build_model_cost_chart 对模型名做 HTML 转义防止存储型 XSS")
+def test_build_model_cost_chart_escapes_model_name():
+    """模型名来自本地日志 / 配置，可能含引号或标记；必须转义后落入 HTML。"""
+    html_out = build_model_cost_chart(
+        model_stats=[{"model": '"><script>alert(1)</script>', "effective_cost": 1.23}]
+    )
+    # 原始未转义载荷不得出现在输出中（防止属性 / 文本上下文逃逸）
+    assert '"><script>alert(1)</script>' not in html_out
+    # 转义后的形态必须存在：< / > / 引号均被 html.escape 处理
+    assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html_out
+

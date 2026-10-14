@@ -251,7 +251,7 @@ def build_model_cost_chart(model_stats, title="各模型估算实际花费对比
             n_lc += 1
         mark = _lc_arrow(_lc_bias(m.get("model"), low_conf_bias_map)) if reason else ""
         rows.append(
-            f'        <div class="bar-row"><span class="bar-label" title="{m["model"]}">{mark}{m["model"]}</span>'
+            f'        <div class="bar-row"><span class="bar-label" title="{_esc(m["model"])}">{mark}{_esc(m["model"])}</span>'
             f'<span class="bar-track"><span class="bar-fill" style="width:{w}px"></span></span>'
             f'<span class="bar-val">¥{c:.2f}</span></div>'
         )
@@ -265,7 +265,7 @@ def build_model_cost_chart(model_stats, title="各模型估算实际花费对比
                 '估算与实际计费偏差已知较大），不参与成本结论，请勿据此做预算。'
                 + _legend_h + '</p>')
     return (
-        f'    <div class="chart-bars">\n      <p><strong>{title}</strong></p>\n'
+        f'    <div class="chart-bars">\n      <p><strong>{_esc(title)}</strong></p>\n'
         + "\n".join(rows)
         + foot
         + "\n    </div>"
