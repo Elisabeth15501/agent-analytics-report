@@ -3,6 +3,14 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.8] — 2026-10-15
+### 修复 build_model_cost_chart 中模型名未转义的存储型 XSS（SDI-4）
+
+- `scripts/report_charts.py` 的 `build_model_cost_chart()` 把模型名 `m["model"]` 直接拼入 HTML 的 `title=` 属性与文本节点，未做 HTML 转义；现统一经 `_esc()` 转义（含 `title` 参数），防止本地 trace/config 中携带引号或标记的模型名在报告被打开时执行脚本（存储型 XSS）。
+- 新增回归测试 `tests/test_sdi4_security.py::test_build_model_cost_chart_escapes_model_name`（恶意 `<script>` / `onmouseover=` payload 被转义为惰性文本、正常模型名恒等输出）。
+- 附带降噪打磨：CHANGELOG/releases 的 v1.9.6「根因复盘」移除被 agentic-risk 扫描器误读为「会话持久化/越权」的措辞（RA2 假阳性 ×4 收敛）；`examples/*` 新增隐私提醒；`--task-classifier llm` 出站确认闸强化（需显式 `--task-classifier-llm-ack` 或 `AAR_TASK_LLM_ACK=1`，否则回退本地启发式）。
+- 六处版本号一致升 1.9.7→1.9.8（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
+
 ## [1.9.6] — 2026-10-13
 ### 消除 ClawHub v1.9.5 复审 7 HIGH（污染 4 + 真 over-collection 2 + LP3 manifest）
 
