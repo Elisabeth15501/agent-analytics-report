@@ -11,7 +11,7 @@
     "unit": "元 / 百万 tokens(CNY per 1M tokens),输入按「缓存未命中」价,不计缓存命中折扣",
     "tier_rule": "厂商按输入长度分档计价的官方内置模型(如 glm-5.1),一律取「长上下文档」(输入 > 32k)单价 —— Agent 会话上下文普遍超过 32k,取长档更贴近真实账单。",
     "auto_is_null": "auto 为 WorkBuddy 智能路由入口,无单一单价,故恒为 null;采集器对其走 router_avg(本期付费模型均价)计价,不会被判为「未配置」。",
-    "updated": "2026-10-08",
+    "updated": "2026-10-17",
     "peak_valley": "峰谷计费（如 DeepSeek-V4.1-Flash）：models 段的 input/output 统一取【空闲时段】价，高峰时段价另以 peak_input/peak_output 记录。v1.7.1 起不再需要手工覆盖 —— scheduled_pricing 段已内置「工作日 09:00-12:00 / 14:00-18:00 走 peak_*」规则，采集器按每次调用的时间戳自动选档；如需改成别的时段，在 pricing.local.json 覆盖该模型规则即可。",
     "scheduled_pricing": "v1.7.1 新增：按调用时刻（日期区间 + 星期 + 小时）改写单价，覆盖夜间免费 / 峰谷双档 / 限期促销三类规则。未命中任何规则时完全不影响既有行为（零回归）。详见同文件 scheduled_pricing 段的 _comment。"
   },
@@ -41,7 +41,8 @@
     "glm53flash_cny": "https://m.21jingji.com/article/20260828/herald/e8a2a10a2a3f742dc7a2f914f2620c0f.html (2026-08-28 报道引智谱官方: GLM-5.3-Flash 每百万 tokens 输入0.8 / 输出2.8 / 缓存命中输入0.23 元，为 GLM-5.3 的 1/10；上线前两周半价，限时折扣期低至 1/20；OpenRouter z-ai/glm-5.3-flash 国际价 $0.15/$0.50/$0.03)",
     "hy4_preview": "https://www.cnstock.com/commonDetail/779697 (2026-08-28 腾讯混元 Hy4 preview 发布并开源，已在 WorkBuddy/CodeBuddy 国内版及国际版、元宝、ima 同步首发；官方定价 输入6 / 输出18 / 缓存命中0.3 每百万 tokens；WorkBuddy/CodeBuddy 面向用户开展为期 2 周限时免费活动)",
     "openai_cny": "https://platform.openai.com/docs/pricing (OpenAI 官方美元定价) — Codex 常用模型 gpt-5-codex / gpt-5.1-codex / gpt-5.2-codex / o4-mini / gpt-4o / gpt-4.1 等；本表按其美元刊例价 ×7.2 折 CNY 记录，标注为估算值，待 OpenAI 官方 CNY 定价确认；若你的 Codex 跑其它模型名，请把对应单价加进本机 scripts/pricing.local.json",
-    "hy4_free_newrule": "https://www.163.com/dy/article/L6DRQP550511B8LM.html (IT之家,2026-09-09 WorkBuddy 公告) — Hy4 preview 限免调整为分人群：已体验过的老用户夜间 23:00-次日8:00 免费、其余时段扣积分；未体验过的用户 2026-10-10 23:59 前首次开启起 14 天每日免费额度；Hy4 preview 为纯语言模型，多模态任务会切模型并正常扣积分。参考：https://cloud.tencent.com/developer/article/2735172"
+    "hy4_free_newrule": "https://www.163.com/dy/article/L6DRQP550511B8LM.html (IT之家,2026-09-09 WorkBuddy 公告) — Hy4 preview 限免调整为分人群：已体验过的老用户夜间 23:00-次日8:00 免费、其余时段扣积分；未体验过的用户 2026-10-10 23:59 前首次开启起 14 天每日免费额度；Hy4 preview 为纯语言模型，多模态任务会切模型并正常扣积分。参考：https://cloud.tencent.com/developer/article/2735172",
+    "step5_preview": "https://platform.stepfun.ai/docs/en/guides/models/step-5-preview (阶跃 Step 5 Preview 官方模型页) + https://platform.stepfun.ai/docs/en/guides/pricing/details (官方定价：输入$1.00/缓存命中$0.10/输出$2.70 每百万 tokens) — WorkBuddy 内独家限免 2026-10-12~10-25（平时 0.43 倍积分，来源 https://www.aipromonow.com/promos/workbuddy-step-5-preview-free-oct25-2026）"
   },
   "default_model": "glm-5.2",
   "models": {
@@ -193,6 +194,12 @@
       "input": 0.73,
       "output": 2.91,
       "note": "WorkBuddy 官方内置匿名模型（vendor=f，1M 上下文 / 输出上限 128K / 原生多模态输入 / 仅推理模式 / 思考强度默认 max）。官方**未公布 ¥ 刊例价**，此处为倍率锚定法推算值。\n【2026-10-08 回填正价】官方限时折扣（2026-10-02~10-07，积分倍率 x0.03）已到期，acc-product-config-v3.json 里的 promotions[space-bunny-discount-202610] 条目**已被官方移除**，credits 恢复正价 **x0.08**。以 deepseek-v4.1-flash 空闲档 ¥1/¥4 = 0.11x 为锚点，factor = 0.08/0.11 = 0.7273，得正价 **¥0.73/¥2.91**（此前填的 ¥0.27/¥1.09 是折扣期 0.03x 的推算值，已作废）。\n⚠️ 仍是推算值、非官方报价；如需精确请用 pricing.local.json 覆盖，或按你实际积分消耗反推后改本段 input/output。"
+    },
+    "step-5-preview": {
+      "input": 7.2,
+      "output": 19.44,
+      "cache_hit_input": 0.72,
+      "note": "阶跃星辰 Step 5 Preview（StepFun 旗舰 Agent 模型，2026-09-20 发布，2026-10-12 起接入 WorkBuddy 独家限免至 2026-10-25）。官方直连 API 定价（platform.stepfun.ai，美元价 ×7.2≈CNY 估算）：输入(缓存未命中) $1.00 / 输入(缓存命中) $0.10 / 输出 $2.70 每百万 tokens；1M 上下文、文本+图像+视频输入、支持工具调用/JSON/推理强度。⚠️ 经 WorkBuddy 使用时按平台积分计费（限免期 0 积分、之后约 0.43 倍），与下方直连 API ¥ 价非同一口径；如需精确还原 WorkBuddy 实际花费请用官方用量导出或本机 pricing.local.json 覆盖。"
     }
   },
   "delisted": {
@@ -268,6 +275,7 @@
     }
   },
   "timed_free": {
+    "step-5-preview": "2026-10-25",
     "hy3": "2026-10-31",
     "hy4-preview": "2026-09-10"
   },

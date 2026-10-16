@@ -90,6 +90,7 @@ MODEL_PRICING = {
     "claude-sonnet-4-20250514": {"input": 21.6, "output": 108.0},
     "claude-haiku-4": {"input": 5.76, "output": 28.8},    # Haiku 4/4.5：$0.8/$4 per MTok 折算
     "claude-haiku-4-20250514": {"input": 5.76, "output": 28.8},
+    "step-5-preview": {"input": 7.2, "output": 19.44},  # 阶跃 Step 5 Preview（StepFun 旗舰）：官方直连 API ¥7.2/¥19.44（美元×7.2 估算），WorkBuddy 限免至 2026-10-25
 }
 
 DEFAULT_MODEL = "glm-5.2"

@@ -3,6 +3,15 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.9] — 2026-10-17
+### 新增阶跃 Step 5 Preview 模型定价（WorkBuddy 限免期 10/12-10/25）
+
+- `scripts/pricing.json` 的 `models` 段新增 `step-5-preview`：阶跃星辰（StepFun）旗舰 Agent 模型，官方直连 API 定价（美元 ×7.2≈CNY 估算）输入(缓存未命中) $1.00 / 输入(缓存命中) $0.10 / 输出 $2.70 每百万 tokens；1M 上下文、文本+图像+视频输入、支持工具调用/JSON/推理强度。
+- `timed_free` 段新增 `step-5-preview: "2026-10-25"`（WorkBuddy 内独家限免至 2026-10-25，限免期全时段 0 积分；之后按约 0.43 倍积分计费，与直连 API ¥ 价非同一口径，已在 note 说明）。
+- `_sources` 补阶跃官方模型页 + 定价页来源；`_pricing_rules.updated` 刷新为 2026-10-17。
+- `scripts/ca_core.py` 的 `MODEL_PRICING` 冷启动兜底种子同步加 `step-5-preview`（与 pricing.json 一致，防冷启动 NameError）。
+- 六处版本号一致升 1.9.8→1.9.9（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
+
 ## [1.9.8] — 2026-10-15
 ### 修复 build_model_cost_chart 中模型名未转义的存储型 XSS（SDI-4）
 

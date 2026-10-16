@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.9** | 2026-10-17 | 新增阶跃 Step 5 Preview 模型定价（WorkBuddy 限免期 10/12-10/25）：直连 API ¥7.2/¥19.44（缓存命中 ¥0.72）+ timed_free 限免至 2026-10-25 | [tag/v1.9.9](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.9) |
 | **v1.9.8** | 2026-10-15 | 修复 build_model_cost_chart 模型名未转义存储型 XSS（SDI-4）+ 降噪打磨（RA2 误报措辞收敛 / 示例隐私提醒 / LLM 分类器出站确认闸） | [tag/v1.9.8](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.8) |
 | **v1.9.7** | 2026-10-13 | 修正 ClawHub 展示名 Pub Clawhub → Agent Analytics Report（发布漏传 --name，版本不可覆盖故升版重发；无代码变更，重扫 Moderate CLEAN） | [tag/v1.9.7](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.7) |
 | **v1.9.6** | 2026-10-13 | 消除 ClawHub v1.9.5 复审 7 HIGH：① 污染 4（verify_194.json 误收进包，已封死）② 真 over-collection 2（collect_claude_code/collect_codex 合并 collector 补日期窗口过滤 + 移除 rglob 二级递归）③ LP3 最小权限 manifest（_meta.json permissions + SKILL.md 权限表）④ TP4 强化披露 | [tag/v1.9.6](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.6) |
@@ -34,6 +35,15 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.9 — 2026-10-17
+### 新增阶跃 Step 5 Preview 模型定价（WorkBuddy 限免期 10/12-10/25）
+
+- `scripts/pricing.json` 的 `models` 段新增 `step-5-preview`：阶跃星辰（StepFun）旗舰 Agent 模型，官方直连 API 定价（美元 ×7.2≈CNY 估算）输入(缓存未命中) $1.00 / 输入(缓存命中) $0.10 / 输出 $2.70 每百万 tokens；1M 上下文、文本+图像+视频输入、支持工具调用/JSON/推理强度。
+- `timed_free` 段新增 `step-5-preview: "2026-10-25"`（WorkBuddy 内独家限免至 2026-10-25，限免期全时段 0 积分；之后按约 0.43 倍积分计费，与直连 API ¥ 价非同一口径，已在 note 说明）。
+- `_sources` 补阶跃官方模型页 + 定价页来源；`_pricing_rules.updated` 刷新为 2026-10-17。
+- `scripts/ca_core.py` 的 `MODEL_PRICING` 冷启动兜底种子同步加 `step-5-preview`（与 pricing.json 一致，防冷启动 NameError）。
+- 六处版本号一致升 1.9.8→1.9.9（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
 
 ## v1.9.8 — 2026-10-15
 ### 修复 build_model_cost_chart 存储型 XSS（SDI-4）+ 降噪打磨
