@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.10** | 2026-10-20 | 新增 MiniMax-M3.1-Flash / Kimi-K2.8-Preview / 小米 MiMo-V2.6-Pro 模型定价（¥1/¥4、¥6.5/¥27、¥3/¥6）+ 修正 minimax-m3 误记价与 space-bunny 回填官方价 | [tag/v1.9.10](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.10) |
 | **v1.9.9** | 2026-10-17 | 新增阶跃 Step 5 Preview 模型定价（WorkBuddy 限免期 10/12-10/25）：直连 API ¥7.2/¥19.44（缓存命中 ¥0.72）+ timed_free 限免至 2026-10-25 | [tag/v1.9.9](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.9) |
 | **v1.9.8** | 2026-10-15 | 修复 build_model_cost_chart 模型名未转义存储型 XSS（SDI-4）+ 降噪打磨（RA2 误报措辞收敛 / 示例隐私提醒 / LLM 分类器出站确认闸） | [tag/v1.9.8](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.8) |
 | **v1.9.7** | 2026-10-13 | 修正 ClawHub 展示名 Pub Clawhub → Agent Analytics Report（发布漏传 --name，版本不可覆盖故升版重发；无代码变更，重扫 Moderate CLEAN） | [tag/v1.9.7](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.7) |
@@ -35,6 +36,15 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.10 — 2026-10-20
+### 新增 MiniMax-M3.1-Flash / Kimi-K2.8-Preview / 小米 MiMo-V2.6-Pro 模型定价 + 修正 minimax-m3 / space-bunny 价格
+
+- `scripts/pricing.json` 的 `models` 段新增 3 个模型刊例价（价表此前缺失）：`minimax-m3.1-flash`（MiniMax 2026-10-19 正式发布，官方 ¥1/¥4/缓存0.1）、`kimi-k2.8-preview`（Kimi Code 2026-09-11 全量上线，¥6.5/¥27/缓存1.7）、`mimo-v2.6-pro`（小米 2026-09-22 发布，¥3/¥6/缓存0.025）。
+- 修正 `minimax-m3` 误记价 ¥1/¥4 为官方分档刊例价 ¥2.1/¥8.4（≤512K，缓存0.42；>512K 4.2/16.8）；`space-bunny` 身份揭示=MiniMax M3.1 Flash 早期匿名版（太空兔），由推算值 ¥0.73/¥2.91 回填官方 ¥1/¥4（缓存0.1）。
+- `_sources` 补 4 条来源；`_pricing_rules.updated` 刷新为 2026-10-20。
+- `scripts/ca_core.py` 种子同步新增 3 个模型 + 修正 2 个存量价。
+- 六处版本号一致升 1.9.9→1.9.10（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
 
 ## v1.9.9 — 2026-10-17
 ### 新增阶跃 Step 5 Preview 模型定价（WorkBuddy 限免期 10/12-10/25）

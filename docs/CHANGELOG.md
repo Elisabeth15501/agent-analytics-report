@@ -3,6 +3,15 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.10] — 2026-10-20
+### 新增 MiniMax-M3.1-Flash / Kimi-K2.8-Preview / 小米 MiMo-V2.6-Pro 模型定价 + 修正 minimax-m3 / space-bunny 价格
+
+- `scripts/pricing.json` 的 `models` 段新增 3 个模型刊例价（价表此前缺失）：`minimax-m3.1-flash`（MiniMax 2026-10-19 正式发布，官方 ¥1/¥4/缓存0.1）、`kimi-k2.8-preview`（Kimi Code 2026-09-11 全量上线，¥6.5/¥27/缓存1.7）、`mimo-v2.6-pro`（小米 2026-09-22 发布，¥3/¥6/缓存0.025）。
+- 修正 `minimax-m3` 误记价 ¥1/¥4 为官方分档刊例价 ¥2.1/¥8.4（≤512K，缓存0.42；>512K 输入4.2/输出16.8/缓存0.84）；`space-bunny` 身份揭示=MiniMax M3.1 Flash 早期匿名版（太空兔），由倍率推算值 ¥0.73/¥2.91 回填官方刊例价 ¥1/¥4（缓存0.1）。
+- `_sources` 补 4 条来源（M3.1-Flash 官宣 + Space Bunny 身份 / K2.8-Preview / MiMo-V2.6-Pro / M3 分档价）；`_pricing_rules.updated` 刷新为 2026-10-20。
+- `scripts/ca_core.py` 的 `MODEL_PRICING` 冷启动兜底种子同步新增上述 3 个模型并修正 2 个存量价（与 pricing.json 一致，防冷启动 NameError）。
+- 六处版本号一致升 1.9.9→1.9.10（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
+
 ## [1.9.9] — 2026-10-17
 ### 新增阶跃 Step 5 Preview 模型定价（WorkBuddy 限免期 10/12-10/25）
 

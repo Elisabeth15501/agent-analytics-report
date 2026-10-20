@@ -74,11 +74,13 @@ MODEL_PRICING = {
     "glm-5.3-flash": {"input": 0.8, "output": 2.8}, # 智谱 GLM-5.3-Flash（320B-A18B 开源，2026-08-26 发布）：输入0.8 / 输出2.8（缓存命中0.23），约为 GLM-5.3 的 1/10
     "glm-5v-turbo": {"input": 5.0, "output": 22.0}, # 智谱官方多模态：输入5 / 输出22
     # —— MiniMax（官方 RMB）——
-    "minimax-m3": {"input": 1.0, "output": 4.0},    # 与 hy3 同网关，同价位
+    "minimax-m3": {"input": 2.1, "output": 8.4},    # MiniMax 官方分档价：≤512K 输入2.1/输出8.4/缓存命中0.42（=$0.30/$1.20×7），>512K 4.2/16.8（2026-10-20 修正，原 ¥1/¥4 误记）
+    "minimax-m3.1-flash": {"input": 1.0, "output": 4.0, "cache_hit_input": 0.1},  # MiniMax M3.1 Flash（2026-10-19 正式发布，Space Bunny 正式版）：官方 ¥1/¥4/缓存0.1
     "minimax-m2.7": {"input": 2.1, "output": 8.4},  # MiniMax 官方：输入2.1 / 输出8.4
     # —— Kimi（官方 RMB）——
     "kimi-k3": {"input": 20.0, "output": 100.0},    # Kimi K3 官方：输入20 / 输出100
     "kimi-k2.7-code": {"input": 6.5, "output": 27.0}, # Kimi 官方：输入6.5 / 输出27
+    "kimi-k2.8-preview": {"input": 6.5, "output": 27.0, "cache_hit_input": 1.7},  # Kimi K2.8 Preview（2026-09-11 上线，kimi-for-coding 升级）：¥6.5/¥27/缓存1.7
     "kimi-k2.6": {"input": 6.5, "output": 27.0},    # Kimi 官方：输入6.5 / 输出27
     # —— DeepSeek（官方 RMB 永久价）——
     "deepseek-v4-flash": {"input": 1.0, "output": 2.0}, # 官方：输入1 / 输出2
@@ -90,6 +92,7 @@ MODEL_PRICING = {
     "claude-sonnet-4-20250514": {"input": 21.6, "output": 108.0},
     "claude-haiku-4": {"input": 5.76, "output": 28.8},    # Haiku 4/4.5：$0.8/$4 per MTok 折算
     "claude-haiku-4-20250514": {"input": 5.76, "output": 28.8},
+    "mimo-v2.6-pro": {"input": 3.0, "output": 6.0, "cache_hit_input": 0.025},  # 小米 MiMo-V2.6-Pro（2026-09-22 发布）：官方 ¥3/¥6/缓存0.025
     "step-5-preview": {"input": 7.2, "output": 19.44},  # 阶跃 Step 5 Preview（StepFun 旗舰）：官方直连 API ¥7.2/¥19.44（美元×7.2 估算），WorkBuddy 限免至 2026-10-25
 }
 
