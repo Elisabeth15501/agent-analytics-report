@@ -6,6 +6,7 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 
 | 版本 | 日期 | 主题 | GitHub Release |
 |---|---|---|---|
+| **v1.9.11** | 2026-10-21 | 修复 generate_report.py 异常分析区块模型名/异常原因/日期未转义（HTML 注入，ClawHub T09）；复用 `_esc()` 统一转义 + 条形图 title 属性加固 + 回归测试 | [tag/v1.9.11](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.11) |
 | **v1.9.10** | 2026-10-20 | 新增 MiniMax-M3.1-Flash / Kimi-K2.8-Preview / 小米 MiMo-V2.6-Pro 模型定价（¥1/¥4、¥6.5/¥27、¥3/¥6）+ 修正 minimax-m3 误记价与 space-bunny 回填官方价 | [tag/v1.9.10](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.10) |
 | **v1.9.9** | 2026-10-17 | 新增阶跃 Step 5 Preview 模型定价（WorkBuddy 限免期 10/12-10/25）：直连 API ¥7.2/¥19.44（缓存命中 ¥0.72）+ timed_free 限免至 2026-10-25 | [tag/v1.9.9](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.9) |
 | **v1.9.8** | 2026-10-15 | 修复 build_model_cost_chart 模型名未转义存储型 XSS（SDI-4）+ 降噪打磨（RA2 误报措辞收敛 / 示例隐私提醒 / LLM 分类器出站确认闸） | [tag/v1.9.8](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.9.8) |
@@ -36,6 +37,14 @@ agent-analytics-report 的版本发布说明。每个版本都对应一个 GitHu
 | **v1.0.0** | 初始发布 | 首发 WorkBuddy Agent 用量与成本报告 | [tag/v1.0.0](https://github.com/Elisabeth15501/agent-analytics-report/releases/tag/v1.0.0) |
 
 ---
+
+## v1.9.11 — 2026-10-21
+### 修复 generate_report.py 异常分析区块模型名/异常原因/日期未转义（ClawHub T09 HTML 注入）
+
+- **T09 HTML 注入修复（安全）**：ClawHub AI-Infra-Guard（`aig-skill-scan v0.2.2`，LLM `gpt-6.1-sol`）在 v1.9.10 判 `decision=fail` / `security.status=suspicious`（规则 T09，Medium），根因是 `scripts/generate_report.py` 的 `_render_anomaly_block()` 在 MD 与 HTML 两分支把来自 trace 的会话主要模型名（`a["models"]`）、异常原因（`a["reasons"]`）、异常日（`a["date"]`）及会话标题未经 HTML 转义即写入报告——构造的模型名（如 `<script>…</script>`）会在 HTML 报告打开时执行 JS。现统一套用既有 `_esc()`（`html.escape(..., quote=True)`）。
+- **每日趋势条形图 `date` 加固**：横向条形图 `title="{date}"` 属性与文本节点补 `_esc()`（属性上下文注入面）。
+- **回归测试**：新增 `tests/test_anomaly_html_escape.py`，用构造 `<script>` 模型名/原因验证 MD 与 HTML 输出均被转义、正常模型名无回归。
+- 六处版本号一致升 1.9.10→1.9.11（config / metadata / _meta / SKILL.md / CHANGELOG + releases）。
 
 ## v1.9.10 — 2026-10-20
 ### 新增 MiniMax-M3.1-Flash / Kimi-K2.8-Preview / 小米 MiMo-V2.6-Pro 模型定价 + 修正 minimax-m3 / space-bunny 价格

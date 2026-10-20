@@ -3242,7 +3242,7 @@ def _render_anomaly_block(fmt, title, block, kind):
             lines.append("")
             for a in daily:
                 v = _fmt_anom_val(a["value"], kind == "cost")
-                lines.append(f"- 🔺 **{a['date']}**：{v} —— {'；'.join(a['reasons'])}")
+                lines.append(f"- 🔺 **{_esc(a['date'])}**：{v} —— {'；'.join(_esc(r) for r in a['reasons'])}")
             lines.append("")
         else:
             label = "成本" if kind == "cost" else "Token 消耗"
@@ -3255,18 +3255,18 @@ def _render_anomaly_block(fmt, title, block, kind):
             else:
                 lines.append("**异常高调用会话（调用次数超过 p95）**：")
             lines.append("")
-            for a in sess:
-                models = "、".join(a.get("models", [])[:3]) or "—"
-                if kind == "cost":
-                    lines.append(
-                        f"- 💰 **{a['title']}**：¥{a['value']:.2f}（主要模型：{models}）"
-                    )
-                else:
-                    # token 口径不是钱，沿用 💰 会让 tokens_only 报告自己打自己脸
-                    lines.append(
-                        f"- 📈 **{a['title']}**：实际消耗 {a['value']:,.0f} token、"
-                        f"调用 {a.get('calls', 0)} 次（主要模型：{models}）"
-                    )
+        for a in sess:
+            models = "、".join(_esc(x) for x in a.get("models", [])[:3]) or "—"
+            if kind == "cost":
+                lines.append(
+                    f"- 💰 **{_esc(a['title'])}**：¥{a['value']:.2f}（主要模型：{models}）"
+                )
+            else:
+                # token 口径不是钱，沿用 💰 会让 tokens_only 报告自己打自己脸
+                lines.append(
+                    f"- 📈 **{_esc(a['title'])}**：实际消耗 {a['value']:,.0f} token、"
+                    f"调用 {a.get('calls', 0)} 次（主要模型：{models}）"
+                )
             lines.append("")
         return lines
     # html
@@ -3287,7 +3287,7 @@ def _render_anomaly_block(fmt, title, block, kind):
         for a in daily:
             v = _fmt_anom_val(a["value"], kind == "cost")
             L.append(
-                f"            <li>🔺 <b>{a['date']}</b>：{v} —— {'；'.join(a['reasons'])}</li>"
+                f"            <li>🔺 <b>{_esc(a['date'])}</b>：{v} —— {'；'.join(_esc(r) for r in a['reasons'])}</li>"
             )
         L.append("        </ul>")
     else:
@@ -3300,7 +3300,7 @@ def _render_anomaly_block(fmt, title, block, kind):
         else:
             L.append("        <p><b>异常高调用会话（调用次数超过 p95）</b>：</p><ul>")
         for a in sess:
-            models = "、".join(a.get("models", [])[:3]) or "—"
+            models = "、".join(_esc(x) for x in a.get("models", [])[:3]) or "—"
             if kind == "cost":
                 L.append(
                     f"            <li>💰 <b>{_esc(a['title'])}</b>：¥{a['value']:.2f}（主要模型：{models}）</li>"
@@ -4048,7 +4048,7 @@ def generate_html_report(data):
             tok = stats.get("total", 0)
             w = max(int(220 * tok / max_tokens), 1)
             rows.append(
-                f'        <div class="bar-row"><span class="bar-label" title="{date}">{date}</span>'
+                f'        <div class="bar-row"><span class="bar-label" title="{_esc(date)}">{_esc(date)}</span>'
                 f'<span class="bar-track"><span class="bar-fill" style="width:{w}px"></span></span>'
                 f'<span class="bar-val">{format_number(tok)}</span></div>'
             )

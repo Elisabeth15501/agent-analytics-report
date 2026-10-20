@@ -3,6 +3,14 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
+## [1.9.11] — 2026-10-21
+### 修复 generate_report.py 异常分析区块模型名/异常原因/日期未转义（ClawHub T09 HTML 注入）
+
+- 修复 `scripts/generate_report.py` 的 `_render_anomaly_block()` 在 MD 与 HTML 两条分支里，把来自 trace 的会话主要模型名（`a["models"]`）、异常原因（`a["reasons"]`）、异常日（`a["date"]`）及会话标题未经 `html.escape` 即写入报告的问题——构造的模型名（如 `<script>…</script>`）会在 HTML 报告打开时执行 JS（ClawHub AI-Infra-Guard `aig-skill-scan v0.2.2` 判 `decision=fail` / `security.status=suspicious`，规则 T09，Medium）。现统一套用既有 `_esc()`（`html.escape(..., quote=True)`）。
+- 同步加固每日趋势横向条形图（`title="{date}"` 属性与文本节点）的 `date` 转义（属性上下文注入面，五类输出上下文里最危险的一类）。
+- 新增回归测试 `tests/test_anomaly_html_escape.py`：用构造 `<script>` 模型名/原因验证 MD 与 HTML 输出均被转义、正常模型名无回归。
+- 版本号六处同步至 1.9.11；发布一致性门禁 `test_version_parity` 通过。
+
 ## [1.9.10] — 2026-10-20
 ### 新增 MiniMax-M3.1-Flash / Kimi-K2.8-Preview / 小米 MiMo-V2.6-Pro 模型定价 + 修正 minimax-m3 / space-bunny 价格
 
