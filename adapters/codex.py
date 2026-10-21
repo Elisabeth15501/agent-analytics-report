@@ -208,6 +208,8 @@ def _parse_codex_file(path, start_date, end_date):
     updated_ms = None
     dialogue_parts = []
     current_model = ""
+    # 会话级累计基线：用于 total_token_usage 增量去重，避免把累计快照当逐轮重复计入
+    _cum = {}
 
     for obj in _read_jsonl_lines(path):
         if not isinstance(obj, dict):
@@ -263,12 +265,33 @@ def _parse_codex_file(path, start_date, end_date):
                         first_model = m
                 dialogue_parts.append(_extract_text(p.get("content")))
             elif ptype == "token_count":
-                # 累计 token 事件（部分版本用它而非 turn.completed）；info.total_token_usage
+                # 累计 token 事件（部分版本用它而非 turn.completed）
                 info = p.get("info") or {}
-                usage = info.get("total_token_usage") or info.get("last_token_usage") or {}
-                if usage:
+                last = info.get("last_token_usage") or {}
+                total = info.get("total_token_usage") or {}
+                if last:
+                    # 逐轮语义（last_token_usage）：直接发，不重复计
                     _emit_trace(traces, session_id, cwd, ts, current_model or first_model,
-                                usage, start_date, end_date)
+                                last, start_date, end_date)
+                elif total:
+                    # 累计快照（total_token_usage）：按会话基线算增量，避免把整段历史当一轮重复计入
+                    base = _cum.setdefault(session_id, {})
+                    prev_in = _to_int(base.get("input_tokens"))
+                    prev_out = _to_int(base.get("output_tokens"))
+                    cur_in = _to_int(total.get("input_tokens"))
+                    cur_out = _to_int(total.get("output_tokens"))
+                    base.clear()
+                    base.update(total)
+                    d_in = cur_in - prev_in
+                    d_out = cur_out - prev_out
+                    if d_in < 0 or d_out < 0:
+                        # 计数重置：基线已更新，本快照不再计入，避免把历史重复算入窗口
+                        continue
+                    if d_in > 0 or d_out > 0:
+                        _emit_trace(traces, session_id, cwd, ts, current_model or first_model,
+                                    {"input_tokens": d_in, "output_tokens": d_out,
+                                     "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+                                    start_date, end_date)
 
         # 逐轮完成事件（⭐ 主用量来源）
         if typ == "turn.completed":
@@ -312,7 +335,8 @@ def _emit_trace(traces, session_id, cwd, ts, model, usage, start_date, end_date)
     if reasoning == 0:
         reasoning = _to_int(usage.get("reasoning_tokens"))
     # 已计费的输出 = output_tokens（reasoning token 成本记透明字段，MVP 不单独计价）
-    total = in_tok + out_tok
+    # 透明口径：raw total 含缓存读，便于账单对账；eff_tokens 仍按下方原口径，不改变费用数值
+    total = in_tok + out_tok + cache_read
     bare = normalize_model(model) if model else _UNKNOWN_MODEL
     model_key = f"{CODEX_CHANNEL}:{bare}"
     pricing_model = resolve_model(bare)
@@ -327,7 +351,7 @@ def _emit_trace(traces, session_id, cwd, ts, model, usage, start_date, end_date)
         eff_cost = (eff_in / 1_000_000) * ip + (out_tok / 1_000_000) * op
     else:
         input_cost = output_cost = cost = eff_cost = 0.0
-    eff_tokens = effective_tokens_of(total, cache_read)
+    eff_tokens = effective_tokens_of(in_tok + out_tok, cache_read)
     is_free = is_timed_free(pricing_model, date) or is_scheduled_free(pricing_model, **_when)
     traces.append({
         "trace_id": f"{session_id}:{ts}:{len(traces)}",

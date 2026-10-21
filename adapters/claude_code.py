@@ -262,7 +262,9 @@ def _parse_claude_file(path, start_date, end_date):
             cache_creation = _to_int(usage.get("cache_creation_input_tokens"))
             # cached_tokens：实际命中缓存读取的 token（享受折扣的部分）
             cached = cache_read
-            total = in_tok + out_tok
+            # 透明口径：raw total 含全部 token（输入 + 输出 + 缓存读/写），
+            # 便于「账单对账」；计费等效 eff_tokens/eff_cost 仍按下方原口径，不改变费用数值
+            total = in_tok + out_tok + cache_read + cache_creation
             bare = normalize_model(model)
             model_key = f"{CLAUDE_CHANNEL}:{bare}"
             pricing_model = resolve_model(bare)
@@ -277,7 +279,7 @@ def _parse_claude_file(path, start_date, end_date):
                 eff_cost = (eff_in / 1_000_000) * ip + (out_tok / 1_000_000) * op
             else:
                 input_cost = output_cost = cost = eff_cost = 0.0
-            eff_tokens = effective_tokens_of(total, cached)
+            eff_tokens = effective_tokens_of(in_tok + out_tok, cached)
             is_free = is_timed_free(pricing_model, date) or is_scheduled_free(pricing_model, **_when)
             traces.append({
                 "trace_id": f"{session_id}:{obj.get('uuid', len(traces))}",

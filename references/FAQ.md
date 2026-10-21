@@ -320,10 +320,10 @@ WorkBuddy 的 `auto` 自动路由下还有三档可选档位，按**积分消耗
 - 关键字段缺失（如 `sessionId`、`modelInfo`）：按孤儿 trace 处理并打警告
 - 结构大变（schema c+）：需升级技能，旧版采集器可能解析失败
 
-若你遇到解析异常，先升级技能到最新版；仍不行则在 GitHub issue 提交一份样例 trace 供开发者适配。
+若你遇到解析异常，先升级技能到最新版；仍不行则在 GitHub issue 提交一份样例 trace 供开发者适配。**⚠️ 提交前请注意：GitHub issue 可能公开，请先脱敏——移除凭据、个人 / 私有 URL、模型端点、路径与任何会话原文，优先用最小合成复现或脱敏后的 schema 示例，确认无敏感信息后再提交。**
 
 **Q41. 自定义模型是怎么自动发现的？**
-采集器在启动时会读取 `~/.workbuddy/models.json`（WorkBuddy 的模型配置文件），自动识别两类自定义模型：
+当你显式涉及自建模型（custom-local）时，聚合层才按需读取 `~/.workbuddy/models.json`（WorkBuddy 的模型配置文件）做自动识别（非报告默认流程、不越权读取），识别两类自定义模型：
 - **本地模型（🏠）**：`vendor=ollama` 或 `url` 含 `localhost:11434` 的模型。零 API 成本，报告强制归零并标 🏠，不计入账单。
 - **外部模型（🔧）**：`vendor=custom` 或 `url` 含 `openrouter` 的模型。可能仍有费用，需你在 `pricing.local.json` 配置单价。
 

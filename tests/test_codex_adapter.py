@@ -133,7 +133,7 @@ def test_parse_turn_completed_to_trace(codex_home):
     assert t["raw_model"] == f"{CODEX_CHANNEL}:gpt-5-codex"
     assert t["input_tokens"] == 2000
     assert t["output_tokens"] == 500
-    assert t["total_tokens"] == 2500
+    assert t["total_tokens"] == 7500, "raw total 应含缓存读（透明口径，A1 修复；2000+500+5000）"
     assert t["cached_tokens"] == 5000, "cached 应等于 cached_input_tokens"
     assert t["_reasoning_output_tokens"] == 128
     assert t["call_count"] == 1
@@ -356,7 +356,7 @@ def test_cli_source_codex_end_to_end(codex_home, tmp_path):
     assert len(d["traces"]) == 2
     assert len(d["sessions"]) == 1
     s = d["summary"]
-    assert s["total_tokens"] == (4000 + 900) + (6000 + 300)
+    assert s["total_tokens"] == (4000 + 900 + 2000) + (6000 + 300), "raw total 应含缓存读（A1 修复）"
     assert s["total_cost"] > 0
     assert s["total_effective_cost"] <= s["total_cost"] + 1e-9
     assert all(m["channel"] == CODEX_CHANNEL for m in d["model_exec_stats"])
@@ -391,3 +391,56 @@ def test_cli_empty_root(tmp_path):
     d = json.loads(out_json.read_text(encoding="utf-8"))
     assert d["traces"] == []
     assert d["summary"]["total_tokens"] == 0
+
+
+@allure.feature("Codex CLI 适配器")
+@allure.story("账单对账 · 累计去重")
+@allure.title("total_token_usage 累计快照按增量计入，不重复计（A2 修复回归）")
+@allure.severity(allure.severity_level.CRITICAL)
+def test_cumulative_token_count_emits_deltas_not_full_snapshots(codex_home):
+    """v1.9.12 A2：total_token_usage 是累计快照，必须按会话基线算增量，
+    不得把整段历史当一轮重复计入（skillspector SDI-4：否则总 token 被放大数倍）。"""
+    lines = [
+        _session_meta("s1", "/p", "gpt-5-codex"),
+        _user_msg("2026-02-20T10:00:00.000Z", "累计快照测试"),
+        _line({"type": "event_msg", "timestamp": "2026-02-20T10:00:01.000Z", "sessionId": "s1",
+               "payload": {"type": "token_count",
+                           "info": {"total_token_usage": {"input_tokens": 100, "output_tokens": 10}}}}),
+        _line({"type": "event_msg", "timestamp": "2026-02-20T10:00:02.000Z", "sessionId": "s1",
+               "payload": {"type": "token_count",
+                           "info": {"total_token_usage": {"input_tokens": 200, "output_tokens": 20}}}}),
+        _line({"type": "event_msg", "timestamp": "2026-02-20T10:00:03.000Z", "sessionId": "s1",
+               "payload": {"type": "token_count",
+                           "info": {"total_token_usage": {"input_tokens": 350, "output_tokens": 35}}}}),
+    ]
+    _write_session(codex_home, "cum", lines)
+    traces, _ = _parse_codex_file(
+        codex_home / "sessions" / "2026" / "02" / "10" / "rollout-cum.jsonl",
+        "2026-02-01", "2026-02-28")
+    assert len(traces) == 3, "累计快照应按增量各出一条 trace"
+    inputs = sorted(t["input_tokens"] for t in traces)
+    assert inputs == [100, 100, 150], "每条应为增量（100 / 100 / 150），非整段累计"
+    assert sum(t["input_tokens"] for t in traces) == 350, "总输入应为增量之和，不得重复计"
+
+
+@allure.feature("Codex CLI 适配器")
+@allure.story("账单对账 · 累计去重")
+@allure.title("计数重置时更新基线且不把历史重复计入（A2 修复回归）")
+def test_cumulative_token_count_handles_reset(codex_home):
+    lines = [
+        _session_meta("s1", "/p", "gpt-5-codex"),
+        _user_msg("2026-02-21T10:00:00.000Z", "重置测试"),
+        _line({"type": "event_msg", "timestamp": "2026-02-21T10:00:01.000Z", "sessionId": "s1",
+               "payload": {"type": "token_count",
+                           "info": {"total_token_usage": {"input_tokens": 100, "output_tokens": 10}}}}),
+        # 计数重置（累计值回落）→ 仅最新基线计入，不把历史重复计入窗口
+        _line({"type": "event_msg", "timestamp": "2026-02-21T10:05:00.000Z", "sessionId": "s1",
+               "payload": {"type": "token_count",
+                           "info": {"total_token_usage": {"input_tokens": 50, "output_tokens": 5}}}}),
+    ]
+    _write_session(codex_home, "reset", lines)
+    traces, _ = _parse_codex_file(
+        codex_home / "sessions" / "2026" / "02" / "10" / "rollout-reset.jsonl",
+        "2026-02-01", "2026-02-28")
+    assert len(traces) == 1, "重置后只计最新基线，不得把历史重复计入"
+    assert traces[0]["input_tokens"] == 100

@@ -114,7 +114,7 @@ def test_parse_assistant_usage_to_trace(projects_root):
     assert t["raw_model"] == f"{CLAUDE_CHANNEL}:claude-sonnet-4-20250514"
     assert t["input_tokens"] == 2000
     assert t["output_tokens"] == 500
-    assert t["total_tokens"] == 2500
+    assert t["total_tokens"] == 8500, "raw total 应含缓存读/写（透明口径，A1 修复；2000+500+5000+1000）"
     assert t["cached_tokens"] == 5000, "cached 应等于 cache_read_input_tokens"
     assert t["_cache_creation_input_tokens"] == 1000
     assert t["call_count"] == 1
@@ -337,7 +337,7 @@ def test_cli_source_claude_code_end_to_end(projects_root, tmp_path):
     assert len(d["traces"]) == 2
     assert len(d["sessions"]) == 1
     s = d["summary"]
-    assert s["total_tokens"] == (4000 + 900) + (6000 + 300)
+    assert s["total_tokens"] == (4000 + 900 + 2000) + (6000 + 300), "raw total 应含缓存读/写（A1 修复）"
     assert s["total_cost"] > 0
     assert s["total_effective_cost"] <= s["total_cost"] + 1e-9
     # 每个模型都要有通道标记
@@ -374,3 +374,26 @@ def test_cli_empty_projects_root(tmp_path):
     d = json.loads(out_json.read_text(encoding="utf-8"))
     assert d["traces"] == []
     assert d["summary"]["total_tokens"] == 0
+
+
+@allure.feature("Claude Code 适配器")
+@allure.story("账单对账 · 缓存透明")
+@allure.title("raw total 含缓存读/写，且计费等效口径不变（A1 修复回归）")
+@allure.severity(allure.severity_level.CRITICAL)
+def test_raw_total_includes_cache_effective_unchanged(projects_root):
+    """v1.9.12 A1：Claude 适配器的 raw total_tokens 必须透明含缓存读/写，
+    不再低估用量（clawscan SDI-1 / skillspector SDI-1 关注点）；同时计费等效
+    (effective_tokens) 仍按原口径，不随 raw total 改变，避免改动账单数值。"""
+    _write_session(projects_root, "a1", [
+        _user("2026-02-19T10:00:00.000Z", "缓存口径校验"),
+        _assistant("2026-02-19T10:00:05.000Z", "claude-sonnet-4-20250514",
+                   1000, 200, cache_read=300, cache_create=100, uuid="a1u"),
+    ])
+    traces, _ = _parse_claude_file(
+        projects_root / "-Users-t-proj" / "a1.jsonl", "2026-02-01", "2026-02-28")
+    t = traces[0]
+    # raw total 透明含缓存：1000 + 200 + 300 + 100 = 1600
+    assert t["total_tokens"] == 1600, "raw total 应含缓存读/写"
+    # 计费等效口径不变：effective_tokens_of(in+out, cached) = max(1200 - 300*0.9, 0) = 930
+    assert t["effective_tokens"] == 930, "effective_tokens 应保持原计费等效口径，不随 raw total 变"
+    assert t["total_cost"] > 0 and t["effective_cost"] <= t["total_cost"] + 1e-9

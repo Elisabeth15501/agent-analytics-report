@@ -23,6 +23,7 @@ from ca_core import (  # 共享常量与纯函数
     ALL_LOCAL_MODELS,
     ALL_ROUTER_MODELS,
     CACHE_DISCOUNT,
+    ensure_custom_models_discovered,
     CUSTOM_LOCAL_PRICING,
     DB_PATH,
     DEFAULT_BLENDED_PER_MILLION,
@@ -311,6 +312,16 @@ def aggregate_by_model(traces):
     计费键仍取各 trace 的 exec_model —— 故免费额度版用量记 ¥0、收费版用量按刊例价计费，
     合并行的花费即「其中收费版那部分的费用」。
     """
+    # 仅当报告实际涉及自建模型（custom-local）时才按需发现用户模型配置，
+    # 避免在生成其它产品报告时越权读取 ~/.workbuddy/models.json
+    if any(
+        (t.get("model", "") or "").lower().startswith("custom-local:")
+        or (t.get("channel") == "custom-local")
+        or (t.get("model_key", "") or "").lower().startswith("custom-local:")
+        for t in (traces or [])
+    ):
+        ensure_custom_models_discovered()
+
     def _resolve_key(t):
         mk = t.get("model_key", "")
         em = t.get("exec_model", "")

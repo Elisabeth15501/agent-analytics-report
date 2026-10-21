@@ -498,13 +498,38 @@ def discover_custom_models():
                 router.add(mid)
     return local, external, router
 
-DISCOVERED_LOCAL, DISCOVERED_EXTERNAL, DISCOVERED_ROUTER = discover_custom_models()
+# 懒加载：导入期不读取 ~/.workbuddy/models.json，避免在生成 WorkBuddy / Claude / Codex 等
+# 其它产品报告时越权访问用户模型配置（满足 ClawHub 比例性原则）。仅当用户显式涉及自建模型
+# （custom-local）时，由聚合层按需调用 ensure_custom_models_discovered() 触发发现。
+DISCOVERED_LOCAL: set = set()
+DISCOVERED_EXTERNAL: set = set()
+DISCOVERED_ROUTER: set = set()
+ALL_LOCAL_MODELS: set = set()
+ALL_ROUTER_MODELS: set = set()
+ALL_CUSTOM_MODELS: set = set(USER_CUSTOM_MODELS)
 
-ALL_LOCAL_MODELS = DISCOVERED_LOCAL
+_DISCOVERED_CACHE = None
 
-ALL_CUSTOM_MODELS = USER_CUSTOM_MODELS | DISCOVERED_LOCAL | DISCOVERED_EXTERNAL
 
-ALL_ROUTER_MODELS = DISCOVERED_ROUTER
+def ensure_custom_models_discovered():
+    """按需发现用户自建模型（读取 ~/.workbuddy/models.json）。
+
+    幂等：多次调用只读取一次。原地变更 DISCOVERED_*/ALL_* 集合（消费者以名字 import，
+    持有同一对象引用），保证跨模块可见。仅供涉及自建模型的报告路径触发。
+    """
+    global _DISCOVERED_CACHE, DISCOVERED_LOCAL, DISCOVERED_EXTERNAL, DISCOVERED_ROUTER
+    global ALL_LOCAL_MODELS, ALL_ROUTER_MODELS, ALL_CUSTOM_MODELS
+    if _DISCOVERED_CACHE is not None:
+        return _DISCOVERED_CACHE
+    local, external, router = discover_custom_models()
+    _DISCOVERED_CACHE = (local, external, router)
+    DISCOVERED_LOCAL.clear(); DISCOVERED_LOCAL |= local
+    DISCOVERED_EXTERNAL.clear(); DISCOVERED_EXTERNAL |= external
+    DISCOVERED_ROUTER.clear(); DISCOVERED_ROUTER |= router
+    ALL_LOCAL_MODELS.clear(); ALL_LOCAL_MODELS |= local
+    ALL_ROUTER_MODELS.clear(); ALL_ROUTER_MODELS |= router
+    ALL_CUSTOM_MODELS.clear(); ALL_CUSTOM_MODELS |= USER_CUSTOM_MODELS | local | external
+    return _DISCOVERED_CACHE
 
 def parse_channel(raw_model_id):
     """从模型标识符解析「API 接口通道」。

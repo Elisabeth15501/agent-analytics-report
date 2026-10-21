@@ -202,8 +202,7 @@ python -m venv .venv && .venv/Scripts/python.exe -m pip install -r requirements-
 你自己的第三方 / 自建模型（OpenRouter 免费、硅基流动、自建 Ollama 等）写在**本机** `scripts/pricing.local.json`——
 该文件已被 `.gitignore` 排除，**不进发布包，`skillhub upgrade` 升级也不会覆盖**，单价自动保留。
 
-下载技能后首次生成报告时，Agent 会扫描本机用过的 `custom-local:*` 模型及 `~/.workbuddy/models.json`
-中配置的自定义 / 外部 / Ollama 端点，**逐个问你单价；只有你明确给出单价数字、
+当你显式发起「自定义模型注入」流程时（说一句"把我的自定义模型加进报告"），Agent 才扫描本机用过的 `custom-local:*` 模型及 `~/.workbuddy/models.json` 中配置的自定义 / 外部 / Ollama 端点（扫描按需触发、非报告默认流程），**逐个问你单价；只有你明确给出单价数字、
 并确认过待写入条目清单之后**，才写入本地文件。之后用自然语言告诉 Agent 新增模型即可。
 
 > **授权边界**：上述扫描**仅限 `~/.workbuddy` 这一个目录**，写入**仅限 `scripts/pricing.local.json` 这一个文件**。
