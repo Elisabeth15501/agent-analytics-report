@@ -3,15 +3,23 @@
 本文件记录 Agent 用量分析报告（agent-analytics-report）的版本变更。
 
 
-## [1.9.13] — 2026-10-21
-### 发布门禁闭环：消解 skill-publish-gate 误报 + 补 ClawHub 声明一致性
+## [1.9.14] — 2026-10-21
+### 文档清理：移除 CHANGELOG 内误写的伪密钥字面量（消 skill-publish-gate PRIVACY redline）
 
-- 修复 `tests/test_sdi4_security.py` 的凭据脱敏用例：原伪密钥 `sk-abcdefghijklmnopqrstuvw` 为源码字面量、形态与真实 OpenAI 密钥一致，被 skill-publish-gate 判 CRITICAL（疑似凭据泄漏）误报。改为运行时拼接（`"sk-" + "a"*24`），源码不再含 `sk-` + 12 位高熵字面量，同时运行时值仍命中 `_REDACT_RE` 验证脱敏；重新扫描该 CRITICAL 已消除。
-- `SKILL.md` frontmatter 新增 `requires: ["python3"]`（技能仅依赖 Python 标准库 + 内部 `ca_*` 模块，无第三方依赖），满足 ClawHub「声明-内容一致性」校验。
-- 复跑门禁：clawhub 视角由 `BLOCKED(critical=2)` 降为 `NEEDS_FIX(critical=0, 18 medium 均为误报：代理工具同族词误命中 SSRF 守卫文本 / 合法的 `sys.path.insert(0,_HERE)` 自举 / 测试依赖 allure·pytest)`；`security-audit` 凭据扫描 0 critical / 0 high。
-- 版本号六处同步至 1.9.13；发布一致性门禁 `test_version_parity` 通过。
+- v1.9.13 的 CHANGELOG 条目误将脱敏用例的原伪密钥以 `sk-` + 24 位高熵字符的字面量写入文档，被 skill-publish-gate 判 PRIVACY CRITICAL（疑似凭据泄漏）误报、整包 BLOCKED。改为描述性写法（形如 `sk-` + 24 位高熵字符的字面量），源码与文档均不再含 `sk-` + 12 位高熵字面量。
+- 复跑门禁：clawhub 视角 `BLOCKED(critical=1)` → 预期 `NEEDS_FIX(critical=0)`；`security-audit` 凭据扫描持续 0 critical / 0 high。
+- 版本号六处同步至 1.9.14；发布一致性门禁 `test_version_parity` 通过。
 
 
+## [1.9.13] — 2026-10-21
+### 发布门禁闭环：消解 skill-publish-gate 误报 + 补 ClawHub 声明一致性
+
+- 修复 `tests/test_sdi4_security.py` 的凭据脱敏用例：原伪密钥（形如 `sk-` + 24 位高熵字符的字面量）为源码字面量、形态与真实 OpenAI 密钥一致，被 skill-publish-gate 判 CRITICAL（疑似凭据泄漏）误报。改为运行时拼接（`"sk-" + "a"*24`），源码不再含 `sk-` + 12 位高熵字面量，同时运行时值仍命中 `_REDACT_RE` 验证脱敏；重新扫描该 CRITICAL 已消除。
+- `SKILL.md` frontmatter 新增 `requires: ["python3"]`（技能仅依赖 Python 标准库 + 内部 `ca_*` 模块，无第三方依赖），满足 ClawHub「声明-内容一致性」校验。
+- 复跑门禁：clawhub 视角由 `BLOCKED(critical=2)` 降为 `NEEDS_FIX(critical=0, 18 medium 均为误报：代理工具同族词误命中 SSRF 守卫文本 / 合法的 `sys.path.insert(0,_HERE)` 自举 / 测试依赖 allure·pytest)`；`security-audit` 凭据扫描 0 critical / 0 high。
+- 版本号六处同步至 1.9.13；发布一致性门禁 `test_version_parity` 通过。
+
+
 ## [1.9.12] — 2026-10-21
 ### 回应 ClawHub v1.9.11 复审「need review」：闭环 Tier A 真实代码缺陷 + Tier B 信任/文档披露
 
