@@ -27,7 +27,7 @@ __all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_
 TIMED_FREE = {
     # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
     # 以 pricing.json 的 timed_free 段为准（权威源）。
-    "hy3": "2026-10-31",
+    "hy3": "2026-11-15",
 }
 
 LOW_CONFIDENCE = {
@@ -66,8 +66,10 @@ MODEL_PRICING = {
     # 路由别名：无单一单价，由代码估算（见 ROUTER_ALIASES）
     "auto": None,            # WorkBuddy 智能路由：执行时自动调配最适合模型
     # —— 腾讯混元（官方 RMB）——
-    "hy3": {"input": 1.0, "output": 4.0},           # 腾讯混元官方：输入1 / 输出4（限时免费至 2026-10-31）
+    "hy4flash-free": {"input": 0.5, "output": 2.0, "cache_hit_input": 0.02},  # Hy4 flash 免费期 trace key（2026-11-16 首发，限免至 11-30 23:59）：官方 ¥0.5/¥2/缓存0.02；trace 实测 key 为 hy4flash-free，非 hy4-flash
+    "hy4": {"input": 6.0, "output": 18.0, "cache_hit_input": 0.3},  # Hy4 正式版（2026-11-04）：限免已于 11-15 23:59 结束，11-16 起恢复计费；刊例价不变 6/18/0.3
     "hy4-preview": {"input": 6.0, "output": 18.0},  # 腾讯混元 Hy4 preview（2026-08-28 发布开源，WorkBuddy 首发）：输入6 / 输出18（缓存命中0.3）；WorkBuddy 2 周限免
+    # hy3 / hy3-x 于 2026-11-16 端内下线，已移入 pricing.json 的 delisted 段（历史调用仍计价）；限免最终截止 11-15 23:59
     # —— 智谱 GLM 系列（bigmodel.cn 国内官方 RMB，非 Z.ai 美元折算）——
     "glm-5.2": {"input": 8.0, "output": 28.0},      # 智谱官方 1M 上下文：输入8 / 输出28
     "glm-5.1": {"input": 8.0, "output": 28.0},      # 智谱官方：输入8 / 输出28
