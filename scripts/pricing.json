@@ -9,13 +9,13 @@
     "step5_free_end_rule": "Step 5 Preview 限时免费的日期语义：多家来源一致给出窗口为 2026-10-12 至 2026-10-25（含当天），因此『10 月 25 日结束免费』与『自 2026-10-26 起终止限时免费』是同一事实的两种表述。本表 timed_free 的语义是『免费截止日，含当天』（见文件头 _comment），故 timed_free.step-5-preview 保持 2026-10-25 不变；若改成 2026-10-26 会把 10-26 当天误计为 ¥0。限免结束后 WorkBuddy 内按积分倍率计费，客户端实测 0.33x（见 _sources.step5_rate_033）；积分倍率属平台侧口径，与 models.step-5-preview 的直连 API 人民币刊例价不是同一计费体系，二者不得互相换算或覆盖。",
     "hy4_official_free": "Hy4 正式版（2026-11-04 发布）在 WorkBuddy/CodeBuddy 的免费规则：2026-11-04 至 2026-11-15 期间每日赠送免费额度、订阅用户享更高配额，消耗速度显示 0.00x；额度当日有效、不结转，用尽后仍可继续消耗积分使用，高峰可能排队（客户端卡片与媒体口径，见 _sources.hy4_daily_quota_1104）；官方通稿措辞为『提供一定额度的免费使用』（见 _sources.hy4_official_1104）。计价处理：这是『每日额度制 + 分人群配额』，不是『全时段无限免』，静态价表在数学上无法表达，故**不**把 hy4 加入 timed_free，也不加 scheduled_pricing 的 free 规则；models.hy4 仍按官方刊例价 6/18 记录，2026-11-04~11-15 的实际免费部分会体现为高估，已在 low_confidence 标注。⚠️ 待确认：每日额度的具体数值、精确截止时刻（媒体称 11-15 23:59）、Hy4 在 trace / 官方用量导出中的实际模型标识符。2026-11-16 更新：官方通稿确认限免已于 11-15 23:59 结束、11-16 起恢复计费（客户端倍率 0.29x，见 _sources.hy3_delisted_1116）；本表对该模型按刊例价 6/18 计价的口径不变，历史 11-04~11-15 调用的 low_confidence 标注保留。",
     "hy3_delisted_1116": "Hy3 于 2026-11-16 端内下线（见 _sources.hy3_delisted_1116）。此前限免经多次延长，最终截止 2026-11-15 23:59，故 timed_free.hy3 由 2026-10-31 更正为 2026-11-15（截止日含当天）——不更正会把 11-01~11-15 的免费调用误计为付费。hy3 / hy3-x 已移入 delisted 段：仍属 WorkBuddy 官方模型、历史调用仍需计价并标注端内已下架（🗄️）；display_merge 的 hy3-x→hy3 保留供历史报告合并显示。",
-    "hy4flash_free": "Hy4 flash（2026-11-16 上线，WorkBuddy 国内版/国际版同步首发接入）在 WorkBuddy 的免费规则：11-16~11-30 23:59 每日赠送免费额度、倍率 0.00x；生图/生视频会切到多模态模型正常扣积分；每日额度做分配、用尽后可消耗积分继续、繁忙排队（见 _sources.hy4_flash_1116）。计价处理：这是『每日额度制 + 分人群配额』，不是全时段无限免，静态价表在数学上无法表达，故**不**把 hy4flash-free 加入 timed_free，也不加 scheduled_pricing 的 free 规则；models.hy4flash-free 按官方 CNY 刊例价 0.5/2/0.02 记录，免费期实际用量会体现为高估，已在 low_confidence 标注。⚠️ trace 实测 key 为 `hy4flash-free`（见 _sources.hy4flash_trace_key）；收费版 key 待额度用尽后实测补建。"
+    "hy4flash_free": "Hy4 flash（2026-11-16 上线，WorkBuddy 国内版/国际版同步首发接入）在 WorkBuddy 的免费规则：11-16~11-30 23:59 每日赠送免费额度、倍率 0.00x；生图/生视频会切到多模态模型正常扣积分；每日额度做分配、用尽后可消耗积分继续、繁忙排队（见 _sources.hy4_flash_1116）。计价处理：2026-11-19 实测确认额度用尽后 trace key 切换为独立的 `hy4flash`（账单展示名 `hy4-flash`，见 _sources.hy4flash_paid_key_1119），故本 key（hy4flash-free）在 11-16~11-30 期间已加入 timed_free 归零；付费调用由 models.hy4flash 按刊例价 0.5/2/0.02 计价，两者经 display_merge 合并显示。此前『不进 timed_free、标 low_confidence 偏高』的判断已被实测数据替代。"
   },
   "_pricing_rules": {
     "unit": "元 / 百万 tokens(CNY per 1M tokens),输入按「缓存未命中」价,不计缓存命中折扣",
     "tier_rule": "厂商按输入长度分档计价的官方内置模型(如 glm-5.1),一律取「长上下文档」(输入 > 32k)单价 —— Agent 会话上下文普遍超过 32k,取长档更贴近真实账单。",
     "auto_is_null": "auto 为 WorkBuddy 智能路由入口,无单一单价,故恒为 null;采集器对其走 router_avg(本期付费模型均价)计价,不会被判为「未配置」。",
-    "updated": "2026-11-16",
+    "updated": "2026-11-19",
     "peak_valley": "峰谷计费（如 DeepSeek-V4.1-Flash）：models 段的 input/output 统一取【空闲时段】价，高峰时段价另以 peak_input/peak_output 记录。v1.7.1 起不再需要手工覆盖 —— scheduled_pricing 段已内置「工作日 09:00-12:00 / 14:00-18:00 走 peak_*」规则，采集器按每次调用的时间戳自动选档；如需改成别的时段，在 pricing.local.json 覆盖该模型规则即可。",
     "scheduled_pricing": "v1.7.1 新增：按调用时刻（日期区间 + 星期 + 小时）改写单价，覆盖夜间免费 / 峰谷双档 / 限期促销三类规则。未命中任何规则时完全不影响既有行为（零回归）。详见同文件 scheduled_pricing 段的 _comment。"
   },
@@ -57,7 +57,8 @@
     "hy4_daily_quota_1104": "http://mp.weixin.qq.com/s?__biz=MjM5MjQzNzQ2OA==&mid=2247484571&idx=1&sn=c612f6089215db55612e3596d0543fb9 (2026-11-04 客户端实拍：模型卡片『11月4日-11月15日，每日赠送免费额度，订阅用户享更高配额』、消耗速度 0.00x、上下文窗口 300K/600K/960K) + https://juejin.cn/post/7704150793607462950 + http://mp.weixin.qq.com/s?__biz=MzcwMjQzODQ0NA==&mid=2247484022&idx=1&sn=2c1cdd15c8510bb1c73bb04fe68ea9af (同为客户端卡片转述) — 交叉核实『每日赠送』而非全时段无限免、订阅用户更高配额。⚠️ 待确认：官方通稿只写『11 月 4 日至 11 月 15 日期间提供一定额度的免费使用』，未给出精确截止时刻；媒体/客户端口径为 11-15 23:59，不作官方定论",
     "hy3_delisted_1116": "https://news.qq.com/rain/a/20261116A08OML00 (腾讯新闻转载官方通稿，2026-11-16：Hy4 flash 上线；Hy4 限免时间现已结束；Hy3 端内下线) + https://news.qq.com/rain/a/20261105A0CSG600 (2026-11-05 混元扩容公告：Hy3 WorkBuddy 限免延长至 2026-11-15 23:59) + https://www.163.com/dy/article/LBSBAKRT053144S4.html (网易，同日三变更交叉核实) — 据此 timed_free.hy3 由 2026-10-31 更正为 2026-11-15（截止日含当天），并把 hy3/hy3-x 移入 delisted 标记端内已下架",
     "hy4_flash_1116": "https://news.qq.com/rain/a/20261116A08OML00 + https://www.163.com/dy/article/LBSBAKRT053144S4.html + http://mp.weixin.qq.com/s?__biz=MjM5MjQzNzQ2OA==&mid=2247484698&idx=1&sn=f3ac4ff07a8e44b264a597e2c6ec2124 (2026-11-16 客户端实拍：Hy4 flash 上架、限时免费 0.00x、11-16~11-30 每日赠送免费额度、上下文 300K/600K/960K) — 官方 CNY 刊例价 输入0.5 / 输出2 / 缓存命中0.02 元每百万 tokens；224B 总参(含64B Engram)/12B 激活/多模态/1M 上下文；生图生视频切多模态模型正常扣积分；额度用尽后可消耗积分继续、繁忙排队",
-    "hy4flash_trace_key": "本机 trace 实测（2026-11-16 16:29~16:38，4 个 trace 文件、118 次 generation）：Hy4 flash 免费期调用在 spans[].toolOutput[].model 中统一记为 `hy4flash-free`（无连字符形式，非 `hy4-flash`）。对照历史 key：Hy4 免费期 `hy4free`、Hy3 免费/收费 `hy3`/`hy3-x`、Hy4 preview 免费/收费 `hy4-preview`/`hy4-preview-x`。⚠️ 待确认：额度用尽后的收费版 key（可能为 `hy4flash` 或 `hy4flash-x`），待实测后补建条目与 display_merge"
+    "hy4flash_trace_key": "本机 trace 实测（2026-11-16 起）：Hy4 flash 免费期调用在 spans[].toolOutput[].model 中记为 `hy4flash-free`（无连字符形式，非账单页的 `hy4-flash`）；额度用尽后的收费期调用记为 `hy4flash`（同为无连字符）。对照历史 key：Hy4 免费期 `hy4free`、Hy3 免费/收费 `hy3`/`hy3-x`、Hy4 preview 免费/收费 `hy4-preview`/`hy4-preview-x`。因付费调用切换到独立 key `hy4flash`，免费 key `hy4flash-free` 在 11-16~11-30 期间可安全归零（timed_free），不会把付费调用误算为 ¥0",
+    "hy4flash_paid_key_1119": "用户实测（2026-11-19，WorkBuddy 积分消耗明细 https://www.workbuddy.cn/pricing/plans-usage 截图）+ 本机 trace 交叉验证：00:07 的 `hy4-flash-free` 两条积分为 0（免费额度内）；00:12~00:15 的 `hy4-flash` 三条积分为 5.76 / 0.68 / 0.62（额度用尽后按积分计费）。对应本地 trace key 分别为 `hy4flash-free` / `hy4flash`（无连字符）——账单页连字符形式与 trace 无连字符形式属不同命名空间，本表按 trace key 建条目。据此新增 models.hy4flash（刊例价同 0.5/2/0.02）、display_merge hy4flash-free→hy4flash，并把 hy4flash-free 加入 timed_free 至 2026-11-30"
   },
   "default_model": "glm-5.2",
   "models": {
@@ -82,7 +83,13 @@
       "input": 0.5,
       "output": 2.0,
       "cache_hit_input": 0.02,
-      "note": "腾讯混元 Hy4 flash 免费期入口（2026-11-16 上线，WorkBuddy/CodeBuddy 国内版与国际版同步首发接入；224B 总参含 64B Engram、12B 激活、多模态、1M 上下文、解码 >150tps）。官方 CNY 刊例价 输入0.5 / 输出2 / 缓存命中0.02 元每百万 tokens，约为 Hy4（6/18/0.3）的 1/12~1/15（见 _sources.hy4_flash_1116）。WorkBuddy 内 2026-11-16~11-30 23:59 每日赠送免费额度、倍率 0.00x，属每日额度制、静态价表无法表达，故不进 timed_free，详见 _definitions.hy4flash_free；免费期用量在本表按刊例计价会高估，已标 low_confidence。trace 实测 key 为 `hy4flash-free`（见 _sources.hy4flash_trace_key）；⚠️ 待确认：额度用尽后收费版 key（待实测补建）。"
+      "note": "腾讯混元 Hy4 flash 免费期入口（2026-11-16 上线；224B 总参含 64B Engram、12B 激活、多模态、1M 上下文）。官方 CNY 刊例价 输入0.5 / 输出2 / 缓存命中0.02 元每百万 tokens，约为 Hy4（6/18/0.3）的 1/12~1/15（见 _sources.hy4_flash_1116）。WorkBuddy 内 2026-11-16~11-30 23:59 每日赠送免费额度、倍率 0.00x（见 _definitions.hy4flash_free）。2026-11-19 实测确认：额度用尽后 trace key 切换为独立的 `hy4flash`（见 _sources.hy4flash_paid_key_1119），故本 key 在 11-16~11-30 期间已加入 timed_free 归零、不再按刊例计价高估；付费调用由 models.hy4flash 单独计价，两者经 display_merge 合并显示。trace 实测 key 为 `hy4flash-free`（无连字符）。"
+    },
+    "hy4flash": {
+      "input": 0.5,
+      "output": 2.0,
+      "cache_hit_input": 0.02,
+      "note": "腾讯混元 Hy4 flash 付费期入口（2026-11-19 实测确认）：WorkBuddy 每日免费额度用尽后，trace key 从 `hy4flash-free` 切换为 `hy4flash`，客户端按积分计费（账单页连字符展示名 `hy4-flash`，实测消耗 5.76/0.68/0.62 积分，见 _sources.hy4flash_paid_key_1119）。官方 CNY 刊例价同免费期：输入0.5 / 输出2 / 缓存命中0.02 元每百万 tokens。经 display_merge 与 hy4flash-free 合并显示为同一模型；本条为全时段按刊例计价（无免费期），不进 timed_free。⚠️ 客户端积分消耗速度与 ¥ 刊例价正交，不得互换；如需精确对账请用 --import-official。"
     },
     "glm-5.2": {
       "input": 8.0,
@@ -326,7 +333,8 @@
   "timed_free": {
     "step-5-preview": "2026-10-25",
     "hy3": "2026-11-15",
-    "hy4-preview": "2026-09-10"
+    "hy4-preview": "2026-09-10",
+    "hy4flash-free": "2026-11-30"
   },
   "low_confidence": {
     "_comment": "成本置信度（v1.5.2 新增）：静态单价 × token 量 的估算与**实际计费**存在已知系统性偏差的模型。这些模型在 L2（未导入官方用量导出）下被标注为「低置信度」，报告里不参与成本结论。根因一律是服务端按用户 / 时段 / 配额减免 —— 静态价表在数学上无法表达，唯一真值是官方用量导出的「积分」字段（v1.6.0 --import-official）。值为给用户看的原因说明，会原样渲染进报告。",
@@ -336,7 +344,8 @@
     "glm-5.3": "发布期 5 折促销已于 2026-09-09 24:00 到期。v1.7.1 起已由 scheduled_pricing 按日期区间打 5 折，跨期报告不再整体高估；残余偏差：官方另有「非高峰/周末 5 折」的长期折扣未纳入（缺可靠时段口径），可能仍高估。",
     "glm-5.3-flash": "同 glm-5.3：5 折促销 2026-09-09 到期。v1.7.1 起已按日期区间打 5 折；残余偏差同 glm-5.3（长期折扣口径未明）。该模型无夜间免费，是实测成本大头（2026-09-12~14 占 72%）。",
     "hy4": "2026-11-04~11-15 期间为『每日赠送免费额度』（订阅用户更高配额、消耗速度 0.00x），额度当日有效不结转、用尽后才按积分计费；本表按官方刊例价 6/18 全量计价，会系统性高估这段时间的实际花费。该规则是分人群 + 每日额度制，静态价表无法表达；如需精确请用官方用量导出（--import-official）或本机 pricing.local.json 覆盖。另：每日额度具体数值、精确截止时刻待确认。2026-11-16 更新：限免已于 11-15 23:59 结束、11-16 起按刊例价计费，本条偏差仅对历史 11-04~11-15 调用成立；客户端倍率 0.29x 属积分口径，与 ¥ 刊例价正交不得换算。",
-    "hy4flash-free": "2026-11-16~11-30 23:59 期间 WorkBuddy 内每日赠送免费额度、倍率 0.00x（订阅用户更高配额），额度当日有效不结转、用尽后可消耗积分继续、生图生视频切多模态模型正常扣积分；本表按官方 CNY 刊例价 0.5/2/0.02 全量计价，会系统性高估免费期实际花费。该规则是分人群 + 每日额度制，静态价表无法表达；如需精确请用官方用量导出（--import-official）或本机 pricing.local.json 覆盖。⚠️ trace key 实测为 `hy4flash-free`；收费版 key 待实测。"
+    "hy4flash-free": "2026-11-16~11-30 23:59 期间 WorkBuddy 内每日赠送免费额度、倍率 0.00x（订阅用户更高配额），额度当日有效不结转、用尽后 key 切换为 `hy4flash` 按积分计费、生图生视频切多模态模型正常扣积分（见 _sources.hy4flash_paid_key_1119）。v1.9.16 起本 key 已加入 timed_free 至 11-30，免费期调用记 ¥0，不再高估；此前版本按刊例价 0.5/2 全量计价会高估。残余偏差：每日额度具体数值 / 订阅用户配额差异未公开，若同一 key 在额度用尽后未及时切换则本表会低估，如需精确请用官方用量导出（--import-official）。",
+    "hy4flash": "2026-11-19 实测的付费期 key（免费额度用尽后切换）。本表按官方 CNY 刊例价 0.5/2/0.02 全时段计价，与客户端积分消耗速度（账单实测有消耗但具体倍率未公布）属不同口径、不得互换；精确对账请用 --import-official。"
   },
   "low_confidence_bias": {
     "_comment": "偏差方向（v1.7.0 新增，机读）：与 low_confidence 同键。over=静态估算高于实际（如夜间免费被全时段计费）；under=静态估算低于实际（如峰谷双档取空闲价，高峰被低估）；mixed=方向不明。报告据此渲染 ⚠↑/⚠↓，让用户一眼看出 L2 数字是虚高还是虚低。",
@@ -346,7 +355,8 @@
     "glm-5.3": "over",
     "glm-5.3-flash": "over",
     "hy4": "over",
-    "hy4flash-free": "over"
+    "hy4flash-free": "over",
+    "hy4flash": "mixed"
   },
   "scheduled_pricing": {
     "_comment": "时段定价（v1.7.1 新增）：模型名 -> 规则列表，按【调用时刻】改写静态单价 —— 解决「夜间免费 / 峰谷双档 / 限期促销」这类静态价表在数学上无法表达的服务端规则（此前只能靠 low_confidence 标注，数字仍是错的）。规则字段：from/until='YYYY-MM-DD' 生效区间（含端点）；dow=星期列表 1=周一…7=周日（也接受 mon/tue/.../sun）；hours='HH:MM-HH:MM' 北京时间、左闭右开、支持跨午夜（如 23:00-08:00）；effect=free|peak|discount；factor=peak/discount 的倍率（缺省 peak=2.0、discount=1.0）；note=给用户看的说明。按配置顺序取**第一条命中**的规则，故更特殊的规则写在前面。缺失的维度按「不套用该维度规则」处理（宁可少打折，也不把白天误判成夜间免费）。所有时间均为北京时间（Asia/Shanghai），与官方用量导出的时间列同口径。",
@@ -426,6 +436,7 @@
   "display_merge": {
     "hy4-preview-x": "hy4-preview",
     "hy3-x": "hy3",
+    "hy4flash-free": "hy4flash",
     "deepseek-flash": "deepseek-v4.1-flash"
   },
   "mode_rates": {
