@@ -4,12 +4,12 @@
 
 用户说：**「生成这周的使用报告」**
 
-技能自动执行：
+技能自动执行（默认渲染到终端/stdout，零写盘；下面带 `--output` 的是显式落盘、供留存文件时才加，路径由用户控制并会覆盖同名文件）：
 
 ```bash
-# 采集最近 7 天数据
-python scripts/collect_usage_data.py --period week --output data.json
-# 生成 Markdown 报告
+# 采集最近 7 天数据（默认 stdout）
+python scripts/collect_usage_data.py --period week > data.json
+# 生成 Markdown 报告（显式落盘到指定文件）
 python scripts/generate_report.py data.json --output 使用情况报告.md
 ```
 

@@ -1053,14 +1053,20 @@ def fetch_remote_pricing(api_url, unconfigured_models, timeout=10):
         try:
             with urllib.request.urlopen(api_url, timeout=timeout) as resp:
                 remote = json.loads(resp.read().decode("utf-8"))
+            if not isinstance(remote, dict):
+                raise ValueError("定价镜像响应不是 dict")
+            models_map = remote.get("models", {})
+            if not isinstance(models_map, dict):
+                models_map = {}
             rm = (
-                remote.get("models", {}).get(normalize_model(model))
-                or remote.get("models", {}).get(model)
+                models_map.get(normalize_model(model))
+                or models_map.get(model)
             )
             if rm and "input" in rm and "output" in rm:
                 network_estimates[model] = {"input": float(rm["input"]),
                                            "output": float(rm["output"])}
-        except (urllib.error.URLError, urllib.error.HTTPError, ValueError, KeyError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError, ValueError, KeyError,
+                AttributeError, TypeError) as e:
             print(f"[WARN] 联网检索 {model} 失败（已降级，不影响报告）：{e}", file=sys.stderr)
     return network_estimates
 

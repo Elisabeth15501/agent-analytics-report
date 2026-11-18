@@ -81,10 +81,12 @@ tags:
    - 行为：`--source` 默认 `workbuddy`；在千问办公内跑必须 `--source qwenwork`；想显示「百度搭子」标题用 `--source dumate`（见硬约束 3）。
    - 兜底：默认源采到 0 条数据时，提示可能选错源并列出可用源。
 3. **采集数据**
-   - 命令：`python scripts/collect_usage_data.py --source <src> --period week --output data.json`（或实时模式：不传 data_file 直接进第 4 步）。
+   - 命令（默认，输出到终端/stdout，零写盘）：`python scripts/collect_usage_data.py --source <src> --period week`
+   - 显式落盘（仅当用户要留存 data.json 时）：加 `--output data.json`；路径由用户控制，会覆盖同名文件。
    - 兜底：trace 未启用 / 目录不存在 → 报错并提示开启 trace 或换 `--source`。
 4. **生成报告**
-   - 命令：`python scripts/generate_report.py data.json --output report.md`（或 `--format html|json`）；想实时生成可合并为 `generate_report.py --period week --output report.md`。
+   - 命令（默认，报告渲染到 stdout）：`python scripts/generate_report.py data.json`（或 `--format html|json`）；实时模式可合并为 `generate_report.py --period week`。
+   - 显式落盘（仅当用户要报告文件时）：加 `--output report.md`；路径由用户控制，会覆盖同名文件。
    - 兜底：data.json 缺字段 → 提示重跑采集。
 5. **展示结果**：输出 3–5 条核心发现摘要，用 `present_files` 展示完整报告。
 

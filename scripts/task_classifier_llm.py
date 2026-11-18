@@ -53,6 +53,28 @@ def _build_prompt(text, type_names):
     return system, user
 
 
+def _extract_answer(data):
+    """从 OpenAI 兼容响应中安全抽取 content。
+
+    结构化校验集中在解析边界：任何不满足预期的形态都抛 ValueError（在调用方
+    _classify 的异常白名单内），避免链式 .get() 在 message=null 时抛 AttributeError
+    逃逸、中断整个报告生成（安全报告 #10，端到端已复现）。
+    """
+    if not isinstance(data, dict):
+        raise ValueError("LLM 响应不是 dict")
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
+        raise ValueError("LLM 响应 choices 为空或类型异常")
+    first = choices[0]
+    if not isinstance(first, dict):
+        raise ValueError("LLM 响应 choices[0] 类型异常")
+    message = first.get("message")
+    if not isinstance(message, dict):
+        raise ValueError("LLM 响应 message 类型异常")
+    content = message.get("content", "")
+    return content if isinstance(content, str) else ""
+
+
 def classify_text_with_llm(text, endpoint, model, api_key=None, timeout=_HTTP_TIMEOUT):
     """调 LLM 给单条会话文本分类。返回类型字符串；失败抛异常（由调用方兜底）。"""
     if not text or not text.strip():
@@ -79,7 +101,7 @@ def classify_text_with_llm(text, endpoint, model, api_key=None, timeout=_HTTP_TI
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
         data = json.loads(resp.read().decode("utf-8"))
 
-    raw = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+    raw = _extract_answer(data)
     answer = raw.strip().strip("\"'`「」『』。.，, ")
     # 严格白名单：LLM 返回不在类型表里时，尝试子串匹配，仍不行就归「其他」
     if answer in type_names:
@@ -108,8 +130,9 @@ def build_llm_classifier(endpoint, model, api_key=None, timeout=_HTTP_TIMEOUT):
             return classify_text_with_llm(text, endpoint, model, api_key=api_key, timeout=timeout)
         except (urllib.error.URLError, urllib.error.HTTPError, OSError,
                 ValueError, KeyError, IndexError, json.JSONDecodeError,
-                TimeoutError) as e:
+                TimeoutError, AttributeError, TypeError) as e:
             # urllib.error.HTTPError ⊂ URLError；socket.timeout ⊂ OSError
+            # AttributeError/TypeError：第二道防线，防御其它链式解析点的畸形响应
             print(f"[WARN] LLM 分类失败，本条回退启发式：{type(e).__name__}: {e}",
                   file=sys.stderr)
             return ""
