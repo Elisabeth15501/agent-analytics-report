@@ -164,89 +164,28 @@ import ca_sources
 import ca_sessions
 import ca_aggregate
 
-
-def _decide_cost_mode(
-    requested,
-    unconfigured,
-    configured_rows,
-    total_cost,
-    total_effective_cost,
-    has_official,
-):
-    """判定本次报告的计价模式，返回 "priced" 或 "tokens_only"。
-
-    priced      ：照常输出金额（默认，历史行为）
-    tokens_only ：整份报告隐藏计费维度，只讲 Token / 调用 / 耗时 / 任务
-    auto（默认）：只要「没有任何可计价的模型」就自动切 tokens_only——覆盖两类数据形态：
-      ① 读到了模型调用数据，但全部未配置单价；② 连模型数据都读不到（如只产出聚合 token 的源）。
-      适配一切无计费能力的 Agent（千问办公、百度搭子等），不依赖每适配器写死标志位。
-      三条边界必须分清，否则会误删合法内容：
-      ① 限免 / 本地模型的 ¥0.00 是**已配置单价**算出来的真实结果（configured_rows 非空），
-         不是「没价可算」，绝不能因此删掉成本章节；
-      ② 已导入官方积分导出（L1 真值）时金额来自账单，与静态价表是否命中无关；
-      ③ 只有「有未配置单价的模型 + 无任何已配置行 + 总额为 0」同时成立，
-         报告才会满屏 ¥0.00 与「未配置」——这时藏起来比摊开更诚实。
-    """
-    if requested == "tokens-only":
-        return "tokens_only"
-    if requested == "priced":
-        return "priced"
-    # auto 决策：只认「有没有可计价的模型」，与具体是哪个适配器无关。
-    #   has_priced_model = 有已配置单价的模型，或存在官方账单（L1 真值，永远有金额）
-    #   任一为真 → 照常 priced；都为假且本期金额为 0 → tokens_only。
-    # 这把两种无计费形态一并兜住（不再依赖 `unconfigured` 是否为空这个易漏的判据）：
-    #   ① unconfigured 非空、configured_rows 空（读到模型但全未配价）
-    #   ② unconfigured 与 configured_rows 都空（连模型数据都读不到）
-    # 限免 / 本地模型那种「单价已配置且合法为 ¥0.00」仍算 configured_rows 非空，不误判
-    # （见 test_legit_zero_cost_stays_priced）。
-    has_priced_model = bool(configured_rows) or has_official
-    zero_everywhere = not ((total_cost or 0) > 0 or (total_effective_cost or 0) > 0)
-    if not has_priced_model and zero_everywhere:
-        return "tokens_only"
-    return "priced"
-
-
-def build_task_classifier_with_consent(args, _stderr=None):
-    """按 --task-classifier 与出站确认门禁构造任务分类器（TP4 合规）。
-
-    仅当 args.task_classifier == "llm" 且显式确认（--task-classifier-llm-ack
-    或环境变量 AAR_TASK_LLM_ACK=1）时，才构建会将会话派生文本外传的 LLM 分类器；
-    否则返回 None，调用方据此走内置加权启发式、零出站。
-
-    默认离线路径（heuristic）完全不受影响：直接返回 None，不打印任何警告。
-    """
-    if args.task_classifier != "llm":
-        return None
-    endpoint = args.task_llm_endpoint
-    ack = bool(getattr(args, "task_classifier_llm_ack", False)) or \
-        os.environ.get("AAR_TASK_LLM_ACK") == "1"
-    stderr = _stderr if _stderr is not None else sys.stderr
-    if not ack:
-        print(
-            "[WARN] ⚠ 出站传输未确认：--task-classifier llm 本会把会话派生文本"
-            "（会话标题 / 对话内容摘要等）\n"
-            f"       发送至你提供的端点 {endpoint or '(未提供)'}，该内容会离开本机。\n"
-            "       未检测到 --task-classifier-llm-ack 或 AAR_TASK_LLM_ACK=1，"
-            "已自动回退本地启发式分类，不做任何出站传输。",
-            file=stderr,
-        )
-        return None
-    print(
-        "[WARN] ⚠ 已确认出站：--task-classifier llm 将把会话派生文本"
-        f"（会话标题 / 对话内容摘要等）发送至端点 {endpoint}（该内容会离开本机）。",
-        file=stderr,
-    )
-    try:
-        from task_classifier_llm import build_llm_classifier
-
-        return build_llm_classifier(
-            endpoint,
-            args.task_llm_model,
-            api_key=args.task_llm_api_key,
-        )
-    except (ValueError, ImportError) as e:
-        print(f"[WARN] LLM 分类器不可用（{e}），回退加权启发式", file=stderr)
-        return None
+# 批次2 re-export：函数已搬入新模块，门面保留旧名字供 CLI/main/测试访问
+from ca_billing import (
+    _decide_cost_mode,
+    fetch_remote_pricing,
+    import_official_l1,
+    collect_unconfigured_models,
+    tier_pricing_basis_meta,
+    apply_cost_mode,
+    decorate_pricing_meta,
+    apply_pricing_lookup,
+)
+from ca_cli import build_task_classifier_with_consent
+from ca_analytics import (
+    estimate_request_count,
+    build_result_skeleton,
+    compute_totals,
+    compute_transparency_counts,
+    build_summary,
+    build_task_distribution,
+    attach_aggregates,
+    enrich_analysis,
+)
 
 
 def main():
@@ -1038,37 +977,6 @@ def main():
         print(f"[OK] 数据已保存到 {args.output}", file=sys.stderr)
     else:
         print(output_json)
-
-
-def fetch_remote_pricing(api_url, unconfigured_models, timeout=10):
-    """拉取用户自有定价镜像（仅当 --pricing-api 显式传入时调用；默认路径不调用，零网络）。
-
-    返回 {model: {"input": float, "output": float}}；任何网络/解析异常均吞掉并返回空 dict，
-    保证目标不可达时优雅降级而非崩溃（修复 SDI-4：原实现 except 只接 requests.RequestException，
-    urllib 抛出的 URLError/HTTPError 会逃逸导致采集器崩溃）。URL 只来自命令行参数，不从 trace/
-    会话内容派生（防 SSRF）。
-    """
-    network_estimates = {}
-    for model in sorted(unconfigured_models):
-        try:
-            with urllib.request.urlopen(api_url, timeout=timeout) as resp:
-                remote = json.loads(resp.read().decode("utf-8"))
-            if not isinstance(remote, dict):
-                raise ValueError("定价镜像响应不是 dict")
-            models_map = remote.get("models", {})
-            if not isinstance(models_map, dict):
-                models_map = {}
-            rm = (
-                models_map.get(normalize_model(model))
-                or models_map.get(model)
-            )
-            if rm and "input" in rm and "output" in rm:
-                network_estimates[model] = {"input": float(rm["input"]),
-                                           "output": float(rm["output"])}
-        except (urllib.error.URLError, urllib.error.HTTPError, ValueError, KeyError,
-                AttributeError, TypeError) as e:
-            print(f"[WARN] 联网检索 {model} 失败（已降级，不影响报告）：{e}", file=sys.stderr)
-    return network_estimates
 
 
 if __name__ == "__main__":
