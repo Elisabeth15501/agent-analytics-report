@@ -38,6 +38,7 @@ from ca_core import (
     UNNAMED_LABEL,
     ORPHAN_LABEL,
     PER_MILLION,
+    is_entry_tier,
     normalize_model,
     token_active_session_ids,
 )
@@ -282,6 +283,13 @@ def _build_model_block(
     for m in model_stats:
         cfg = m.get("configured")
         mname = m["model"]
+        # 档位入口（qwenwork 六个 id 族：老名 qwork-* / qmodel_latest + 现名 flash / pro）：
+        # 底层模型未公开或按入口统计，
+        # 无单一单价。不进未配置清单（collect_unconfigured_models 已排除），
+        # 金额/单价列给出明确的「不适用」口径，绝不显示 ¥、绝不诱导用户补价。
+        _entry = m.get("is_entry_tier") or is_entry_tier(m.get("model"))
+        if _entry:
+            mname = f"{m['model']}（档位入口）"
         if m.get("is_delisted"):
             mname = f"{m['model']} 🗄️"
         elif m.get("is_local"):
@@ -303,7 +311,13 @@ def _build_model_block(
         is_free = (
             cfg and m.get("unit_price_input") == 0 and m.get("unit_price_output") == 0
         )
-        if m.get("timed_free"):
+        if _entry:
+            # 档位入口：底层模型未公开（pro / qwork-advanced / qmodel_latest）或入口维度
+            # 保留原名（flash / qwork-lite / qwork-auto）——不单价、不金额。
+            # 文案含全角括号与中文，MD/HTML 表格均按纯文本单元格处理，无 XSS 面。
+            _entry_note = "—（档位入口，底层模型未公开）"
+            ip, op, cost = _entry_note, _entry_note, _entry_note
+        elif m.get("timed_free"):
             ip = (
                 f"{m['unit_price_input']:.2f}"
                 if cfg and m.get("unit_price_input")
@@ -2777,10 +2791,10 @@ def _source_identity(data):
 def _cost_supported(data):
     """该数据源在语义上是否支持「计费」维度（由适配器显式声明，不由单价是否为 0 推断）。
 
-    千问办公是积分订阅制、账号级积分无法归因到单个会话，适配器里写死
-    `SUPPORTS_COST = False`：即便将来用户在 pricing.local.json 填了单价，
-    算出来的 ¥ 也是无法对账的虚构值，因此「缺失单价模型 + 补价 stub」整块
-    对该源永远不该出现（真要金额请显式 --cost-mode priced 并接受其口径）。
+    由适配器显式声明：千问办公在 2026-11-16 前为档位制、无刊例价，
+    曾设 `SUPPORTS_COST = False` 压制补价 stub；11-16 起上线 10 款具名模型、
+    官方直连 ¥ 刊例价已配入 pricing.json，故 2026-11-22 起改为 True，
+    成本块正常显示（金额口径为「直连单价估算的 token 价值」，低置信度已标注）。
     历史 JSON 没有 meta.cost_supported 字段 → 按 True 处理，WorkBuddy 呈现零变化。
     """
     meta = (data or {}).get("meta", {}) or {}
@@ -3107,16 +3121,27 @@ def _cost_hidden_banner(fmt, data):
     meta = data.get("meta", {}) or {}
     unc = meta.get("unconfigured_models") or []
     _unc_txt = "、".join("`%s`" % m for m in unc[:6]) + ("…" if len(unc) > 6 else "")
+    if unc:
+        # 只有「真·未配置具名模型」才提示补单价
+        why = ("本期所有调用都没有命中 `pricing.json` 里的单价"
+               "（未配置具名模型：%s）" % _unc_txt)
+        howto = (
+            "要出金额：在 `scripts/pricing.local.json` 补上这些模型的单价后重跑，"
+            "或加 `--cost-mode priced` 强制保留成本章节。"
+        )
+    else:
+        # 档位入口 / 底层未公开模型没有单一 ¥ 单价，绝不能伪装成「用户该补价」
+        why = ("本期调用均为档位入口 / 底层模型未公开的标识，无具名模型可命中单价；"
+                "档位入口无单一 ¥ 单价，补价无依据")
+        howto = (
+            "若确有具名模型被漏配，可在 `scripts/pricing.local.json` 补单价；"
+            "档位入口请勿臆造单价。或加 `--cost-mode priced` 强制保留成本章节"
+            "（入口行的单价 / 金额列显示「不适用」）。"
+        )
     body = (
-        "本报告**不提供金额（¥）与花费结论**：本期所有调用都没有命中"
-        "`pricing.json` 里的单价（未配置：%s），继续渲染只会得到满屏 "
+        "本报告**不提供金额（¥）与花费结论**：%s，继续渲染只会得到满屏 "
         "`¥0.00` 与「未配置」，反而容易被误读成「免费」或「采集失败」。"
-        "Token / 调用次数 / 耗时 / 任务维度不受影响。"
-        % (_unc_txt or "（本期无模型名记录）")
-    )
-    howto = (
-        "要出金额：在 `scripts/pricing.local.json` 补上这些模型的单价后重跑，"
-        "或加 `--cost-mode priced` 强制保留成本章节。"
+        "Token / 调用次数 / 耗时 / 任务维度不受影响。" % why
     )
     if fmt == "html":
         return [

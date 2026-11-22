@@ -28,6 +28,7 @@ import urllib.error
 
 from ca_core import (
     normalize_model,
+    is_entry_tier,
     ROUTER_ALIASES,
     DISPLAY_MERGE,
     TIMED_FREE,
@@ -198,10 +199,14 @@ def collect_unconfigured_models(result):
     for stats in (result["model_stats"], result["model_exec_stats"]):
         for m in stats:
             # 已下架官方模型不算「缺失单价」——它们本就无需用户补写，仅标注即可
+            # 档位入口（qwenwork pro / 早期 flash）也不算——它们是入口非模型、底层未公开，
+            # 让用户补一个凭空的单价会污染账单口径（见 ca_core.QWENWORK_ENTRY_TIERS）。
             if (
                 not m.get("configured")
                 and m.get("model") not in ROUTER_ALIASES
                 and not m.get("is_delisted")
+                and not m.get("is_entry_tier")
+                and not is_entry_tier(m.get("model"))
             ):
                 unconfigured.add(m["model"])
     # 入口维度与执行维度可能对同一底层模型各记一次，补价只需裸名 → 折裸名去重
@@ -242,11 +247,14 @@ def apply_cost_mode(result, args, unconfigured, totals, has_official):
     result["meta"]["cost_mode"] = cost_mode
     if cost_mode == "tokens_only":
         print(
-            "[INFO] 计价模式=tokens_only：本期无任何命中单价（未配置："
-            + "、".join(sorted(unconfigured)[:6])
-            + ("…" if len(unconfigured) > 6 else "")
-            + "），报告将隐藏金额维度；要出金额请在 scripts/pricing.local.json 补单价，"
-            "或加 --cost-mode priced 强制保留现状。",
+            "[INFO] 计价模式=tokens_only：本期无命中单价的模型"
+            + ("（未配置具名模型：" + "、".join(sorted(unconfigured)[:6])
+               + ("…" if len(unconfigured) > 6 else "") + "）"
+               if unconfigured else "（本期仅档位入口/底层未公开模型，无具名模型可计价）")
+            + "，报告将隐藏金额维度；"
+            + ("具名模型可在本机 scripts/pricing.local.json 补单价；"
+               if unconfigured else "档位入口底层模型未公开，补单价无依据、请勿臆造；")
+            + "或加 --cost-mode priced 强制保留现状。",
             file=sys.stderr,
         )
     return cost_mode

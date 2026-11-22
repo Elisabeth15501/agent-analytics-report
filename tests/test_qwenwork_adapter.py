@@ -36,6 +36,7 @@ for _p in (str(SKILL_DIR), str(SCRIPTS_DIR)):
 
 from adapters.qwenwork import (  # noqa: E402
     QWENWORK_CHANNEL,
+    TIER_ENTRY_IDS,
     _parse_run_log,
     _parse_session_file,
     _ts_to_ms,
@@ -44,10 +45,16 @@ from adapters.qwenwork import (  # noqa: E402
     collect_qwenwork_traces,
     estimate_tokens,
     load_db_index,
+    model_id_timeline,
     resolve_qwenwork_db,
     resolve_qwenwork_home,
 )
-from ca_core import parse_channel, price_of  # noqa: E402
+from ca_core import (  # noqa: E402
+    is_entry_tier,
+    parse_channel,
+    price_of,
+    resolve_entry_model,
+)
 
 pytestmark = [pytest.mark.unit, pytest.mark.integration]
 
@@ -533,10 +540,11 @@ def test_cli_source_qwenwork_end_to_end(qw_home, tmp_path):
     d = json.loads(out_json.read_text(encoding="utf-8"))
     assert d["meta"]["source"] == "qwenwork"
     assert d["meta"]["tokens_source"] == "estimated", "token 口径必须显式标记"
-    # 千问办公档位无单价 → 采集器 auto 必须把报告切成 tokens_only（不再满屏 ¥0.00）
+    # 本测试夹具用旧档位模型名（无单价）→ 采集器 auto 必须把报告切成 tokens_only（不再满屏 ¥0.00）
     assert d["meta"]["cost_mode"] == "tokens_only", "无单价命中的源应自动进入 tokens_only"
-    # 适配器显式声明「不支持计费」→ 报告端据此压制补价 stub（不靠单价全 0 隐式推断）
-    assert d["meta"]["cost_supported"] is False
+    # 2026-11-22 起千问办公上线具名模型并配价，适配器声明「支持计费」→ 报告端保留成本块；
+    # 本期仍 tokens_only 是由「无单价命中」触发的 cost_mode，与数据源能力声明正交。
+    assert d["meta"]["cost_supported"] is True
     assert len(d["traces"]) == 2
     assert d["summary"]["total_tokens"] > 0
     assert all(m["channel"] == QWENWORK_CHANNEL for m in d["model_exec_stats"])
@@ -586,3 +594,253 @@ def test_never_reads_real_home(qw_home, monkeypatch):
         # 环境变量已把探测锚到 tmp_path，真实目录不应被打开（计数不变即无写入）
         assert sum(1 for _ in home.rglob("*.jsonl")) == before
     assert str(qw_home) in str(resolve_qwenwork_home())
+
+
+# ── 十一、Qwen3.8-Max 档真实 trace id 命中（静默 miss 回归守护）──────────────
+
+@allure.feature("千问办公适配器")
+@allure.story("计价")
+@allure.title("Qwen3.8-Max 真实 trace id=qwen3.8-max-preview 必须命中单价")
+def test_qwen38_max_preview_trace_id_is_priced():
+    """Qwen3.8-Max 档在千问办公的真实 trace id 带 -preview 后缀（本机转录
+    与 qodercli.log 实测），而 UI 展示名/历史价表 key 是无后缀的 qwen3.8-max。
+    normalize_model 只做小写去空白、resolve_model 不配别名 —— 若价表只有无后缀
+    key，这条档的全部调用会静默落进「未配置」（不报错、只是少算钱）。
+    本测试锁定两条 key 并存、同价，防止未来整理价表时删掉 preview 条目。
+    """
+    cfg = json.loads((SCRIPTS_DIR / "pricing.json").read_text(encoding="utf-8"))
+    # ① 两条 key 都在 models 段、单价一致
+    assert "qwen3.8-max" in cfg["models"]
+    assert "qwen3.8-max-preview" in cfg["models"], (
+        "真实 trace id qwen3.8-max-preview 必须从 models 段消失"
+    )
+    assert cfg["models"]["qwen3.8-max-preview"]["input"] == \
+           cfg["models"]["qwen3.8-max"]["input"] == 12.0
+    assert cfg["models"]["qwen3.8-max-preview"]["output"] == \
+           cfg["models"]["qwen3.8-max"]["output"] == 36.0
+    # ② 端到端计价：带通道前缀的 model_key 命中 ¥12/¥36
+    assert price_of("qwenwork:qwen3.8-max-preview") == (12.0, 36.0)
+    # ③ low_confidence / bias 两处都要有（_lc_reason 精确查名、不走 display_merge）
+    assert "qwen3.8-max-preview" in cfg["low_confidence"]
+    assert "qwen3.8-max-preview" in cfg["low_confidence_bias"]
+    # ④ 显示层归并到无后缀一行（计费仍各按各的 exec_model）
+    assert cfg["display_merge"]["qwen3.8-max-preview"] == "qwen3.8-max"
+
+
+# ── 十二、档位入口契约（flash 日期门 / pro 不适用 /  Zero-Drift）───────────
+
+@allure.feature("千问办公适配器")
+@allure.story("计价")
+@allure.title("档位入口 pro/flash 显式声明，不进未配置清单、不被 WorkBuddy 同名误伤")
+def test_entry_tiers_excluded_from_unconfigured():
+    """档位入口是「入口」非「模型」：底层未公开(pro)/按入口统计(flash)，
+    绝不能进 §3.3 未配置单价清单（否则诱导用户补一个凭空的价）。
+    同时验证零漂移：WorkBuddy 的 *-flash / *-pro 不被误判为档位入口。
+    """
+    # ① 显式入口集合（带前缀 + 裸名两形态都识别）
+    SIX = ("flash", "pro", "qwork-lite", "qwork-auto",
+           "qwork-advanced", "qmodel_latest")
+    for bare in SIX:
+        for mid in ("qwenwork:" + bare, bare):
+            assert is_entry_tier(mid), f"{mid} 应识别为档位入口"
+    # 代码显式集合必须是配置 entry_tiers 的子集（防并行会话改配置漏同步）
+    import ca_core as _C
+    assert TIER_ENTRY_IDS <= set(_C.QWENWORK_ENTRY_TIERS)
+    # ② 零漂移：WorkBuddy 的同后缀模型不是档位入口
+    for mid in ("glm-5.3-flash", "deepseek-v4-pro", "minimax-m3.1-flash",
+                "auto", "qwenwork:qwen3.8-max-preview"):
+        assert not is_entry_tier(mid), f"{mid} 不应被误判为档位入口"
+
+    # ③ 端到端：档位入口 + 真未配置模型 → 清单只留后者
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    import ca_aggregate as A
+    import ca_billing as B
+
+    def tr(mk, exec_name):
+        return {"model_key": mk, "exec_model": exec_name, "model_name": exec_name,
+                "channel": "qwenwork", "date": "2026-10-01", "calls": 1,
+                "total_tokens": 1000, "input_tokens": 700, "output_tokens": 300,
+                "cached_tokens": 0, "effective_tokens": 1000,
+                "total_cost": 0.0, "effective_cost": 0.0, "call_count": 1,
+                "is_entry_tier": is_entry_tier(mk)}
+
+    traces = [tr("qwenwork:pro", "pro"), tr("qwenwork:flash", "qwen3.8-flash"),
+              tr("qwenwork:qwork-advanced", "qwork-advanced"),
+              tr("qwenwork:qmodel_latest", "qmodel_latest"),
+              tr("qwenwork:qwork-lite", "qwork-lite"),
+              tr("qwenwork:qwork-auto", "qwork-auto"),
+              tr("gateway:really-unpriced", "really-unpriced")]
+    result = {"model_stats": A.aggregate_by_model(traces),
+              "model_exec_stats": A.aggregate_by_exec_model(traces), "meta": {}}
+    unc = B.collect_unconfigured_models(result)
+    for banned in ("flash", "pro", "qwork-lite", "qwork-auto",
+                   "qwork-advanced", "qmodel_latest"):
+        assert banned not in unc, f"§3.3 不得出现档位入口 {banned}：{unc}"
+    assert "really-unpriced" in unc
+
+
+@allure.feature("千问办公适配器")
+@allure.story("计价")
+@allure.title("flash 日期门：8-25 不映射（不适用）、8-27 映射为 qwen3.8-flash")
+def test_flash_entry_date_gate():
+    """标准档 2026-08-26 首发、底层=Qwen3.8-Flash；此前 0.1x 是经济档、底层未公开。
+    日期门必须严格：8-25 不映射（走档位不适用），8-26/8-27 映射并可计价。
+    """
+    # 8-25（含）之前：不映射
+    assert resolve_entry_model("qwenwork:flash", "2026-08-25") is None
+    assert resolve_entry_model("flash", "2026-08-25") is None
+    # 8-26 起（含当天，闭区间）：映射到 qwen3.8-flash
+    for d in ("2026-08-26", "2026-08-27", "2026-10-01"):
+        assert resolve_entry_model("qwenwork:flash", d) == "qwen3.8-flash"
+        assert resolve_entry_model("flash", d) == "qwen3.8-flash"
+    # 映射后可计价（¥0.8/¥2.7）
+    assert price_of("qwenwork:qwen3.8-flash") == (0.8, 2.7)
+    # 配置里 low_confidence / bias 都标注了 flash 的日期门与多模态偏差
+    cfg = json.loads((SCRIPTS_DIR / "pricing.json").read_text(encoding="utf-8"))
+    assert "flash" in cfg["low_confidence"] and "flash" in cfg["low_confidence_bias"]
+
+
+@allure.feature("千问办公适配器")
+@allure.story("自证工具")
+@allure.title("模型 id 时间线按原始 model_key 聚合、遵循 requestId 去重口径")
+def test_model_id_timeline():
+    """时间线是对文档假设的自证：保留 flash/pro 原始入口 id（非归一后的 exec_model），
+    首次/末次日期与调用次数正确；函数本身不二次去重（输入须已去重）。
+    """
+    traces = [
+        {"model_key": "qwenwork:flash", "exec_model": "qwen3.8-flash",
+         "date": "2026-09-03", "model_name": "qwen3.8-flash"},
+        {"model_key": "qwenwork:flash", "exec_model": "qwen3.8-flash",
+         "date": "2026-09-10", "model_name": "qwen3.8-flash"},
+        {"model_key": "qwenwork:pro", "exec_model": "pro",
+         "date": "2026-09-02", "model_name": "pro"},
+    ]
+    rows = {r["model"]: r for r in model_id_timeline(traces)}
+    assert rows["flash"]["first_date"] == "2026-09-03"
+    assert rows["flash"]["last_date"] == "2026-09-10"
+    assert rows["flash"]["calls"] == 2
+    assert rows["pro"]["calls"] == 1
+    # 按首次日期升序
+    assert [r["model"] for r in model_id_timeline(traces)] == ["pro", "flash"]
+# ── 十三、批次2：档位 id 族（8 月老名）+ 逐 trace 选档 + 推断开关 ──────────
+
+@allure.feature("千问办公适配器")
+@allure.story("计价")
+@allure.title("8 月老 id 不落未配置；§3.1/§3.2 成行且金额显示档位入口不适用")
+def test_legacy_tier_ids_rendered_and_excluded():
+    """用 8 月真实 id 形态（model_key 带 qwenwork: 前缀）造 fixture：
+    六个档位入口在 §3.3 必须 0 命中；§3.1/§3.2 各自成行、调用次数非 0、
+    单价/金额列显示「—（档位入口，底层模型未公开）」。真未配置模型仍保留。
+    """
+    sys.path.insert(0, str(SCRIPTS_DIR))
+    import ca_aggregate as A
+    import ca_billing as B
+    import generate_report as G
+
+    cfg = json.loads((SCRIPTS_DIR / "pricing.json").read_text(encoding="utf-8"))
+    assert TIER_ENTRY_IDS <= set(cfg["entry_tiers"]), "代码显式集合必须是配置子集"
+
+    legacy = (("qwenwork:qwork-advanced", "qwork-advanced"),
+              ("qwenwork:qmodel_latest", "qmodel_latest"),
+              ("qwenwork:qwork-lite", "qwork-lite"),
+              ("qwenwork:qwork-auto", "qwork-auto"))
+
+    def tr(mk, bare, date):
+        return {"model_key": mk, "exec_model": bare, "model_name": bare,
+                "channel": "qwenwork", "date": date, "call_count": 1,
+                "total_tokens": 100, "input_tokens": 70, "output_tokens": 30,
+                "cached_tokens": 0, "effective_tokens": 100,
+                "total_cost": 0.0, "effective_cost": 0.0,
+                "input_cost": 0.0, "output_cost": 0.0,
+                "is_entry_tier": is_entry_tier(mk),
+                "_is_entry_tier": is_entry_tier(mk)}
+
+    traces = [tr(mk, bare, "2026-08-10") for mk, bare in legacy]
+    traces.append(tr("gateway:really-unpriced", "really-unpriced", "2026-08-10"))
+    result = {"model_stats": A.aggregate_by_model(traces),
+              "model_exec_stats": A.aggregate_by_exec_model(traces), "meta": {}}
+    unc = B.collect_unconfigured_models(result)
+    banned = ("flash", "pro", "qwork-lite", "qwork-auto",
+              "qwork-advanced", "qmodel_latest")
+    assert not (set(unc) & set(banned)), f"§3.3 命中禁用词：{unc}"
+    assert "really-unpriced" in unc
+
+    for stats in (result["model_stats"], result["model_exec_stats"]):
+        md = "\n".join(G._build_model_block(
+            "markdown", stats, dim_label="按执行模型", is_exec=True))
+        for _mk, bare in legacy:
+            assert f"{bare}（档位入口）" in md, f"{bare} 未在表格成行"
+        # 四个老 id 各有自己的「不适用」单元格
+        assert md.count("—（档位入口，底层模型未公开）") >= len(legacy), md[:800]
+
+
+@allure.feature("千问办公适配器")
+@allure.story("计价")
+@allure.title("同一会话新旧 id 并存：逐条 trace 按自身 timestamp 选档")
+def test_per_trace_tier_selection_same_session(tmp_path):
+    """8-25 的 flash + qwork-advanced 走不适用；8-27 的 flash 归一为
+    qwen3.8-flash 正常计价，同会话的 qmodel_latest 仍走不适用。
+    证明「改名发生在长会话中途」时不能按会话整体归类。
+    """
+    sid = "mixed-tier-session"
+
+    def asst(ts, rid, model, text):
+        return _line({
+            "type": "assistant", "sessionId": sid, "timestamp": ts,
+            "requestTokenAnchor": {"requestId": rid},
+            "message": {"role": "assistant", "model": model,
+                        "content": [{"type": "text", "text": text}]},
+        })
+
+    lines = [
+        _line({"type": "runtime-config", "sessionId": sid, "model": "flash",
+               "timestamp": "2026-08-25T09:00:00+08:00"}),
+        asst("2026-08-25T10:01:00+08:00", "r-825-flash", "flash", "旧经济档"),
+        asst("2026-08-25T10:02:00+08:00", "r-825-adv", "qwork-advanced", "旧高级档"),
+        asst("2026-08-27T10:01:00+08:00", "r-827-flash", "flash", "新标准档"),
+        asst("2026-08-27T10:02:00+08:00", "r-827-ql", "qmodel_latest", "旧前沿档"),
+    ]
+    p = tmp_path / (sid + ".jsonl")
+    p.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    traces, _ = _parse_session_file(p, "2026-08-01", "2026-08-31")
+    by = {t["_request_id"]: t for t in traces}
+    assert set(by) == {"r-825-flash", "r-825-adv", "r-827-flash", "r-827-ql"}
+
+    assert by["r-825-flash"]["date"] == "2026-08-25"
+    assert by["r-825-flash"]["exec_model"] == "flash"
+    assert by["r-825-flash"]["_is_entry_tier"] is True
+    assert by["r-825-flash"]["total_cost"] == 0.0
+    assert by["r-825-adv"]["exec_model"] == "qwork-advanced"
+    assert by["r-825-adv"]["_is_entry_tier"] is True
+
+    assert by["r-827-flash"]["date"] == "2026-08-27"
+    assert by["r-827-flash"]["exec_model"] == "qwen3.8-flash"
+    assert by["r-827-flash"]["model_key"] == "qwenwork:flash"
+    assert by["r-827-flash"]["_is_entry_tier"] is False
+    assert price_of("qwenwork:qwen3.8-flash") == (0.8, 2.7)
+    assert by["r-827-ql"]["exec_model"] == "qmodel_latest"
+    assert by["r-827-ql"]["_is_entry_tier"] is True
+    assert by["r-827-ql"]["total_cost"] == 0.0
+
+
+@allure.feature("千问办公适配器")
+@allure.story("计价")
+@allure.title("qmodel_latest 推断映射默认关闭，开启后仍带推断注记")
+def test_qmodel_latest_inference_default_off(monkeypatch):
+    import ca_core as C
+
+    cfg = json.loads((SCRIPTS_DIR / "pricing.json").read_text(encoding="utf-8"))
+    rule = cfg["entry_model_map"]["qwenwork:qmodel_latest"][0]
+    assert rule["enabled"] is False and rule["inferred"] is True
+    assert "推断" in rule["note"] and "不能证明" in rule["note"]
+
+    # 默认关闭：新旧两种形态都不出 ¥
+    assert resolve_entry_model("qwenwork:qmodel_latest", "2026-08-10") is None
+    assert resolve_entry_model("qmodel_latest", "2026-08-10") is None
+
+    # 显式开启（模拟 pricing.local.json 覆盖）才生效，且仍受 from 门限约束
+    monkeypatch.setitem(C.ENTRY_MODEL_MAP, "qwenwork:qmodel_latest",
+                        [dict(rule, enabled=True)])
+    assert resolve_entry_model("qwenwork:qmodel_latest", "2026-08-10") == "qwen3.8-max-preview"
+    assert resolve_entry_model("qwenwork:qmodel_latest", "2026-08-01") is None

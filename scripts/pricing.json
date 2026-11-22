@@ -58,7 +58,11 @@
     "hy3_delisted_1116": "https://news.qq.com/rain/a/20261116A08OML00 (腾讯新闻转载官方通稿，2026-11-16：Hy4 flash 上线；Hy4 限免时间现已结束；Hy3 端内下线) + https://news.qq.com/rain/a/20261105A0CSG600 (2026-11-05 混元扩容公告：Hy3 WorkBuddy 限免延长至 2026-11-15 23:59) + https://www.163.com/dy/article/LBSBAKRT053144S4.html (网易，同日三变更交叉核实) — 据此 timed_free.hy3 由 2026-10-31 更正为 2026-11-15（截止日含当天），并把 hy3/hy3-x 移入 delisted 标记端内已下架",
     "hy4_flash_1116": "https://news.qq.com/rain/a/20261116A08OML00 + https://www.163.com/dy/article/LBSBAKRT053144S4.html + http://mp.weixin.qq.com/s?__biz=MjM5MjQzNzQ2OA==&mid=2247484698&idx=1&sn=f3ac4ff07a8e44b264a597e2c6ec2124 (2026-11-16 客户端实拍：Hy4 flash 上架、限时免费 0.00x、11-16~11-30 每日赠送免费额度、上下文 300K/600K/960K) — 官方 CNY 刊例价 输入0.5 / 输出2 / 缓存命中0.02 元每百万 tokens；224B 总参(含64B Engram)/12B 激活/多模态/1M 上下文；生图生视频切多模态模型正常扣积分；额度用尽后可消耗积分继续、繁忙排队",
     "hy4flash_trace_key": "本机 trace 实测（2026-11-16 起）：Hy4 flash 免费期调用在 spans[].toolOutput[].model 中记为 `hy4flash-free`（无连字符形式，非账单页的 `hy4-flash`）；额度用尽后的收费期调用记为 `hy4flash`（同为无连字符）。对照历史 key：Hy4 免费期 `hy4free`、Hy3 免费/收费 `hy3`/`hy3-x`、Hy4 preview 免费/收费 `hy4-preview`/`hy4-preview-x`。因付费调用切换到独立 key `hy4flash`，免费 key `hy4flash-free` 在 11-16~11-30 期间可安全归零（timed_free），不会把付费调用误算为 ¥0",
-    "hy4flash_paid_key_1119": "用户实测（2026-11-19，WorkBuddy 积分消耗明细 https://www.workbuddy.cn/pricing/plans-usage 截图）+ 本机 trace 交叉验证：00:07 的 `hy4-flash-free` 两条积分为 0（免费额度内）；00:12~00:15 的 `hy4-flash` 三条积分为 5.76 / 0.68 / 0.62（额度用尽后按积分计费）。对应本地 trace key 分别为 `hy4flash-free` / `hy4flash`（无连字符）——账单页连字符形式与 trace 无连字符形式属不同命名空间，本表按 trace key 建条目。据此新增 models.hy4flash（刊例价同 0.5/2/0.02）、display_merge hy4flash-free→hy4flash，并把 hy4flash-free 加入 timed_free 至 2026-11-30"
+    "qwenwork_10models_1116": "智东西/新浪财经/凤凰科技/微信公众号多源一致（2026-11-16）：千问办公一次性上线 10 款模型——Qwen4-Max（阿里当日发布、首发）、Qwen3.8-Flash、Kimi-K3.1-Pro、GLM-5.3、GLM-5.3-Flash、DeepSeek-V4-Pro、DeepSeek-V4.1-Flash、MiniMax-M3.1-Flash、Step-5-Preview、Ling-3.1-Flash；此前仅标准/高级/Qwen3.8-Max 三档。个人版与企业标准版可自由切换，企业管理员可按部门/用户组/成员配置模型权限。https://finance.sina.com.cn/stock/t/2026-11-16/doc-iniyxufc2714269.shtml",
+    "qwenwork_model_prices": "模型调用 ID 与官方直连 API 人民币刊例价（阿里云百炼 help.aliyun.com/zh/model-studio、Kimi 官方 kimi.com/resources）：qwen4-max ¥10/¥30（2026-11-11 预览发布、11-16 千问办公首发；预览期 2 折）；qwen3.8-max ¥12/¥36/缓存1.5（qwen3.8-max-0902）；qwen3.8-flash ¥0.8/¥2.7/缓存0.1（2026-08-26 发布，alizila 与澎湃口径 ¥1/¥3 为发布期宣传价，以百炼现行 ¥0.8/¥2.7 为准）；kimi-k3.1-pro ¥13/¥68/缓存1.3（2026-10-24 发布，较 K3 的 ¥20/¥100 降 35%/32%）；ling-3.1-flash 蚂蚁官方定价页标注 ¥0/¥0/¥0、限时免费两周、后续价未公布。⚠️ 以上均为各模型**直连 API 刊例价**；千问办公平台内按积分倍率计费（截图 0.1x~2.4x），两套口径正交、不得互换。",
+    "hy4flash_paid_key_1119": "用户实测（2026-11-19，WorkBuddy 积分消耗明细 https://www.workbuddy.cn/pricing/plans-usage 截图）+ 本机 trace 交叉验证：00:07 的 `hy4-flash-free` 两条积分为 0（免费额度内）；00:12~00:15 的 `hy4-flash` 三条积分为 5.76 / 0.68 / 0.62（额度用尽后按积分计费）。对应本地 trace key 分别为 `hy4flash-free` / `hy4flash`（无连字符）——账单页连字符形式与 trace 无连字符形式属不同命名空间，本表按 trace key 建条目。据此新增 models.hy4flash（刊例价同 0.5/2/0.02）、display_merge hy4flash-free→hy4flash，并把 hy4flash-free 加入 timed_free 至 2026-11-30",
+    "qwenwork_credits_cash_anchor": "阿里云帮助中心《个人版权益 — 千问办公(QwenWork)》「2.2 积分包套餐」（用户提供的一手官方页面；URL 未在材料中给出，故按标题+章节引用，不臆造链接；2026-11-22 核实）：积分包 200 积分=10 元、2,000=100 元、20,000=1,000 元、自定义上限 600,000=30,000 元 → 官方 1 积分 = ¥0.05。同页套餐内积分：免费 0（每日登录 100，限时）、个人标准版 2,000/月 + 每日 200、个人高级版 4,000/月 + 每日 300、新用户赠 2,000（3 个月）、企业席位 2,000/月、积分包 12 个月有效。⚠️ 本来源只锚定「积分→¥」；官方从未公布 token↔积分 兑换率，credits_index.T=1600 仍是第三方实测倒推值，不得升级为官方。",
+    "qwenwork_tier_id_rename": "千问办公档位入口 id 历史改名（本机 ~/.qwenworkcn/projects 实测，已按 requestId 全局去重；见 scripts/qwenwork_model_timeline.py）：qmodel_latest 2026-08-06~08-19（3375 次）、qwork-lite 08-06~08-12（24 次）、qwork-auto 08-09~10-06（230 次）、qwork-advanced 08-10~09-10（87 次）、pro 09-02（26 次）、flash 09-03~11-22（271 次）、qwen3.8-max-preview 10-21~10-22（45 次）。文档侧：Qwen3.8-Flash 2026-08-26 发布并首发「标准」模式（多源一致），档位收拢为标准/高级两档；旧四档（经济 0.1x / 基础 0.25x / 高级 1x / 前沿 Qwen3.8-Max 1.1x）无任何官方文档把档位名映射到模型名。QoderWork CN release notes（前身产品，帮助中心更新 2026-09-24）0.6.2「model selector now displays the consumption multipliers for each tier」、0.6.3「off-peak discounts … Qwen3.7-Max and Qwen3.7-Plus」只证明倍率体系来源与当时可点名模型，**不构成把 qwork-lite 折成 Qwen3.7-Plus 单价的依据**。"
   },
   "default_model": "glm-5.2",
   "models": {
@@ -246,6 +250,40 @@
       "output": 19.44,
       "cache_hit_input": 0.72,
       "note": "阶跃星辰 Step 5 Preview（StepFun 旗舰 Agent 模型，2026-09-20 发布，2026-10-12 起接入 WorkBuddy，独家限免 2026-10-12~2026-10-25；2026-10-25 为最后免费日（含当天），自 2026-10-26 起终止限时免费，核实来源见 _sources.step5_free_end）。官方直连 API 定价（platform.stepfun.ai，美元价 ×7.2≈CNY 估算）：输入(缓存未命中) $1.00 / 输入(缓存命中) $0.10 / 输出 $2.70 每百万 tokens；1M 上下文、文本+图像+视频输入、支持工具调用/JSON/推理强度。⚠️ 经 WorkBuddy 使用时按平台积分计费（限免期 0 积分；自 2026-10-26 起终止限免并恢复积分计费，WorkBuddy 内积分消耗速度 0.33x，客户端实测见 _sources.step5_rate_033。⚠️ 0.43x 为限免期公告给出的『结束后恢复倍率』预期口径，与实测 0.33x 不一致，差异原因未获官方说明，标记待确认），与下方直连 API ¥ 价非同一口径；如需精确还原 WorkBuddy 实际花费请用官方用量导出或本机 pricing.local.json 覆盖。"
+    },
+    "qwen4-max": {
+      "input": 10.0,
+      "output": 30.0,
+      "note": "阿里通义千问第四代旗舰（2026-11-11 预览发布，11-16 千问办公首发上线，见 _sources.qwenwork_10models_1116）。官方直连 API 刊例价 ¥10/¥30 每百万 tokens（阿里云百炼 help.aliyun.com/zh/model-studio/qwen4-max，华北2北京；Batch 5/15；预览期限时 2 折、新用户再 5 折最低 1 折，见 _sources.qwenwork_model_prices）。2.4T 总参/71B 激活、原生视觉理解、1M 上下文。⚠️ 千问办公平台内按积分倍率计费（截图 1.6x）、非直连 ¥ 价，本条仅作「按同款模型直连单价估算的 token 价值」，不代表订阅真实支出；如需精确请用官方用量导出。"
+    },
+    "qwen3.8-max": {
+      "input": 12.0,
+      "output": 36.0,
+      "cache_hit_input": 1.5,
+      "note": "阿里通义千问 3.8 旗舰（快照 qwen3.8-max-0902，2.4T MoE）。官方直连 API 刊例价 ¥12/¥36/缓存命中1.5 每百万 tokens（阿里云百炼 help.aliyun.com/zh/model-studio/qwen3-8-max，华北2北京；Batch 6/18）。千问办公此前三档之一，11-16 起与 10 款新模型并存（截图 1.8x）。⚠️ 平台积分倍率与直连 ¥ 价正交，本条为 token 价值估算、非订阅真实支出。"
+    },
+    "qwen3.8-max-preview": {
+      "input": 12.0,
+      "output": 36.0,
+      "cache_hit_input": 1.5,
+      "note": "Qwen3.8-Max 档在千问办公的**真实 trace id**（本机转录与 qodercli.log 实测为 `qwen3.8-max-preview`，UI 展示名 Qwen3.8-Max）。与 `qwen3.8-max` 是同一模型、同一官方直连价 ¥12/¥36/缓存命中1.5。两条 key 并存：本条命中当前真实 trace id，无后缀条作为平台未来去掉 -preview 后缀时的兜底。⚠️ 千问办公按积分倍率计费（截图 1.8x）与直连 ¥ 价正交，本条为 token 价值估算、非订阅真实支出。"
+    },
+    "qwen3.8-flash": {
+      "input": 0.8,
+      "output": 2.7,
+      "cache_hit_input": 0.1,
+      "note": "阿里 Qwen3.8-Flash（2026-08-26 发布并开源，125B+51B N-gram MoE、6B 激活，Qwen4 架构前身；首发上线千问办公并重做标准模式，token 消耗降 75%）。官方直连 API 现行价 ¥0.8/¥2.7/缓存命中0.1 每百万 tokens（阿里云百炼现行价，见 _sources.qwenwork_model_prices；发布期宣传 ¥1/¥3 已过时）。1M 上下文可扩。⚠️ 千问办公平台内截图 0.1x 为积分倍率、非 ¥ 价；本条为直连价估算。"
+    },
+    "kimi-k3.1-pro": {
+      "input": 13.0,
+      "output": 68.0,
+      "cache_hit_input": 1.3,
+      "note": "月之暗面 Kimi K3.1 Pro（2026-10-24 发布，K3 后训练版、3T 级参数、1M 上下文，代码/3D/金融/长程 Agent 增强）。官方 API 价 ¥13/¥68/缓存命中1.3 每百万 tokens（kimi.com/resources/kimi-k3-1-pro-pricing，较 K3 的 ¥20/¥100 降 35%/32%；高速版 kimi-k3.1-pro-highspeed 价格 2 倍）。2026-11-16 上线千问办公（截图 2.4x 为平台积分倍率）。⚠️ 平台积分倍率与直连 ¥ 价正交，本条为 token 价值估算、非订阅真实支出。"
+    },
+    "ling-3.1-flash": {
+      "input": 0.0,
+      "output": 0.0,
+      "note": "蚂蚁 Ling-3.1-Flash（560B MoE，2026-09-30 前后发布；2026-11-16 上线千问办公，UI 标注「限时免费」）。蚂蚁官方定价页标注 ¥0/¥0/¥0、限时免费两周，到期后转标准计费但**后续费率未公布**（见 _sources.qwenwork_model_prices 与 orcarouter 汇总）。本表按官方现行 ¥0 计价（不进 timed_free——无确切截止日，到期后需人工更新）；独立第三方 Artificial Analysis 记录 $0.30/$0.90 为最接近的转付费参考，但蚂蚁未确认，故不采用。⚠️ 千问办公平台内截图 0.1x 为积分倍率，限免期实付可能为 0；本表 ¥0 与之一致。"
     }
   },
   "delisted": {
@@ -345,6 +383,13 @@
     "glm-5.3-flash": "同 glm-5.3：5 折促销 2026-09-09 到期。v1.7.1 起已按日期区间打 5 折；残余偏差同 glm-5.3（长期折扣口径未明）。该模型无夜间免费，是实测成本大头（2026-09-12~14 占 72%）。",
     "hy4": "2026-11-04~11-15 期间为『每日赠送免费额度』（订阅用户更高配额、消耗速度 0.00x），额度当日有效不结转、用尽后才按积分计费；本表按官方刊例价 6/18 全量计价，会系统性高估这段时间的实际花费。该规则是分人群 + 每日额度制，静态价表无法表达；如需精确请用官方用量导出（--import-official）或本机 pricing.local.json 覆盖。另：每日额度具体数值、精确截止时刻待确认。2026-11-16 更新：限免已于 11-15 23:59 结束、11-16 起按刊例价计费，本条偏差仅对历史 11-04~11-15 调用成立；客户端倍率 0.29x 属积分口径，与 ¥ 刊例价正交不得换算。",
     "hy4flash-free": "2026-11-16~11-30 23:59 期间 WorkBuddy 内每日赠送免费额度、倍率 0.00x（订阅用户更高配额），额度当日有效不结转、用尽后 key 切换为 `hy4flash` 按积分计费、生图生视频切多模态模型正常扣积分（见 _sources.hy4flash_paid_key_1119）。v1.9.16 起本 key 已加入 timed_free 至 11-30，免费期调用记 ¥0，不再高估；此前版本按刊例价 0.5/2 全量计价会高估。残余偏差：每日额度具体数值 / 订阅用户配额差异未公开，若同一 key 在额度用尽后未及时切换则本表会低估，如需精确请用官方用量导出（--import-official）。",
+    "qwen4-max": "千问办公数据源的 token 多为本地字符估算（上游 tokens 字段全为 0，trace 标 _tokens_estimated=True），本条按官方**直连 API** 刊例价 ¥10/¥30 估算 token 价值；千问办公内实际按积分倍率计费（截图 1.6x）、与 ¥ 价正交，且平台内调用可能非直连 API 价。故本条金额仅供参考，精确对账请用官方用量导出或本机 pricing.local.json 覆盖。",
+    "qwen3.8-max": "同 qwen4-max：千问办公 token 多为字符估算，按直连 API 刊例价 ¥12/¥36 估算；平台内积分倍率 1.8x 与 ¥ 价正交。金额仅供参考。",
+    "qwen3.8-max-preview": "同 qwen3.8-max：本 key 是 Qwen3.8-Max 档的真实 trace id（含 -preview 后缀），千问办公 token 多为字符估算，按直连 API 刊例价 ¥12/¥36 估算；平台内积分倍率 1.8x 与 ¥ 价正交。金额仅供参考。",
+    "qwen3.8-flash": "同 qwen4-max：千问办公 token 多为字符估算，按直连 API 价 ¥0.8/¥2.7 估算；平台内积分倍率 0.1x 与 ¥ 价正交。金额仅供参考。",
+    "flash": "标准档入口：① 2026-08-26 起底层为 Qwen3.8-Flash，已按日期门归一并按 ¥0.8/¥2.7 计价；此前（<08-26）的 0.1x 是经济档、底层官方未公布，不映射、不出 ¥；② 多模态子调用（生图/生视频）可能切到其它模型但仍记为 flash，归一会把它们算作 Qwen3.8-Flash，可能低估这些子调用的真实消耗。token 亦为字符估算，金额仅供参考。",
+    "kimi-k3.1-pro": "同 qwen4-max：千问办公 token 多为字符估算，按官方 API 价 ¥13/¥68 估算；平台内积分倍率 2.4x 与 ¥ 价正交。金额仅供参考。",
+    "ling-3.1-flash": "蚂蚁官方定价页标注限时免费 ¥0（两周，后续费率未公布），本表按 ¥0 计；千问办公 UI 亦标「限时免费」。风险：限免到期后费率未定，届时本条会低估，需人工更新 trace id 与单价。",
     "hy4flash": "2026-11-19 实测的付费期 key（免费额度用尽后切换）。本表按官方 CNY 刊例价 0.5/2/0.02 全时段计价，与客户端积分消耗速度（账单实测有消耗但具体倍率未公布）属不同口径、不得互换；精确对账请用 --import-official。"
   },
   "low_confidence_bias": {
@@ -356,7 +401,14 @@
     "glm-5.3-flash": "over",
     "hy4": "over",
     "hy4flash-free": "over",
-    "hy4flash": "mixed"
+    "hy4flash": "mixed",
+    "qwen4-max": "mixed",
+    "qwen3.8-max": "mixed",
+    "qwen3.8-max-preview": "mixed",
+    "qwen3.8-flash": "mixed",
+    "flash": "mixed",
+    "kimi-k3.1-pro": "mixed",
+    "ling-3.1-flash": "mixed"
   },
   "scheduled_pricing": {
     "_comment": "时段定价（v1.7.1 新增）：模型名 -> 规则列表，按【调用时刻】改写静态单价 —— 解决「夜间免费 / 峰谷双档 / 限期促销」这类静态价表在数学上无法表达的服务端规则（此前只能靠 low_confidence 标注，数字仍是错的）。规则字段：from/until='YYYY-MM-DD' 生效区间（含端点）；dow=星期列表 1=周一…7=周日（也接受 mon/tue/.../sun）；hours='HH:MM-HH:MM' 北京时间、左闭右开、支持跨午夜（如 23:00-08:00）；effect=free|peak|discount；factor=peak/discount 的倍率（缺省 peak=2.0、discount=1.0）；note=给用户看的说明。按配置顺序取**第一条命中**的规则，故更特殊的规则写在前面。缺失的维度按「不套用该维度规则」处理（宁可少打折，也不把白天误判成夜间免费）。所有时间均为北京时间（Asia/Shanghai），与官方用量导出的时间列同口径。",
@@ -433,11 +485,64 @@
       }
     ]
   },
+  "entry_tiers": {
+    "_comment": "档位入口（qwenwork 千问办公）：这些 id 是「档位/模式入口」而非具体模型，底层模型官方未公开或部分未公开，故无单一 ¥ 单价。登记覆盖**历史改名的整族 id**：8 月老名 qmodel_latest / qwork-lite / qwork-auto / qwork-advanced，10 月起现名 flash / pro（时间线见 _sources.qwenwork_tier_id_rename）；同一会话内新旧并存时逐条 trace 按各自 timestamp 选档，不按会话整体归类。老 id 一律不给 ¥（当时官方只给档位倍率、从未公布底层模型）。登记在此的 id：① 不进 §3.3「未配置单价」清单（禁止诱导用户补一个凭空的价）；② 报告 §3.1/§3.2 正常成行统计调用/token/耗时/会话，但单价与金额列显示「—（档位入口，底层模型未公开）」；③ 绝不用倍率锚定法造 ¥ 价、也绝不用 router_avg 均价（倍率-价格非线性、均价被高价模型拉高一个量级）。这与 WorkBuddy 的 `auto` 同属「入口无单一单价」契约，但 auto 走 router_avg、档位入口不走，二者必须分开。键为带通道前缀的完整 id（qwenwork:xxx），可由 pricing.local.json 覆盖。",
+    "qwenwork:pro": "高级档（1x，现名）：底层模型官方从未公布，任何一手/二手来源均无定论。禁止臆测为具体模型或按 1x 锚定 ¥ 价。全时段金额不适用。",
+    "qwenwork:flash": "标准档入口（0.1x，现名）：2026-08-26 起底层为 Qwen3.8-Flash（见 entry_model_map，§3.1 按 qwen3.8-flash 计价）；此前该 slot 另有所属（经济档 qwork-lite，底层未公开），本机时间线未见 08-26 前的 flash 记录。§3.2 入口维度保留 flash 原名、不出 ¥、不进未配置清单。",
+    "qwenwork:qwork-lite": "经济档旧名（本机 2026-08-06~08-12，已按 requestId 去重）：当时 0.1x，官方文档只给场景描述、未把档位名映射到具体模型 → 金额一律不适用；2026-08-26 起标准档改记 flash。禁止用倍率锚定法或 QoderWork 侧 Qwen3.7-Plus 线索倒推出 ¥。",
+    "qwenwork:qwork-advanced": "高级档旧名（本机 2026-08-10~09-10）：等价于今天的 pro，底层模型官方从未公布；全时段金额不适用。",
+    "qwenwork:qwork-auto": "自动路由档旧名（本机 2026-08-09~10-06）：与 WorkBuddy 的 auto 同属「入口无单一单价」契约，但千问办公侧不回传路由明细也无官方 ¥ 价 → null 单价、走入口语义、不进未配置清单（不走 router_avg）。",
+    "qwenwork:qmodel_latest": "前沿档旧名（本机 2026-08-06~08-19，3375 次，已去重）：推断为 Qwen3.8-Max 一族的前身 id，但官方从未确认 → 推断映射默认关闭（见 entry_model_map 的 enabled=false）。默认不出 ¥、不进未配置清单；仅当用户用 pricing.local.json 显式开启时才计价，且报告必须带推断注记。"
+  },
+  "entry_model_map": {
+    "_comment": "档位入口 -> 具名模型 的**带生效日**映射（仅用于把底层已公开的档位归一为可计价模型；未公开的档位留在 entry_tiers 里不出 ¥）。结构：入口 id -> [{from, model, note, enabled?, inferred?}]，from=YYYY-MM-DD 含当天；按日期取 from<=trace_date 的最后一条（可表达历史变更）。enabled=false 的规则被 resolve_entry_model 跳过（用于「推断映射默认关闭」），缺省视为 true；inferred=true 的规则必须带 note 说明推断依据与不确定性。老 id（qwork-* / qmodel_latest）一律不进本表给 ¥，只有 flash 的 2026-08-26 门限有官方发布依据。刻意不放进 models 段做全时段裸 key——那会把 8-26 前的「经济档」（底层未公开、也记成 flash）冒充成 Qwen3.8-Flash。可被 pricing.local.json 覆盖。",
+    "qwenwork:flash": [
+      {
+        "from": "2026-08-26",
+        "model": "qwen3.8-flash",
+        "note": "千问办公 2026-08-26 晚首发「标准」模式，底层即 Qwen3.8-Flash（官方发布稿+多源一致）；该日起的 flash trace 归一为 qwen3.8-flash，沿用 ¥0.8/¥2.7/缓存0.1 单价。此前（<2026-08-26）不存在「标准」档，当时的 0.1x 是「经济档」、底层模型官方未公布 —— 不映射，按 entry_tiers 的「不适用」路径处理（不出 ¥、不进未配置清单）。另：多模态子调用（生图/生视频）可能切到其它模型但仍记 flash，此映射会把它们一并归为 Qwen3.8-Flash，已在 low_confidence.flash 标注该偏差。"
+      }
+    ],
+    "qwenwork:qmodel_latest": [
+      {
+        "from": "2026-08-03",
+        "model": "qwen3.8-max-preview",
+        "enabled": false,
+        "inferred": true,
+        "note": "【推断映射，默认关闭，禁止当作官方定论】窗口按 Qwen3.8-Max 公测（约 2026-08-03）至 08-26 档位改名划界；本机时间线已复核 qmodel_latest 出现于 2026-08-06~08-19（3375 次，已按 requestId 去重），但时间线只能证明「何时出现」，不能证明「底层是哪个模型」。官方两份《模型选择》页都只给场景描述、不说明标准/高级的底层模型。默认 enabled=false → resolve_entry_model 返回 None，该 id 按档位入口「不适用」处理（不出 ¥、不进未配置清单）。若用户确需用推断价，用 pricing.local.json 同结构覆盖并置 enabled=true；此时报告必须显式标注「推断映射」，不得写成账单结论。"
+      }
+    ]
+  },
+  "credits_index": {
+    "_comment": "【仅配置，不渲染】千问办公积分口径参数。① 现金锚已升级为官方一手：1 积分 = ¥0.05（阿里云帮助中心《个人版权益 — 千问办公(QwenWork)》2.2 积分包套餐，见 _sources.qwenwork_credits_cash_anchor；此前标「第三方口径」已作废）。② 相对消耗指数 credits_index = est_tokens × multiplier ÷ T：官方从未公布 token↔积分 兑换率；T=1600 仍是单一重度账号两天实测倒推（约 900万 token ↔ 5500+ 积分）的**第三方口径**，可被 pricing.local.json 覆盖，不得当账单。③ 平台内 vs 直连 API 溢价只能作注记、不得作结论：1x 档 625 积分/百万 token × ¥0.05 ≈ ¥31/百万，对比 Qwen3.8-Max 直连混合价约 ¥13.2/百万 ≈ 2.4×；0.1x 档 62.5 积分/百万 × ¥0.05 ≈ ¥3.1/百万，对比 Qwen3.8-Flash 直连约 ¥0.9/百万 ≈ 3.5×。两个算式都建立在第三方 T=1600 之上、只说明体系自洽，**不构成官方定价、不进报告正文金额结论**。④ 禁止把本指数渲染成积分数或金额；禁止与 WorkBuddy 的积分直接比较（两套计费体系不同、不可比，此前「差约 2.6 倍」无一手出处已删除）。是否启用渲染由后续版本决定，本版只落配置。可被 pricing.local.json 覆盖 T、倍率与现金锚。",
+    "credits_cny": 0.05,
+    "credits_cny_source": "_sources.qwenwork_credits_cash_anchor（官方一手，2026-11-22 核实）",
+    "credits_cny_note": "官方 1 积分 = ¥0.05；积分包 200/2000/20000 分别 10/100/1000 元，上限 600000=30000 元。只锚定积分→¥，不覆盖 token↔积分。",
+    "premium_note": "【注记，非结论】平台内 vs 直连 API 溢价约 2.4×（1x 档 ¥31/百万 vs ¥13.2/百万）/ 3.5×（0.1x 档 ¥3.1/百万 vs ¥0.9/百万）；建立在第三方 T=1600 实测之上，官方未公布兑换率，禁止写进报告结论或金额列。",
+    "T": 1600,
+    "T_note": "单一账号两天实测倒推、可本地校准；第三方口径、非官方兑换率",
+    "multipliers": {
+      "flash": 0.1,
+      "pro": 1.0,
+      "qwen4-max": 1.6,
+      "qwen3.8-max-preview": 1.8,
+      "qwen3.8-flash": 0.1,
+      "ling-3.1-flash": 0.1,
+      "glm-5.3": 1.2,
+      "glm-5.3-flash": 0.2,
+      "kimi-k3.1-pro": 2.4,
+      "minimax-m3.1-flash": 0.2,
+      "step-5-preview": 0.7,
+      "deepseek-flash": 0.1,
+      "deepseek-v4-pro": 0.2
+    }
+  },
   "display_merge": {
     "hy4-preview-x": "hy4-preview",
     "hy3-x": "hy3",
     "hy4flash-free": "hy4flash",
-    "deepseek-flash": "deepseek-v4.1-flash"
+    "deepseek-flash": "deepseek-v4.1-flash",
+    "qwen3.8-max-preview": "qwen3.8-max"
   },
   "mode_rates": {
     "_comment": "档位（路由三档：快速/均衡/极致）估算单价（v1.3.0 新增分析维度）。档位倍率是「积分维度」，与 ¥ 刊例价正交——已确认不参与金额计算，仅作分析维度。下方 ¥ 单价为「倍率锚定法」估算：按已知模型倍率线性外推（见各档 anchor）。服务端配置缓存 acc-product-config-v3.json 的官方 credits 倍率会覆盖这里的 multiplier，但 ¥ 单价仍以本段锚定值为准（官方只给倍率不给 ¥）。若想更精确，请按你实际积分消耗反推后改本段 input/output；改完无需动 Python。别名 alias 为配置缓存规范 id（极致在缓存里叫 deep-model，trace 里是 extreme-model，采集器已自动归一）。",

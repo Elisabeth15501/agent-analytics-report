@@ -23,7 +23,7 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 
-__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'LOW_CONFIDENCE_BIAS', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PER_MILLION', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SCHEDULED_PRICING', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'call_time_of', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_scheduled_free', 'is_timed_free', 'iso_to_date', 'iso_to_dt', 'load_task_rules', 'low_confidence_reason', 'low_confidence_bias', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
+__all__ = ['ALL_CUSTOM_MODELS', 'ALL_LOCAL_MODELS', 'ALL_ROUTER_MODELS', 'CACHE_DISCOUNT', 'CUSTOM_LOCAL_PRICING', 'DB_PATH', 'DEFAULT_BLENDED_PER_MILLION', 'DEFAULT_MODEL', 'DELISTED_MODELS', 'DISCOVERED_EXTERNAL', 'DISCOVERED_LOCAL', 'DISCOVERED_ROUTER', 'DISPLAY_MERGE', 'QWENWORK_ENTRY_TIERS', 'ENTRY_MODEL_MAP', 'CREDITS_INDEX', 'is_entry_tier', 'resolve_entry_model', 'GLM52_FAMILY', 'GLM52_RATE', 'HOME', 'LOW_CONFIDENCE', 'LOW_CONFIDENCE_BIAS', 'MEDIA_EXTS', 'MODEL_PRICING', 'MODE_RATES_META', 'ORPHAN_KEY', 'ORPHAN_LABEL', 'PERIOD_DAYS', 'PERIOD_LABELS', 'PERIOD_NEXT', 'PERIOD_SHORT', 'PER_MILLION', 'PROJECTS_DIR', 'ROUTER_ALIASES', 'ROUTER_HOSTS', 'ROUTER_VENDORS', 'SCHEDULED_PRICING', 'SESSIONS_DIR', 'SILICONFLOW_VENDOR_PREFIXES', 'SYSTEM_REMINDER_RE', 'TASK_RULES_PATH', 'TASK_TYPE_RULES', 'TIER_ALIASES', 'TIER_CANON', 'TIER_LABELS', 'TIMED_FREE', 'TRACES_DIR', 'TZ', 'UNNAMED_LABEL', 'USAGE_LOG_PATH', 'USER_CUSTOM_MODELS', 'WB_DIR', 'WORKBUDDY_SESSIONS', '_CHEAPER_ALT', '_PRICING', '_PRICING_LOCAL_LOADED', '_build_sid_to_title', '_load_acc_product_config', '_load_pricing_config', '_to_num', 'call_time_of', 'canonical_tier', 'compute_cost', 'discover_custom_models', 'effective_tokens_of', 'glm52_discount_multiplier', 'is_router_like', 'is_scheduled_free', 'is_timed_free', 'iso_to_date', 'iso_to_dt', 'load_task_rules', 'low_confidence_reason', 'low_confidence_bias', 'merge_display_key', 'normalize_model', 'parse_channel', 'parse_date_range', 'price_of', 'resolve_date_range', 'resolve_model', 'score_task_types', 'trace_cost', 'ts_to_date', 'ts_to_dt', '_router_avg_unit_price']
 TIMED_FREE = {
     # 兜底种子值；运行时 _load_pricing_config() 会从 pricing.json 合并覆盖，
     # 以 pricing.json 的 timed_free 段为准（权威源）。
@@ -45,6 +45,34 @@ LOW_CONFIDENCE_BIAS = {
     # ⚠️ 必须先在此处定义：_load_pricing_config() 在模块加载早期（下方）就会读取它来
     # 初始化 cfg，若只在 _PRICING 生成后再赋值会触发 NameError。
 }
+
+# 档位入口（qwenwork）：入口 id -> 说明。这些 id 无单一 ¥ 单价、不进未配置清单、
+# 不出金额。兜底种子；运行时由 pricing.json 的 entry_tiers 段覆盖（权威源）。
+QWENWORK_ENTRY_TIERS = {
+    "qwenwork:pro": "高级档（1x，现名）：底层模型官方未公开",
+    "qwenwork:flash": "标准档入口（0.1x，现名）：flash >=2026-08-26 可按 entry_model_map 归一",
+    "qwenwork:qwork-lite": "经济档旧名：官方从未映射底层模型，金额不适用",
+    "qwenwork:qwork-advanced": "高级档旧名（今 pro）：底层未公开，金额不适用",
+    "qwenwork:qwork-auto": "自动路由档旧名：无官方 ¥ 价，走入口语义",
+    "qwenwork:qmodel_latest": "前沿档旧名：推断映射默认关闭，金额不适用",
+}
+
+# 档位入口 -> 具名模型的带生效日映射。兜底种子；权威源为 pricing.json 的 entry_model_map。
+# 老 id（qwork-* / qmodel_latest）一律不在此表出 ¥；只有 flash 的 08-26 门限有官方发布依据。
+# qmodel_latest 条目 enabled=false → 推断映射默认关闭，需 pricing.local.json 显式开启。
+ENTRY_MODEL_MAP = {
+    "qwenwork:flash": [
+        {"from": "2026-08-26", "model": "qwen3.8-flash"},
+    ],
+    "qwenwork:qmodel_latest": [
+        {"from": "2026-08-03", "model": "qwen3.8-max-preview",
+         "enabled": False, "inferred": True,
+         "note": "【推断，默认关闭】前沿档旧名 → Qwen3.8-Max；时间线只能证明出现窗口，不能证明底层模型身份"},
+    ],
+}
+
+# 积分相对指数参数（仅配置不渲染）。兜底种子；权威源 pricing.json 的 credits_index。
+CREDITS_INDEX = {"T": 1600, "T_note": "单一账号两天实测倒推、可本地校准；第三方口径、非官方兑换率", "multipliers": {}}
 
 SCHEDULED_PRICING = {
     # 兜底种子值（通常为空）；运行时由 pricing.json 的 scheduled_pricing 段覆盖（权威源）。
@@ -81,8 +109,17 @@ MODEL_PRICING = {
     "minimax-m3": {"input": 2.1, "output": 8.4},    # MiniMax 官方分档价：≤512K 输入2.1/输出8.4/缓存命中0.42（=$0.30/$1.20×7），>512K 4.2/16.8（2026-10-20 修正，原 ¥1/¥4 误记）
     "minimax-m3.1-flash": {"input": 1.0, "output": 4.0, "cache_hit_input": 0.1},  # MiniMax M3.1 Flash（2026-10-19 正式发布，Space Bunny 正式版）：官方 ¥1/¥4/缓存0.1
     "minimax-m2.7": {"input": 2.1, "output": 8.4},  # MiniMax 官方：输入2.1 / 输出8.4
+    # —— 阿里通义千问（官方 RMB，直连 API 刊例价；千问办公 2026-11-16 起 10 款模型可用）——
+    # ⚠️ 这些是各模型直连 API 的 ¥ 刊例价；千问办公平台内按积分倍率计费（0.1x~2.4x），
+    #    两套口径正交。用于「按同款模型直连单价估算的 token 价值」，非订阅真实支出。
+    "qwen4-max": {"input": 10.0, "output": 30.0},   # Qwen4-Max（2026-11-11 预览/11-16 千问办公首发）：百炼 ¥10/¥30
+    "qwen3.8-max": {"input": 12.0, "output": 36.0, "cache_hit_input": 1.5},  # Qwen3.8-Max（qwen3.8-max-0902）：百炼 ¥12/¥36/缓存1.5
+    "qwen3.8-max-preview": {"input": 12.0, "output": 36.0, "cache_hit_input": 1.5},  # Qwen3.8-Max 档真实 trace id（千问办公实测）：同 qwen3.8-max 同价，两条并存兜底
+    "qwen3.8-flash": {"input": 0.8, "output": 2.7, "cache_hit_input": 0.1},  # Qwen3.8-Flash（2026-08-26 发布）：百炼现行 ¥0.8/¥2.7/缓存0.1
+    "ling-3.1-flash": {"input": 0.0, "output": 0.0},  # 蚂蚁 Ling-3.1-Flash：官方定价页 ¥0（限时免费两周，后续费率未公布）
     # —— Kimi（官方 RMB）——
     "kimi-k3": {"input": 20.0, "output": 100.0},    # Kimi K3 官方：输入20 / 输出100
+    "kimi-k3.1-pro": {"input": 13.0, "output": 68.0, "cache_hit_input": 1.3},  # Kimi K3.1 Pro（2026-10-24 发布）：官方 ¥13/¥68/缓存1.3（较 K3 降 35%/32%）
     "kimi-k2.7-code": {"input": 6.5, "output": 27.0}, # Kimi 官方：输入6.5 / 输出27
     "kimi-k2.8-preview": {"input": 6.5, "output": 27.0, "cache_hit_input": 1.7},  # Kimi K2.8 Preview（2026-09-11 上线，kimi-for-coding 升级）：¥6.5/¥27/缓存1.7
     "kimi-k2.6": {"input": 6.5, "output": 27.0},    # Kimi 官方：输入6.5 / 输出27
@@ -296,6 +333,9 @@ def _load_pricing_config():
         "display_merge": {},
         "mode_rates": {},
         "mode_rates_meta": {},
+        "entry_tiers": dict(QWENWORK_ENTRY_TIERS),
+        "entry_model_map": {k: list(v) for k, v in ENTRY_MODEL_MAP.items()},
+        "credits_index": dict(CREDITS_INDEX),
     }
     cfg_path = here / "pricing.json"
     if cfg_path.exists():
@@ -341,6 +381,17 @@ def _load_pricing_config():
                     {normalize_model(k): str(v) for k, v in data["display_merge"].items()
                      if not str(k).startswith("_")}
                 )
+            if isinstance(data.get("entry_tiers"), dict):
+                cfg["entry_tiers"] = {
+                    normalize_model(k): str(v) for k, v in data["entry_tiers"].items()
+                    if not str(k).startswith("_")}
+            if isinstance(data.get("entry_model_map"), dict):
+                cfg["entry_model_map"] = {
+                    normalize_model(k): [dict(x) for x in v if isinstance(x, dict)]
+                    for k, v in data["entry_model_map"].items()
+                    if not str(k).startswith("_") and isinstance(v, list)}
+            if isinstance(data.get("credits_index"), dict):
+                cfg["credits_index"] = dict(data["credits_index"])
             if isinstance(data.get("mode_rates"), dict):
                 # 档位估算单价（倍率锚定法）：fast / balanced / extreme →
                 # {alias, label, multiplier, input, output}。并入 cfg["mode_rates"]。
@@ -389,6 +440,17 @@ def _load_pricing_config():
                      for k, v in local["scheduled_pricing"].items()
                      if not str(k).startswith("_")}
                 )
+            if isinstance(local.get("entry_tiers"), dict):
+                cfg["entry_tiers"].update(
+                    {normalize_model(k): str(v) for k, v in local["entry_tiers"].items()
+                     if not str(k).startswith("_")})
+            if isinstance(local.get("entry_model_map"), dict):
+                cfg["entry_model_map"].update(
+                    {normalize_model(k): [dict(x) for x in v if isinstance(x, dict)]
+                     for k, v in local["entry_model_map"].items()
+                     if not str(k).startswith("_") and isinstance(v, list)})
+            if isinstance(local.get("credits_index"), dict):
+                cfg["credits_index"].update(local["credits_index"])
             if isinstance(local.get("mode_rates"), dict):
                 # 本地覆盖也允许改档位估算单价（优先级高于发布版 pricing.json）
                 cfg["mode_rates"].update(local["mode_rates"])
@@ -449,6 +511,12 @@ DELISTED_MODELS = _PRICING.get("delisted_models", set())
 
 DISPLAY_MERGE = _PRICING.get("display_merge", {})
 
+QWENWORK_ENTRY_TIERS = _PRICING.get("entry_tiers", {})
+
+ENTRY_MODEL_MAP = _PRICING.get("entry_model_map", {})
+
+CREDITS_INDEX = _PRICING.get("credits_index", {})
+
 MODE_RATES_META = _PRICING.get("mode_rates_meta", {})
 
 def merge_display_key(name):
@@ -456,6 +524,59 @@ def merge_display_key(name):
     if not name:
         return name
     return DISPLAY_MERGE.get(normalize_model(name), name)
+
+
+def is_entry_tier(model):
+    """该模型 id 是否为「档位入口」（无单一单价、不进未配置清单、不出金额）。
+
+    入口 id 可能以 `qwenwork:pro` 或裸 `pro` 两种形态出现（trace model_key 带前缀，
+    聚合后 exec_model 为裸名）。两种形态都识别；通道前缀只认 qwenwork，避免
+    WorkBuddy 源里恰好同名的模型被误判（零漂移硬约束）。
+    """
+    if not model:
+        return False
+    name = normalize_model(model)
+    # 显式登记的入口 id（带 qwenwork: 前缀）
+    if name in QWENWORK_ENTRY_TIERS:
+        return True
+    # 配置里从 qwenwork:xxx 派生出的裸名集合（如 pro）——§3.1 的 exec_model 是裸名。
+    # 只认这份派生集合，WorkBuddy 自己的 *-flash / *-pro 不会误命中（零漂移）。
+    qwenwork_bare = {
+        normalize_model(k).split(":", 1)[-1] for k in QWENWORK_ENTRY_TIERS
+        if normalize_model(k).startswith("qwenwork:")
+    }
+    return name in qwenwork_bare
+
+
+def resolve_entry_model(model, date):
+    """把「底层已公开的档位入口」按生效日映射为具名模型；不适用返回 None。
+
+    date 为 YYYY-MM-DD 字符串。按 from<=date 取最后一条（可表达历史变更）。
+    规则可带 enabled=False（推断映射默认关闭，直接跳过）/ inferred=True（需注记），
+    缺省 enabled 视为 True。仅 qwenwork 通道；映射表来自 pricing.json 的
+    entry_model_map（可被 local 覆盖）。
+    """
+    if not model or not date:
+        return None
+    name = normalize_model(model)
+    key = name if name in ENTRY_MODEL_MAP else None
+    if key is None:
+        # 裸名（§3.1 exec_model）或带前缀名都映射到 qwenwork 配置的裸名
+        bare = name.split(":", 1)[-1]
+        for cand in ENTRY_MODEL_MAP:
+            if normalize_model(cand).split(":", 1)[-1] == bare:
+                key = cand
+                break
+    if key is None:
+        return None
+    applicable = [r for r in ENTRY_MODEL_MAP.get(key, [])
+                  if isinstance(r, dict)
+                  and r.get("enabled", True) is not False
+                  and str(r.get("from", "")) <= str(date)]
+    if not applicable:
+        return None
+    chosen = applicable[-1].get("model")
+    return normalize_model(chosen) if chosen else None
 
 USER_CUSTOM_MODELS = _PRICING.get("user_custom_models", set())
 

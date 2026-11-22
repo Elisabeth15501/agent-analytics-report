@@ -40,12 +40,27 @@ trace / session schema，复用同一套聚合与报告渲染逻辑，无需 Wor
     可读名「记忆整理后台任务（awareness nudge）」，报告据此把它从 Top 榜摘出去。
 
 计价
-  trace 的 model_key 统一为 `qwenwork:<档位>`（档位取服务端下发的标识符，如
-  flash / pro / qwork-lite / qmodel_latest）。千问办公没有公开的单 token 刊例价，
-  故 pricing.json 里**故意不配**这些档位：未命中单价时按技能既有约定处理
-  （计入 token、不计成本、报告中给出补价提示）。想看到金额，在
-  scripts/pricing.local.json 里按裸档位名补价即可（price_of 会剥掉前缀查表）：
-      {"flash": {"input": 1.2, "output": 4.8}, "pro": {"input": 7.2, "output": 28.8}}
+  trace 的 model_key 统一为 `qwenwork:<模型名>`，price_of 剥掉前缀后按裸名查
+  pricing.json 的 models 段。2026-11-16 起千问办公上线 10 款新模型（此前仅标准/
+  高级/Qwen3.8-Max 三档），下列模型已在 models 段按**直连 API 官方 ¥ 刊例价**
+  配好，可自动计价（trace id 以服务端下发为准，UI 展示名可能带空格/大小写差异，
+  normalize_model 已统一转小写去空白）。⚠️ 注意：后缀差异（如 `-preview`）
+  **不在 normalize_model 的归一范围内**（它只 strip+lower，不删后缀），
+  resolve_model 也无别名机制 —— 这类差异只能靠 pricing.json 里**显式别名
+  key**（如 qwen3.8-max-preview）兜住，不能指望自动归一。实测例外：
+  Qwen3.8-Max 档的真实 trace id 带 `-preview` 后缀（qwen3.8-max-preview），
+  已与无后缀名双 key 配价、并经 display_merge 合并为一行显示
+  （计费各按各自 trace 的 exec_model）：
+      qwen4-max(10/30) / qwen3.8-max-preview(12/36，无后缀 qwen3.8-max 并存) /
+        qwen3.8-flash(0.8/2.7)
+      kimi-k3.1-pro(13/68) / ling-3.1-flash(0/0 限免)
+      + 同名复用的 glm-5.3 / glm-5.3-flash / minimax-m3.1-flash /
+        deepseek-v4.1-flash / deepseek-v4-pro / step-5-preview
+  ⚠️ 千问办公平台内按**积分倍率**计费（客户端 0.1x~2.4x），与直连 API ¥ 刊例价
+     是两套正交口径：本表 ¥ 金额是「按同款模型直连单价估算的 token 价值」，
+     非订阅真实支出；且 token 多为字符估算（见上方），成本属 L2 估算级。
+     5 个新模型已在 pricing.json low_confidence 段逐条标注该偏差。
+  如需改用本机口径，在 scripts/pricing.local.json 里按裸模型名覆盖单价即可。
 """
 
 import hashlib
@@ -66,21 +81,25 @@ from ca_core import (  # noqa: E402
     CACHE_DISCOUNT,
     call_time_of,
     effective_tokens_of,
+    is_entry_tier,
     is_scheduled_free,
     is_timed_free,
     iso_to_date,
     normalize_model,
     price_of,
+    resolve_entry_model,
     resolve_model,
 )
 from ca_sessions import classify_task  # noqa: E402
 
 __all__ = [
     "QWENWORK_CHANNEL",
+    "TIER_ENTRY_IDS",
     "collect_qwenwork",
     "collect_qwenwork_sessions",
     "collect_qwenwork_traces",
     "estimate_tokens",
+    "model_id_timeline",
     "load_db_index",
     "load_run_usage",
     "resolve_qwenwork_db",
@@ -90,13 +109,30 @@ __all__ = [
 # 本适配器产出的 trace 统一走此通道（ca_core.parse_channel 识别 qwenwork: 前缀）
 QWENWORK_CHANNEL = "qwenwork"
 
-# 显式能力声明：千问办公**在语义上不支持「计费」维度**，而不是「这次恰好没配单价」。
-# 依据：① 积分订阅制、无公开单 token 刊例价；② 账号级积分无法归因到单个会话，
-# 因此即便用户在 pricing.local.json 里填了档位单价，算出来的 ¥ 也是无法对账的虚构值。
-# 生成器据此压制「本期有未配置单价的模型 + pricing.local.json 补价 stub」整块
-# （见 generate_report._show_unconfigured_block），不靠「单价全 0」隐式推断——
-# 将来千问真出可计价套餐时，把这个标记改成 True 即可，无需回头改渲染逻辑。
-SUPPORTS_COST = False
+# 档位入口 id 族（显式声明，非字符串前缀猜测）：8 月老名 + 10 月起现名。
+#   qmodel_latest(前沿) / qwork-lite(经济) / qwork-auto(自动) / qwork-advanced(高级)
+#   flash(标准) / pro(高级)
+# 全部无单一 ¥ 单价（flash>=2026-08-26 例外：底层 Qwen3.8-Flash 已公开，由
+# entry_model_map 归一后按具名模型计价）。权威源是 pricing.json 的 entry_tiers，
+# 可被 pricing.local.json 覆盖；本集合用于「显式声明 + 防漂移断言」，运行时判定
+# 仍走 ca_core.is_entry_tier()。零漂移：仅 qwenwork 通道 id，WorkBuddy 的 auto /
+# *-flash / *-pro 均不在集合内。
+TIER_ENTRY_IDS = frozenset({
+    "qwenwork:flash", "qwenwork:pro",
+    "qwenwork:qmodel_latest", "qwenwork:qwork-lite",
+    "qwenwork:qwork-auto", "qwenwork:qwork-advanced",
+})
+
+# 显式能力声明：千问办公**支持「计费」维度**（2026-11-22 起）。
+# 依据：2026-11-16 千问办公上线 10 款具名新模型（此前仅标准/高级/Qwen3.8-Max 三档），
+# 各模型官方直连 API ¥ 刊例价已公开并配入 pricing.json 的 models 段（见文件头「计价」），
+# trace 可按裸模型名命中单价、正常计价。
+# ⚠️ 口径仍需注意：平台内按积分倍率计费（0.1x~2.4x）与 ¥ 刊例价正交；token 多为字符
+#    估算、账号级积分无法归因到单会话 → 本表 ¥ 属 L2 估算的 token 价值、非订阅真实支出，
+#    5 个新模型已在 pricing.json low_confidence 段标注。生成器据此保留成本块显示
+#    （见 generate_report._show_unconfigured_block），不再整块压制。
+# 历史：此前为 False（当时仅档位、无具名模型与刊例价），2026-11-22 随 10 模型上线改 True。
+SUPPORTS_COST = True
 
 _UNKNOWN_MODEL = "qwenwork-default"
 
@@ -710,9 +746,15 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
         model = _raw_name or _UNKNOWN_MODEL
         bare = normalize_model(model)
         model_key = "%s:%s" % (QWENWORK_CHANNEL, bare)
-        pricing_model = resolve_model(bare)
+        # 档位入口的带生效日归一（如 flash >= 2026-08-26 → qwen3.8-flash）：
+        # 只改「实际执行模型 / 计价键」，保留 model_key（§3.2 入口维度仍显示 flash）、
+        # requestId 去重与 token 估算不变。底层未公开的档位（pro / <08-26 的 flash）
+        # resolve 为 None → 保持裸名，由 ca_billing 判为档位入口、不出 ¥、不进未配置清单。
+        exec_bare = resolve_entry_model(model_key, date) or bare
+        pricing_model = resolve_model(exec_bare)
         _when = call_time_of(g["ts"], date)
-        ip, op = price_of(model_key, **_when)
+        _pricing_key = "%s:%s" % (QWENWORK_CHANNEL, exec_bare)
+        ip, op = price_of(_pricing_key, **_when)
         if ip is not None and op is not None:
             input_cost = (in_tok / 1_000_000) * ip
             output_cost = (out_tok / 1_000_000) * op
@@ -739,12 +781,18 @@ def _parse_session_file(path, start_date, end_date, run_usage=None):
             "output_tokens": out_tok,
             "cached_tokens": cache_read,
             "call_count": 1,
-            "models": [bare],
-            "model_name": bare,
-            "exec_model": bare,
+            # §3.1 执行维度用归一后的模型（flash>=08-26 → qwen3.8-flash）；
+            # §3.2 入口维度 model_key 保留原始档位 id（flash / pro）。
+            "models": [exec_bare],
+            "model_name": exec_bare,
+            "exec_model": exec_bare,
             "model_key": model_key,
             "channel": QWENWORK_CHANNEL,
             "raw_model": model_key,
+            # 档位入口标记（TIER_ENTRY_IDS + ca_core.is_entry_tier 显式声明，非按名字猜）：
+            # 六个 id 族全部不出 ¥、不进未配置清单；flash>=08-26 已归一为具名模型，
+            # exec_bare != bare 故自动取消入口标记、正常计价。零漂移：仅 qwenwork 源产生。
+            "_is_entry_tier": bool(is_entry_tier(model_key)) and exec_bare == bare,
             "total_cost": round(cost, 4),
             "input_cost": round(input_cost, 4),
             "output_cost": round(output_cost, 4),
@@ -1130,6 +1178,33 @@ def collect_qwenwork_traces(start_date, end_date, home=None, projects_root=None,
     traces, _, _ = _assemble(start_date, end_date, home=home,
                              projects_root=projects_root, db_path=db_path)
     return traces
+
+
+def model_id_timeline(traces):
+    """按 model id 聚合首次/末次出现日期与调用次数（自证工具，替代文档假设）。
+
+    口径与采集一致：输入 traces 必须是已按 requestId 全局去重的结果
+    （即 collect_qwenwork_traces 的返回值），不在这里二次去重。
+    model id 取 `model_key` 的裸名（保留 flash / pro 等原始入口 id，
+    而非 §3.1 归一后的 exec_model）——这样才能回答「本机 flash 是否早于
+    2026-08-26 出现」这类平台时间线问题。
+
+    返回 list[dict]，按首次日期升序、model id 升序：
+      {model, first_date, last_date, calls}
+    """
+    agg = {}
+    for t in traces or []:
+        mk = t.get("model_key") or t.get("raw_model") or t.get("model_name") or ""
+        name = str(mk).split(":", 1)[-1].strip().lower() or "unknown"
+        date = t.get("date") or ""
+        rec = agg.setdefault(name, {"model": name, "first_date": date,
+                                    "last_date": date, "calls": 0})
+        rec["calls"] += 1
+        if date and date < rec["first_date"]:
+            rec["first_date"] = date
+        if date and date > rec["last_date"]:
+            rec["last_date"] = date
+    return sorted(agg.values(), key=lambda r: (r["first_date"], r["model"]))
 
 
 def collect_qwenwork_sessions(start_date, end_date, home=None, projects_root=None,

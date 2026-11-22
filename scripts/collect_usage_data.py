@@ -102,6 +102,7 @@ from ca_core import (
     discover_custom_models,
     effective_tokens_of,
     glm52_discount_multiplier,
+    is_entry_tier,
     is_router_like,
     is_scheduled_free,
     is_timed_free,
@@ -836,10 +837,14 @@ def main():
     for stats in (result["model_stats"], result["model_exec_stats"]):
         for m in stats:
             # 已下架官方模型不算「缺失单价」——它们本就无需用户补写，仅标注即可
+            # 档位入口（qwenwork pro / flash）也不算——入口非模型、底层未公开，
+            # 让用户补一个凭空的 ¥ 单价会污染账单口径（见 ca_core.QWENWORK_ENTRY_TIERS）。
             if (
                 not m.get("configured")
                 and m.get("model") not in ROUTER_ALIASES
                 and not m.get("is_delisted")
+                and not m.get("is_entry_tier")
+                and not is_entry_tier(m.get("model"))
             ):
                 unconfigured.add(m["model"])
     # 「入口维度」与「执行维度」可能对同一个底层模型各记一次（如 `qwenwork:flash`
@@ -874,11 +879,14 @@ def main():
     result["meta"]["cost_mode"] = cost_mode
     if cost_mode == "tokens_only":
         print(
-            "[INFO] 计价模式=tokens_only：本期无任何命中单价（未配置："
-            + "、".join(sorted(unconfigured)[:6])
-            + ("…" if len(unconfigured) > 6 else "")
-            + "），报告将隐藏金额维度；要出金额请在 scripts/pricing.local.json 补单价，"
-            "或加 --cost-mode priced 强制保留现状。",
+            "[INFO] 计价模式=tokens_only：本期无命中单价的模型"
+            + ("（未配置具名模型：" + "、".join(sorted(unconfigured)[:6])
+               + ("…" if len(unconfigured) > 6 else "") + "）"
+               if unconfigured else "（本期仅档位入口/底层未公开模型，无具名模型可计价）")
+            + "，报告将隐藏金额维度；"
+            + ("具名模型可在本机 scripts/pricing.local.json 补单价；"
+               if unconfigured else "档位入口底层模型未公开，补单价无依据、请勿臆造；")
+            + "或加 --cost-mode priced 强制保留现状。",
             file=sys.stderr,
         )
     # 限时免费截止日（来自 pricing.json 的 timed_free），供报告渲染「限时免费至 X」标签，
