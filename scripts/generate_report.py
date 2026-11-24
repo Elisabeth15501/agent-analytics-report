@@ -646,10 +646,16 @@ def build_model_section(fmt, data):
         )
         lines.append("")
         if hidden:
+            _generic_src = str(meta.get("source") or "") == "generic"
+            _no_cost_note = (
+                "（通用数据源不提供可核对的计费口径）"
+                if _generic_src
+                else "（免得满屏 `¥0.00` 被读成「免费」）"
+            )
             lines.append(
                 "按模型统计调用次数与实际消耗 Token。**本报告为 tokens_only 计价模式："
                 "本期没有任何模型命中单价，故金额、占比与「最贵模型」结论一律不出**"
-                "（免得满屏 `¥0.00` 被读成「免费」）。"
+                + _no_cost_note
                 + (
                     "§3.1 按实际执行模型统计使用量。"
                     if _skip32
@@ -836,10 +842,15 @@ def build_model_section(fmt, data):
         else '        <h2 class="section-title">三、模型使用对比</h2>'
     )
     if hidden:
+        _no_cost_html = (
+            "（通用数据源不提供可核对的计费口径）"
+            if str(meta.get("source") or "") == "generic"
+            else "（免得满屏 <code>¥0.00</code> 被读成「免费」）"
+        )
         lines.append(
             "        <p>按模型统计调用次数与实际消耗 Token。<b>本报告为 tokens_only 计价模式："
             "本期没有任何模型命中单价，故金额、占比与「最贵模型」结论一律不出</b>"
-            "（免得满屏 <code>¥0.00</code> 被读成「免费」）。</p>"
+            f"{_no_cost_html}</p>"
         )
     else:
         lines.append(
@@ -3143,22 +3154,48 @@ def _cost_hidden_banner(fmt, data):
         "`¥0.00` 与「未配置」，反而容易被误读成「免费」或「采集失败」。"
         "Token / 调用次数 / 耗时 / 任务维度不受影响。" % why
     )
+    # 通用数据源：本就没有可对账的刊例价，补价 stub 对他无意义（A3 零命中）；
+    # 改为展示 token 分层口径与中文 L4 偏差提示（A11/A13）。仅限 generic 源，
+    # 其余源沿用历史文案，保证五源零漂移。
+    is_generic = str(meta.get("source") or "") == "generic"
+    layers = meta.get("tokens_source_layer_summary") or {}
+    notice = meta.get("tokens_notice") or ""
+    layer_rows = []
+    for layer in ("L2", "L3", "L4", "missing"):
+        if layer in layers:
+            row = layers[layer] or {}
+            layer_rows.append(
+                f"{layer}：{row.get('traces', 0)} 条 / {row.get('tokens', 0)} token"
+            )
+    layer_line = "；".join(layer_rows)
+    if is_generic:
+        # A1：generic 报告全篇零金额符号——连「不提供金额」的解释也不出现 ¥
+        body = ("通用数据源未覆盖该 Agent 的计费口径，本报告不提供金额维度；"
+                "Token / 调用次数 / 耗时 / 任务维度不受影响。")
+        howto = "如需金额，请先为该 Agent 提供可核对的单价口径与专用适配器。"
     if fmt == "html":
-        return [
+        lines = [
             '        <div class="disclaimer-box">',
             "            <p>ℹ️ <b>计价模式：tokens_only（仅用量，不计价）</b></p>",
             f"            <p>{body.replace('**', '')}</p>",
             f"            <p>{howto.replace('`', '')}</p>",
-            "        </div>",
         ]
-    return [
+        if is_generic and layer_line:
+            lines.append(
+                f"            <p>ℹ️ <b>通用数据源 token 分层</b>：{layer_line}。"
+                f"{notice}</p>"
+            )
+        return lines + ["        </div>"]
+    lines = [
         f"> ℹ️ **计价模式：tokens_only（仅用量，不计价）**",
         ">",
         f"> {body}",
         ">",
         f"> {howto}",
-        "",
     ]
+    if is_generic and layer_line:
+        lines += [">", f"> ℹ️ **通用数据源 token 分层**：{layer_line}。", f"> {notice}"]
+    return lines + [""]
 
 
 def _cost_confidence_banner(fmt, data):

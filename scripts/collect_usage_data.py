@@ -231,8 +231,10 @@ def main():
     )
     parser.add_argument(
         "--source",
-        choices=["workbuddy", "claude-code", "codex", "qwenwork", "dumate"],
-        default="workbuddy",
+        choices=[
+            "workbuddy", "claude-code", "codex", "qwenwork", "dumate", "generic", "auto"
+        ],
+        default="auto",
         help="数据源：workbuddy=默认（WorkBuddy traces/workbuddy.db/usage-log），"
         "claude-code=读取 ~/.claude/projects/ 下的 Claude Code 会话 JSONL（P2-1 适配器 MVP）。"
         "claude-code 模式无需 WorkBuddy 环境，成本按 pricing.json 中 Claude 模型估算价计算。"
@@ -242,7 +244,11 @@ def main():
         "agents.db 会话元信息），无需 WorkBuddy 环境；"
         "千问办公上游不回传 token，故 token 为字符估算、成本未计价；"
         "dumate=百度搭子（DuMate）数据源：读 ~/.workbuddy/（与 WorkBuddy 同布局），"
-        "可用 DUMATE_HOME 环境变量覆盖数据目录",
+        "可用 DUMATE_HOME 环境变量覆盖数据目录；"
+        "generic=通用数据源（JSONL/SQLite 双 reader，零金额、tokens-only，"
+        "只读 GENERIC_HOME/GENERIC_PROJECTS_DIR 指定目录）；"
+        "auto=默认，按 workbuddy>claude-code>codex>qwenwork>generic 探测，"
+        "全不命中走 generic；显式指定 --source 时完全绕过探测",
     )
     parser.add_argument(
         "--cost-mode",
@@ -306,6 +312,25 @@ def main():
         help="官方导出工作表名（默认取第一个工作表；官方固定为 'Usage Details'）",
     )
     args = parser.parse_args()
+
+    # ── 阶段 2（P0）：auto 探测与互斥选择 ──
+    # 兼容闸门：--import-official 历来只支持 workbuddy，旧脚本常省略 --source
+    # （靠历史默认值 workbuddy）。默认改为 auto 后若让探测把它判成 generic，
+    # 老命令会直接 exit 2 —— 属于用户功能退化，故先把这类调用锚回 workbuddy。
+    # 用户显式传了非 workbuddy 时仍由下方检查报错，不改变原语义。
+    if args.import_official and args.source == "auto":
+        args.source = "workbuddy"
+    # 探测结果就地写回 args.source：后续所有分支与统计只看具体源名，
+    # 批次 5 搬 collect_from_source 时可原样搬走分发链，不必搬探测逻辑。
+    # 显式 --source 在 detect_source 内直接返回，完全绕过探测（S2.5）。
+    from ca_detect import detect_source
+
+    args.source = detect_source(args.source)["source"]
+    if args.source == "generic":
+        # S1.8：通用源显式强制 tokens-only。_decide_cost_mode 的 auto 只认
+        # has_priced_model，若 generic 模型名恰好命中价表会被切回 priced；
+        # 这里在入口处锁死口径，不靠「恰好没单价」隐式推断。
+        args.cost_mode = "tokens-only"
 
     # 官方导出只对 WorkBuddy 源有意义：claude-code / codex 没有官方积分账单可对
     if args.import_official and args.source != "workbuddy":
@@ -501,6 +526,29 @@ def main():
             f"（数据目录 {DUMATE_HOME}）",
             file=sys.stderr,
         )
+    elif args.source == "generic":
+        # ── 通用数据源（阶段 1 / P0）──
+        # 只读显式根目录，JSONL/SQLite 双 reader；金额恒为 0，
+        # token 逐条带 tokens_source 分层标记，报告端走 tokens_only 口径。
+        from adapters.generic import collect_generic, SUPPORTS_COST
+
+        # 能力显式声明：不靠「本期单价全 0」隐式推断（红线 1）
+        cost_supported = SUPPORTS_COST
+        traces, db_data = collect_generic(start_date, end_date)
+        sid_to_rawmodel = {
+            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
+        }
+        skill_usage = db_data.get("skill_usage") or {
+            "skills": {}, "active_days": sorted({t["date"] for t in traces})
+        }
+        outputs = db_data.get("outputs") or []
+        # 红线 6：通用源不构造 memory_logs，避免把用户目录内容带进报告
+        memory_logs = {}
+        source_meta.update(db_data.get("_meta") or {})
+        # 适配器不做预分类；与 dumate 同理必须无条件直采，
+        # 否则没有 task_type 键的会话会整列塌成「其他」。
+        task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+
     else:
         # ── WorkBuddy 默认数据源 ──
         db_data = collect_db_data(start_date, end_date)
@@ -611,7 +659,7 @@ def main():
     # token 口径标记：WorkBuddy / claude-code / codex 的 token 是上游回传的真值，
     # 成本才是估算（L2）；千问办公源连 token 都是本地字符估算，
     # 显式落一个 meta 位，避免读者把估算 token 当成账单口径引用。
-    if args.source == "qwenwork":
+    if args.source in ("qwenwork", "generic"):
         result["meta"]["tokens_source"] = "estimated"
 
     # 统计摘要
