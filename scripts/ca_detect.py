@@ -3,8 +3,9 @@
 职责边界：
   * **只判路径存在性**，不打开任何数据库、不读会话内容；
   * 复用各适配器已有 ``resolve_*_home()``，不硬编码新路径；
-  * 固定优先级 ``workbuddy > claude-code > codex > qwenwork > generic``；
-  * ``dumate`` 明确排除（归属未证实，v1.9.0 红线）；
+  * 固定优先级 ``workbuddy > claude-code > codex > qwenwork > dumate > generic``；
+  * dumate 自 2026-11-26 纳入 auto：复用 resolve_dumate_db() 只判 opencode.db 存在性，
+    不打开库、不读内容；优先级在 qwenwork 之后、generic 兜底之前；
   * OpenClaw 只做双路径探测扩展点，不注册 source、不写解析器；
   * 显式 ``--source`` 完全绕过探测（S2.5）。
 
@@ -20,8 +21,9 @@ from pathlib import Path
 
 __all__ = ["PRIORITY", "EXCLUDED_SOURCES", "detect_source"]
 
-PRIORITY = ("workbuddy", "claude-code", "codex", "qwenwork", "generic")
-EXCLUDED_SOURCES = ("dumate",)
+PRIORITY = ("workbuddy", "claude-code", "codex", "qwenwork", "dumate", "generic")
+# 当前无排除源。dumate 于 2026-11-26 纳入 auto（qwenwork 与 generic 之间）。
+EXCLUDED_SOURCES = ()
 
 
 def _safe_dir(path: Path) -> bool:
@@ -59,6 +61,12 @@ def _qwenwork_root():
     return Path(resolve_qwenwork_home())
 
 
+def _dumate_root():
+    """百度搭子 opencode.db 路径（复用专用 reader 的发现逻辑，不打开库）。"""
+    from adapters.dumate import resolve_dumate_db
+    return Path(resolve_dumate_db())
+
+
 def _openclaw_layout(root=None):
     from adapters.generic import detect_openclaw_layout
     return detect_openclaw_layout(home=root)
@@ -83,6 +91,16 @@ def _probe(source, root):
             candidate = root / marker
             if _safe_dir(candidate):
                 return True, f"{root}/{marker}"
+    elif source == "dumate":
+        # 百度搭子是 SQLite 文件（opencode.db），不是标志目录；只判存在性、
+        # 不打开库、不读内容。生产 root 即 db 路径；测试可注入目录。
+        candidates = [root] if root.is_file() else [
+            root / "data" / "opencode" / "opencode.db",
+            root / "opencode.db",
+        ]
+        for candidate in candidates:
+            if _safe_file(candidate):
+                return True, str(candidate)
     return False, ""
 
 
@@ -118,6 +136,7 @@ def detect_source(explicit="auto", *, roots=None, env=None, report=True):
         "claude-code": _claude_root,
         "codex": _codex_root,
         "qwenwork": _qwenwork_root,
+        "dumate": _dumate_root,
     }
     hits, skipped = {}, {}
     for name in PRIORITY:
@@ -166,8 +185,8 @@ def detect_source(explicit="auto", *, roots=None, env=None, report=True):
         for name, why in skipped.items():
             print(f"[INFO]   跳过 {name}：{why}", file=sys.stderr)
         print(
-            "[INFO]   dumate 不参与自动探测（归属未证实）；"
-            "OpenClaw 仅探测扩展点、未实现解析器",
+            "[INFO]   dumate 已纳入自动探测（qwenwork 之后、generic 之前，"
+            "只判 opencode.db 存在性）；OpenClaw 仅探测扩展点、未实现解析器",
             file=sys.stderr,
         )
     return decision

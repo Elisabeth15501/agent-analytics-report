@@ -248,8 +248,9 @@ def main():
         "DUMATE_DB_PATH 可显式覆盖；"
         "generic=通用数据源（JSONL/SQLite 双 reader，零金额、tokens-only，"
         "只读 GENERIC_HOME/GENERIC_PROJECTS_DIR 指定目录）；"
-        "auto=默认，按 workbuddy>claude-code>codex>qwenwork>generic 探测，"
-        "全不命中走 generic；显式指定 --source 时完全绕过探测",
+        "auto=默认，按 workbuddy>claude-code>codex>qwenwork>dumate>generic 探测，"
+        "只判各源标志存在性（dumate 判 opencode.db 文件），全不命中走 generic；"
+        "显式指定 --source 时完全绕过探测",
     )
     parser.add_argument(
         "--cost-mode",

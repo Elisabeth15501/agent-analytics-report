@@ -499,6 +499,14 @@ DUMATE_DB_PATH=/path/to/opencode.db python scripts/collect_usage_data.py --sourc
 python scripts/generate_report.py data.json --output report.html --format html
 ```
 
+**自动探测（--source auto，默认）**：`scripts/ca_detect.py` 的固定优先级为
+`workbuddy > claude-code > codex > qwenwork > dumate > generic`（dumate 自 2026-11-26
+纳入，位于 qwenwork 与 generic 之间）。各源**只判标志存在性、不打开库、不读内容**：
+dumate 的标志是 `resolve_dumate_db()` 定位到的 `opencode.db` 文件（其它源为标志目录）。
+互斥选择——多源并存只取最高优先级，其余在 stderr 标「命中但优先级低…未采用」，避免双计；
+四源全不命中才回退 generic。显式 `--source dumate` 完全绕过探测。
+测试通过 `DUMATE_DB_PATH` 指向 tmp fixture，绝不读测试机真实百度搭子库。
+
 ### 6.4 已知边界
 
 - **模型口径**：仅显示实际出现的模型标识（实测主要为 `glm-5`），未确认是否覆盖全部底层模型；
