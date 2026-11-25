@@ -162,8 +162,11 @@ def compute_transparency_counts(bundle, totals):
         sum(t.get("alt_hy3_cost") or 0.0 for t in tier_traces), 4)
     # 3) 失败调用：单独成列而非剔除——同样消耗 token / 可能计费
     error_traces = sum(1 for t in traces if t.get("is_error"))
-    # 缓存占比：缓存命中 token 占输入 token 的比例
-    cache_rate = (totals.total_cached / totals.total_input * 100) if totals.total_input else 0
+    # 缓存占比：dumate(OpenCode) 的 input 不含 cache.read，分母用 total；
+    # 其余源沿用 cached/input（与 collect_usage_data main 内联段一致）。
+    _is_dumate = str((bundle.source_meta or {}).get("source") or "") == "dumate"
+    _cache_denom = totals.total_tokens if _is_dumate else totals.total_input
+    cache_rate = (totals.total_cached / _cache_denom * 100) if _cache_denom else 0
     return TransparencyCounts(
         unknown_model_traces=unknown_model_traces,
         tier_traces=tier_traces,

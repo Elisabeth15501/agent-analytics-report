@@ -1,241 +1,390 @@
 # -*- coding: utf-8 -*-
-"""adapters/dumate.py — 百度搭子（DuMate）数据源适配器
+"""adapters/dumate.py — 百度搭子（DuMate）专用数据源适配器（2026-11-25 重写）
 
-把百度搭子桌面客户端（qianfan-desktop-app / DuMate）的本地用量数据归一化为
-agent-analytics-report 的统一 trace / session schema，复用同一套聚合与报告
-渲染逻辑。
+数据归属（实证，2026-11-25）
+  百度搭子桌面客户端 qianfan-desktop-app / DuMate 的真实用量数据在：
+    %APPDATA%/qianfan-desktop-app/qianfan_desk_xdg/<uid-hash>/
+      data/opencode/opencode.db
+  实测 schema 为 OpenCode 旧代：session(77) / message(1771) / part(6952)，
+  token 藏在 message.data JSON 的 tokens{total,input,output,reasoning,
+  cache:{read,write}}，同条消息还带 modelID / providerID / requestID，
+  是上游回传的 L2 真值（不是本地字符估算）。
 
-背景（数据归属未证实）
-  百度搭子客户端当前的数据**按 WorkBuddy 的布局**落在 `~/.workbuddy`，本适配器
-  因此按 WorkBuddy 那套路径常量读取该目录：
-    - ~/.workbuddy/traces/<pid>/trace_*.json   （token / 模型 / 时长）
-    - ~/.workbuddy/workbuddy.db                 （会话 / 自动化 / 信用）
-    - ~/.workbuddy/usage-log.json               （技能使用记录）
-    - ~/.workbuddy/projects/ + sessions/        （会话转录定位）
-    - ~/WorkBuddy/<会话目录>                     （产出文件 / 记忆日志）
-  ⚠️**数据归属未证实**：这些记录里没有任何字段能区分它来自百度搭子还是
-  WorkBuddy。本机 `workbuddy.db` 的 217 个会话中，cwd / title 匹配
-  qianfan / dumate 关键词命中 0 行、`id LIKE 'ses_%'` 命中 0 行；1165 个
-  trace 里既无 `ses_` 形态的 sessionId，也没有任何归属字段。百度搭子自己的
-  数据落在 `~/.qianfan/workspace/.../.dumate/ses_*/flows/*.yml`，是 yml 流转
-  格式，不是本技能的 trace schema。也就是说 `--source dumate` 跑出来的内容
-  **可能完全是 WorkBuddy 的**。详细边界见 docs/ADAPTERS.md §6.4。
-  所以本适配器的定位是「读取 WorkBuddy 布局目录的通用入口」，**归属由使用者
-  自行确认**；不作为「已验证支持百度搭子」的能力对外承诺。
+  ⚠️ 此前版本把数据源默认指向 ~/.workbuddy（"归属未证实" 保守假设），实跑证明
+  那条链读到的 100% 是 WorkBuddy 自己的库，与百度搭子无关，已废弃。
+  本适配器与 --source generic 完全独立：自带专用 reader，不读 generic 的
+  schema profile，也不复用 ca_sources 的 WorkBuddy 路径常量。
 
-  那适配器还有什么用？三个职责，缺一不可：
-    1. **显式声明口径**：`--source dumate` 让报告标题 / 来源清单显示
-       「百度搭子」，标明本次采集走的是这个入口，而不是借 workbuddy 的名义
-       冒充另一份数据源——它并不证明数据是百度搭子的；
-    2. **路径隔离**：支持 `DUMATE_HOME` 环境变量覆盖数据目录（默认
-       ~/.workbuddy），另可用 `DUMATE_OUTPUTS_DIR` 单独覆盖产出 / 记忆目录。
-       若 dumate 更换数据布局 / 迁移目录，或在多账号场景下，只需在该适配器
-       内部重映射路径，不改采集器与报告端；
-    3. **可测试隔离**：测试通过 `DUMATE_HOME` 把 fixture 指向 tmp_path，
-       绝不读取用户真实目录（与 CLAUDE_PROJECTS_DIR / QWENWORK_HOME 同约定）。
+  本应用只录入本地会话数据：全链路只读本地 SQLite（mode=ro），不联网、
+  不上传、不读取 credential/account/token 等敏感表。
 
-实现方式
-  采集链路既然读的是 WorkBuddy 那套布局常量，直接复用 ca_sources 的函数
-  （collect_db_data / collect_traces / collect_skill_usage /
-  collect_session_outputs）。ca_sources 的路径常量是模块级名字，因此
-  collect_dumate 在调用前临时替换 ca_sources 模块命名空间里的路径常量，
-  调用结束后恢复 —— 与 qwenwork / claude-code 适配器「自带路径解析」相比，
-  本适配器把「路径可变」做在模块名字层，改动面最小，且不触碰
-  collect_usage_data.py 的 workbuddy 默认分支。
+计费口径
+  SUPPORTS_COST=False：百度搭子底层模型标识（glm-5 等）是否有可核对刊例价
+  尚未确认，不做任何金额推断；报告强制 tokens-only，只显示模型 / token /
+  调用维度，全篇零金额。
+
+隐私边界
+  - 数据库路径由 DUMATE_DB_PATH 显式指定或按固定目录自动发现，不递归用户 home；
+  - 只读打开（mode=ro + timeout），锁冲突显式告警降级，绝不静默读空；
+  - 仅 SELECT session / message 两张白名单表；part / control_account /
+    memory_chunk / session_share 等表一律不访问（只从 sqlite_master 读表名用于探测）；
+  - 关闭符号链接跟随：发现路径若含符号链接则跳过。
 """
 
 import contextlib
+import json
 import os
 import sqlite3
-from pathlib import Path
-
 import sys
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
 _SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import ca_sources as cs  # noqa: E402
 from ca_core import ts_to_date  # noqa: E402
 
 __all__ = [
-    "DUMATE_HOME",
+    "DUMATE_DB_PATH",
     "SUPPORTS_COST",
     "collect_dumate",
+    "resolve_dumate_db",
     "resolve_dumate_home",
 ]
 
-# 显式能力声明：token 为上游回传真值（读的是 WorkBuddy 的 traces，非本地估算），
-# 成本可走静态价表估算（L2），支持 `--import-official` 对账或直接计价。
-# ⚠️ 与「是否支持百度搭子」无关——数据归属未证实，见模块 docstring 与 §6.4。
-SUPPORTS_COST = True
+# 显式能力声明：不提供金额，报告走 tokens-only（见 CLI :329–335 强制口径）。
+SUPPORTS_COST = False
 
-# ca_sources 中依赖 ~/.workbuddy 布局的模块级路径常量（collect_dumate
-# 切换数据目录时逐项替换；key ∈ ca_sources 模块命名空间）。
-_PATH_ATTRS = (
-    "WB_DIR",
-    "TRACES_DIR",
-    "SESSIONS_DIR",
-    "PROJECTS_DIR",
-    "DB_PATH",
-    "USAGE_LOG_PATH",
-    "WORKBUDDY_SESSIONS",
+# 环境变量名（直接指向 opencode.db 文件，或其所在目录）。
+DUMATE_DB_PATH = "DUMATE_DB_PATH"
+
+_TZ = timezone(timedelta(hours=8))
+# 只读白名单：除这两张表外不访问任何表内容（含 part / control_account）。
+_READ_TABLES = ("session", "message")
+_SENSITIVE = (
+    "credential", "credentials", "account", "accounts", "token", "tokens",
+    "secret", "secrets", "auth", "auth_tokens", "api_keys", "keychain",
+    "control_account",
 )
 
 
-def resolve_dumate_home():
-    """定位百度搭子数据目录。
+def _appdata_root():
+    """%APPDATA%（Windows）或 ~/.config（POSIX）下的 qianfan-desktop-app 目录。"""
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        return Path(appdata) / "qianfan-desktop-app"
+    return Path.home() / ".config" / "qianfan-desktop-app"
+
+
+def _is_link(path):
+    """路径任一环节是符号链接就跳过（隐私硬边界）。"""
+    p = Path(path)
+    for part in (p, *p.parents):
+        try:
+            if part.is_symlink():
+                return True
+        except OSError:
+            return True
+        if part == part.parent:
+            break
+    return False
+
+
+def resolve_dumate_db():
+    """定位百度搭子 opencode.db。
 
     优先级：
-      1. 环境变量 DUMATE_HOME —— 直接指向主目录（测试 fixture / 多账号）
-      2. 平台默认：~/.workbuddy（当前按 WorkBuddy 布局读取的目录，归属未证实）
-    返回 Path；目录可能不存在（未使用过百度搭子），调用方负责判空。
+      1. DUMATE_DB_PATH —— 文件或目录，直接指向（测试 fixture / 多账号）
+      2. DUMATE_HOME   —— 兼容旧变量：可指向 db 文件、或含 data/opencode 的根
+      3. 自动发现 —— %APPDATA%/qianfan-desktop-app/qianfan_desk_xdg/*/
+         data/opencode/opencode.db，多个账号取 mtime 最新者
+      4. 未发现时返回保守默认路径（通常不存在），调用方判空走空结果
+
+    返回 Path，可能不存在；只读打开失败时 collect_dumate 返回空结果并打 stderr。
     """
-    env = os.environ.get("DUMATE_HOME")
-    if env:
-        return Path(env).expanduser()
-    return Path.home() / ".workbuddy"
+    for env_name in (DUMATE_DB_PATH, "DUMATE_HOME"):
+        env = os.environ.get(env_name)
+        if not env:
+            continue
+        p = Path(env).expanduser()
+        candidates = [p]
+        if p.is_dir():
+            candidates = [p / "data" / "opencode" / "opencode.db", p / "opencode.db"]
+        for c in candidates:
+            if c.is_file() and not _is_link(c):
+                return c
+        # 显式指定但文件不存在：原样返回，让调用方显式失败/降级，不悄悄回退真实用户目录
+        return candidates[0]
+
+    root = _appdata_root() / "qianfan_desk_xdg"
+    found = []
+    if root.exists() and not _is_link(root):
+        with contextlib.suppress(OSError):
+            for candidate in root.glob("*/data/opencode/opencode.db"):
+                if candidate.is_file() and not _is_link(candidate):
+                    found.append(candidate)
+    if found:
+        return max(found, key=lambda p: p.stat().st_mtime)
+    return root / "data" / "opencode" / "opencode.db"
 
 
-def _child_paths(home):
-    """由数据目录推导出 ca_sources 全套路径常量（与 ca_core 中默认布局一一对应）。
-
-    ⚠️ 注意最后一项：产出 / 记忆日志的会话目录**不直接取 `Path.home()`**，
-    而是过 `_resolve_outputs_dir()` —— 优先 `$DUMATE_OUTPUTS_DIR`，否则由
-    home 的 parent 派生（dumate 的 home 默认 `~/.workbuddy`，parent 正是
-    WorkBuddy 主目录）。若这里写死 `Path.home() / "WorkBuddy"`，把
-    DUMATE_HOME 指到临时目录时 outputs / memory_logs 仍会读回用户真实目录，
-    隔离就名存实亡了（audit hook 实测抓到 17 次真实 HOME 访问）。
-    """
-    home = Path(home)
-    return {
-        "WB_DIR": home,
-        "TRACES_DIR": home / "traces",
-        "SESSIONS_DIR": home / "sessions",
-        "PROJECTS_DIR": home / "projects",
-        "DB_PATH": home / "workbuddy.db",
-        "USAGE_LOG_PATH": home / "usage-log.json",
-        # 产出 / 记忆日志的会话目录按 WorkBuddy 约定在 HOME 的同级 WorkBuddy 下；
-        # DUMATE_HOME=<x>/.workbuddy 时 parent 即 <x>，还原 ca_core 的默认位置。
-        "WORKBUDDY_SESSIONS": _resolve_outputs_dir(home),
-    }
+def resolve_dumate_home():
+    """兼容旧 API：返回 opencode.db 所在目录（data/opencode）。"""
+    return resolve_dumate_db().parent
 
 
-def _resolve_outputs_dir(home):
-    """产出 / 记忆日志的会话目录：DUMATE_OUTPUTS_DIR 优先，否则 home 的同级 WorkBuddy。
-
-    dumate 的 home 默认是 `~/.workbuddy`，其 parent 恰好是 WorkBuddy 主目录，
-    因此默认分支从 home 派生而非 `Path.home()`，这样 DUMATE_HOME 指向临时目录
-    时也会跟着隔离（默认 outputs 落到 <tmp>/WorkBuddy）。
-    """
-    env = os.environ.get("DUMATE_OUTPUTS_DIR")
-    if env:
-        return Path(env).expanduser()
-    return Path(home).parent / "WorkBuddy"
+# 保留旧常量名供外部引用（CLI 已改用 resolve_dumate_db()）。
+DUMATE_HOME = resolve_dumate_db().parent
 
 
-@contextlib.contextmanager
-def _patched_paths(home):
-    """临时把 ca_sources 的路径常量指向 dumate 数据目录，用完恢复。
-
-    用于支持 DUMATE_HOME 覆盖，同时保证多次调用之间无全局状态残留。
-    """
-    new_paths = _child_paths(home)
-    saved = {name: getattr(cs, name) for name in _PATH_ATTRS}
+def _connect_ro(path):
+    """只读打开 opencode.db；锁冲突 / 路径异常返回 None 并显式告警。"""
+    if not path or not Path(path).exists():
+        return None
+    if _is_link(path):
+        print(f"[WARN] dumate 数据源为符号链接，跳过：{path}", file=sys.stderr)
+        return None
+    uri = "file:" + str(path).replace("\\", "/") + "?mode=ro"
     try:
-        for name, value in new_paths.items():
-            setattr(cs, name, value)
-        yield
-    finally:
-        for name, value in saved.items():
-            setattr(cs, name, value)
-
-
-def _supplement_out_of_window_sessions(home, traces, sessions_by_id):
-    """补全窗口内有 trace、但会话创建于窗口外的会话（与 workbuddy 分支同款修复）。
-
-    确保 token 统计能关联到任务类型，且 sid_to_rawmodel 含这些会话的通道
-    真相（sessions.model 带接口通道前缀），避免通道误判。
-    """
-    trace_sids = {t.get("session_id") for t in traces if t.get("session_id")}
-    missing = trace_sids - set(sessions_by_id)
-    if not missing:
-        return []
-    db_path = Path(home) / "workbuddy.db"
-    if not db_path.exists():
-        return []
-    rows = []
-    # 只读打开：WAL 模式下可写连接会额外创建 -wal / -shm，且客户端持锁时
-    # 可写连接会抛 SQLITE_BUSY。参照 adapters/qwenwork.py 的 _db_connect。
-    cdb = None
-    try:
-        uri = "file:" + str(db_path).replace("\\", "/") + "?mode=ro"
-        cdb = sqlite3.connect(uri, uri=True, timeout=1.0)
-        cdb.row_factory = sqlite3.Row
-        ph = ",".join("?" * len(missing))
-        rows = cdb.execute(
-            "SELECT * FROM sessions WHERE id IN ({}) AND deleted_at IS NULL".format(ph),
-            list(missing),
-        ).fetchall()
-    except (sqlite3.Error, OSError):
-        return []
-    finally:
-        if cdb is not None:
-            cdb.close()
-    return [
-        {
-            "id": r["id"],
-            "cwd": r["cwd"],
-            "title": r["title"] or "",
-            "custom_title": r["custom_title"] or "",
-            "status": r["status"],
-            "created_at": r["created_at"],
-            "created_date": ts_to_date(r["created_at"]),
-            "updated_at": r["updated_at"],
-            "mode": r["mode"],
-            "model": r["model"],
-            "is_background_automation": bool(r["is_background_automation"]),
+        connection = sqlite3.connect(uri, uri=True, timeout=1.0)
+        connection.row_factory = sqlite3.Row
+        # 只读校验：到 sqlite_master 取表名（不读表内容），顺便探测 schema。
+        tables = {
+            r[0] for r in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
         }
-        for r in rows
-    ]
+        if not all(t in tables for t in _READ_TABLES):
+            print(
+                f"[WARN] dumate opencode.db schema 不含 session/message，跳过（tables={sorted(tables)[:8]}）",
+                file=sys.stderr,
+            )
+            connection.close()
+            return None
+        if any(t.lower() in _SENSITIVE for t in tables):
+            # 敏感表存在并不读取：此处仅提示本适配器不会访问它们。
+            pass
+        return connection
+    except (sqlite3.Error, OSError) as exc:
+        print(f"[WARN] dumate opencode.db open(read-only): {exc}", file=sys.stderr)
+        return None
+
+
+def _date_of_ms(value):
+    """毫秒时间戳 → YYYY-MM-DD（东八区）；无法解析返回空串。"""
+    try:
+        ms = int(value)
+    except (TypeError, ValueError):
+        return ""
+    if ms <= 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(ms / 1000, tz=_TZ).strftime("%Y-%m-%d")
+    except (OverflowError, OSError, ValueError):
+        return ""
+
+
+def _to_int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _load_sessions(conn):
+    """从 session 表读全部未删除会话（窗口过滤在 collect_dumate 里做）。
+
+    窗口外创建的会话仍可能在窗口内产生 trace，不能在这里提前过滤，否则大量
+    token 会被静默丢弃（旧版 dumate 用「补全会话」修复过同类问题）。
+    """
+    rows = conn.execute(
+        "SELECT id, title, directory, time_created, time_updated, "
+        "model_settings, source, channel, type FROM session "
+        "WHERE time_deleted IS NULL"
+    ).fetchall()
+    sessions = []
+    for r in rows:
+        date = _date_of_ms(r["time_created"])
+        model = ""
+        raw_settings = r["model_settings"]
+        if raw_settings:
+            with contextlib.suppress(json.JSONDecodeError, TypeError):
+                settings = json.loads(raw_settings) if isinstance(raw_settings, str) else raw_settings
+                if isinstance(settings, dict):
+                    model = str(
+                        settings.get("modelID") or settings.get("model")
+                        or settings.get("model_id") or ""
+                    )
+        sessions.append({
+            "id": str(r["id"]),
+            "cwd": str(r["directory"] or ""),
+            "title": str(r["title"] or ""),
+            "custom_title": "",
+            "status": "active",
+            "created_at": _to_int(r["time_created"]),
+            "created_date": date,
+            "updated_at": _to_int(r["time_updated"]),
+            "mode": str(r["type"] or r["channel"] or "default"),
+            "model": model or str(r["channel"] or "dumate"),
+            "is_background_automation": False,
+            # 只录入本地会话数据：不携带任何云端归属字段。
+            "_source": "dumate",
+        })
+    return sessions
+
+
+def _load_traces(conn, start_date, end_date, sessions):
+    """从 message.data JSON 抽 assistant 调用的 L2 token，归一成统一 trace。"""
+    known = {s["id"] for s in sessions}
+    rows = conn.execute(
+        "SELECT id, session_id, time_created, data FROM message WHERE time_deleted IS NULL"
+    ).fetchall()
+    traces, seen = [], set()
+    for r in rows:
+        sid = str(r["session_id"] or "")
+        if sid not in known:
+            continue
+        raw = r["data"]
+        try:
+            msg = json.loads(raw) if isinstance(raw, str) else (raw or {})
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+        tokens = msg.get("tokens")
+        if not isinstance(tokens, dict):
+            continue
+        total = _to_int(tokens.get("total"))
+        inp = _to_int(tokens.get("input"))
+        out = _to_int(tokens.get("output"))
+        if not (total or inp or out):
+            continue
+        # 真实数据 data.time 是 {'created': ms, 'completed': ms} 字典，不是标量。
+        timing = msg.get("time") if isinstance(msg.get("time"), dict) else {}
+        created_ms = timing.get("created") or r["time_created"]
+        completed_ms = timing.get("completed") or created_ms
+        date = _date_of_ms(created_ms)
+        if not date or not (start_date <= date <= end_date):
+            continue
+        # 百度搭子同一个 requestID 会复用于多条 usage 消息（流式/多轮上报），
+        # 按 requestID 去重会误删真实调用；改用 message.id（库主键）作唯一键。
+        # requestID 只作为元数据保留在 _request_id，不参与去重。
+        req = str(r["id"] or "")
+        if req in seen:
+            continue
+        seen.add(req)
+        model = str(msg.get("modelID") or msg.get("model") or "unknown")
+        cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+        cached = _to_int(cache.get("read"))
+        reasoning = _to_int(tokens.get("reasoning"))
+        # 与 ca_core.CACHE_DISCOUNT = 0.1 保持一致，但本源不计价。
+        effective = max(int(round(total - cached * 0.1)), 0)
+        def _iso(ms):
+            try:
+                return datetime.fromtimestamp(float(ms) / 1000, tz=_TZ).isoformat()
+            except (TypeError, ValueError, OSError, OverflowError):
+                return date
+        traces.append({
+            "trace_id": f"dumate:{sid}:{req}",
+            "pid": f"dumate:{sid}",
+            "date": date,
+            "started_at": _iso(created_ms),
+            "ended_at": _iso(completed_ms),
+            "duration_ms": max(_to_int(completed_ms) - _to_int(created_ms), 0),
+            "status": "error" if str(msg.get("finish") or "").lower() in ("error", "failed") else "success",
+            "session_id": sid,
+            "total_tokens": total,
+            "token_source": "reported",
+            "input_tokens": inp,
+            "output_tokens": out,
+            "cached_tokens": cached,
+            "reasoning_tokens": reasoning,
+            "call_count": 1,
+            "models": [model],
+            "model_name": model,
+            "exec_model": model,
+            "model_key": model,
+            # 不冒充 WorkBuddy 默认网关：显式标记 dumate 通道。
+            "channel": "dumate",
+            "raw_model": model,
+            # 金额恒 0：SUPPORTS_COST=False + CLI 强制 tokens-only 双保险。
+            "total_cost": 0.0,
+            "input_cost": 0.0,
+            "output_cost": 0.0,
+            "effective_tokens": effective,
+            "effective_cost": 0.0,
+            "is_free": False,
+            "is_error": str(msg.get("finish") or "").lower() in ("error", "failed"),
+            "is_unknown_model": model == "unknown",
+            "is_tier_name": False,
+            "alt_hy3_cost": None,
+            # token 分层：上游 L2 真值，非估算、非缺失。
+            "tokens_source": "reported",
+            "tokens_source_layer": "L2",
+            "_tokens_estimated": False,
+            "_tokens_missing": False,
+            "_tokens_note": "百度搭子 message.data.tokens 上游回传真值",
+            "_request_id": str(msg.get("requestID") or ""),
+            "_dialogue_text": "",
+        })
+    traces.sort(key=lambda t: t["started_at"])
+    return traces
 
 
 def collect_dumate(start_date, end_date):
-    """一次性返回 (traces, db_data)，供 collect_usage_data.py --source dumate 使用。
+    """返回 (traces, db_data)，schema 与采集层下游兼容。
 
-    trace 与 db_data 的 schema 与 WorkBuddy 源一致（读的是同一套路径常量）。
-    ⚠️ 但**数据归属未证实**：这些记录可能全部来自 WorkBuddy，见模块 docstring。
-      - sessions / automation_runs / session_credits 来自 workbuddy.db
-      - traces 来自 traces/<pid>/trace_*.json（含补全会话后的通道重关联）
-      - skill_usage 来自 usage-log.json
-      - outputs / memory_logs 来自 DUMATE_OUTPUTS_DIR（默认 home 的同级
-        WorkBuddy 目录）下的会话目录，不是 home 内部
+    仅录入本地会话数据：只读取本地 opencode.db 的 session / message 两张表；
+    automation_runs / session_credits 留空（该库无对应表）；成本维度恒 0。
     """
-    home = resolve_dumate_home()
-    with _patched_paths(home):
-        db_data = cs.collect_db_data(start_date, end_date)
-        sid_to_rawmodel = {
-            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
+    db_path = resolve_dumate_db()
+    conn = _connect_ro(db_path)
+    if conn is None:
+        return [], {
+            "sessions": [], "automation_runs": [], "session_credits": [],
+            "skill_usage": {"skills": {}, "active_days": []},
+            "outputs": [], "memory_logs": {},
+            "_meta": {"dumate_db": str(db_path), "local-only": True},
         }
-        traces = cs.collect_traces(start_date, end_date, sid_to_rawmodel)
+    try:
+        all_sessions = _load_sessions(conn)
+        traces = _load_traces(conn, start_date, end_date, all_sessions)
+    finally:
+        conn.close()
 
-        # 补全窗口外会话（与 workbuddy 分支同款修复），然后重采 trace
-        extra = _supplement_out_of_window_sessions(
-            home, traces, {s["id"] for s in db_data["sessions"]}
-        )
-        for s in extra:
-            db_data["sessions"].append(s)
-        for s in db_data["sessions"]:
-            sid_to_rawmodel.setdefault(s["id"], s.get("model") or "default")
-        traces = cs.collect_traces(start_date, end_date, sid_to_rawmodel)
+    # 纳入「窗口内创建」或「窗口内有 trace」的会话（后者可能创建于窗口外）。
+    traced_sids = {t["session_id"] for t in traces}
+    sessions = [
+        s for s in all_sessions
+        if (start_date <= s["created_date"] <= end_date) or s["id"] in traced_sids
+    ]
+    sessions.sort(key=lambda s: s["created_at"])
 
-        skill_usage = cs.collect_skill_usage(start_date, end_date)
-        outputs, memory_logs = cs.collect_session_outputs(start_date, end_date)
+    # session.model_settings 只记档位（如 autoModelLevel=L0），没有真实模型名；
+    # 从本窗口 trace 反推每个会话实际执行的模型，供报告模型维度使用。
+    sid_model = {}
+    for t in traces:
+        sid_model.setdefault(t["session_id"], t["model_name"])
+    for s in sessions:
+        if s.get("model") in ("", "dumate") and s["id"] in sid_model:
+            s["model"] = sid_model[s["id"]]
 
-    db_data["skill_usage"] = skill_usage
-    db_data["outputs"] = outputs
-    db_data["memory_logs"] = memory_logs
+    db_data = {
+        "sessions": sessions,
+        "automation_runs": [],   # 百度搭子库无自动化表
+        "session_credits": [],   # 百度搭子库无信用消耗表
+        "skill_usage": {"skills": {}, "active_days": sorted({t["date"] for t in traces})},
+        "outputs": [],
+        "memory_logs": {},
+        "_meta": {
+            "dumate_db": str(db_path),
+            "local-only": True,
+            "source_notice": "本应用只录入本地会话数据",
+            "tokens_source_layer_summary": {"L2": {"traces": len(traces),
+                                                    "tokens": sum(t["total_tokens"] for t in traces)}},
+        },
+    }
     return traces, db_data
-
-
-DUMATE_HOME = resolve_dumate_home()

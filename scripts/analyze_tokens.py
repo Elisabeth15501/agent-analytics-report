@@ -187,7 +187,9 @@ def generate_token_report(data, output_path=None):
     # 缓存效率
     total_input = summary.get("total_input_tokens", 0)
     total_cached = summary.get("total_cached_tokens", 0)
-    cache_rate = (total_cached / total_input * 100) if total_input > 0 else 0
+    _src = str((data.get("meta") or {}).get("source") or "")
+    _denom = summary.get("total_tokens", 0) if _src == "dumate" else total_input
+    cache_rate = (total_cached / _denom * 100) if _denom > 0 else 0
     lines.append(f"**缓存效率**：{cache_rate:.1f}%（节省了 {format_number(total_cached)} 输入 token）")
     lines.append("")
 

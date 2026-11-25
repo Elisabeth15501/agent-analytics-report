@@ -243,8 +243,9 @@ def main():
         "qwenwork=读取千问办公（~/.qwenworkcn/projects 转录 + logs/runs 调用日志 + "
         "agents.db 会话元信息），无需 WorkBuddy 环境；"
         "千问办公上游不回传 token，故 token 为字符估算、成本未计价；"
-        "dumate=百度搭子（DuMate）数据源：读 ~/.workbuddy/（与 WorkBuddy 同布局），"
-        "可用 DUMATE_HOME 环境变量覆盖数据目录；"
+        "dumate=百度搭子（DuMate）数据源：读 qianfan-desktop-app 的 opencode.db"
+        "（OpenCode schema + SQLite，非 JSONL，与其他 Agent 不同），"
+        "DUMATE_DB_PATH 可显式覆盖；"
         "generic=通用数据源（JSONL/SQLite 双 reader，零金额、tokens-only，"
         "只读 GENERIC_HOME/GENERIC_PROJECTS_DIR 指定目录）；"
         "auto=默认，按 workbuddy>claude-code>codex>qwenwork>generic 探测，"
@@ -326,8 +327,8 @@ def main():
     from ca_detect import detect_source
 
     args.source = detect_source(args.source)["source"]
-    if args.source == "generic":
-        # S1.8：通用源显式强制 tokens-only。_decide_cost_mode 的 auto 只认
+    if args.source in ("generic", "dumate"):
+        # S1.8 / dumate：两源都显式强制 tokens-only。_decide_cost_mode 的 auto 只认
         # has_priced_model，若 generic 模型名恰好命中价表会被切回 priced；
         # 这里在入口处锁死口径，不靠「恰好没单价」隐式推断。
         args.cost_mode = "tokens-only"
@@ -487,14 +488,15 @@ def main():
             file=sys.stderr,
         )
     elif args.source == "dumate":
-        # ── 百度搭子（DuMate）数据源 ──
-        # 百度搭子桌面客户端（qianfan-desktop-app）的数据落点与 WorkBuddy
-        # 完全一致（~/.workbuddy：traces/ + workbuddy.db + usage-log.json +
-        # 会话目录），因此适配器复用同一采集链路，仅显式声明数据源身份，
-        # 并支持 DUMATE_HOME 环境变量覆盖数据目录（测试 / 多账号 / 未来迁移）。
-        from adapters.dumate import collect_dumate, SUPPORTS_COST, DUMATE_HOME
+        # ── 百度搭子（DuMate）数据源（2026-11-25 专用 reader）──
+        # 真实数据在 %APPDATA%/qianfan-desktop-app/qianfan_desk_xdg/<hash>/
+        # data/opencode/opencode.db；不再读 ~/.workbuddy（那是 WorkBuddy 自己的库）。
+        # 适配器自带专用 reader，不复用 generic 的 profile 机制。
+        # 能力声明：SUPPORTS_COST=False，报告只显示模型/Token/调用维度，零金额。
+        from adapters.dumate import (
+            collect_dumate, resolve_dumate_db, SUPPORTS_COST,
+        )
 
-        # 能力声明：百度搭子与 WorkBuddy 同布局，token 为上游真值 -> 支持计费
         cost_supported = SUPPORTS_COST
         traces, db_data = collect_dumate(start_date, end_date)
         sid_to_rawmodel = {
@@ -513,17 +515,15 @@ def main():
         task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
         source_meta.update(
             {
-                "dumate_home": str(DUMATE_HOME),
-                # 实测结论：百度搭子默认 home 与 WorkBuddy 同在 ~/.workbuddy 这棵树下，
-                # 但并没有往 ~/.workbuddy 写用量数据（db/trace 里无归属字段可区分），
-                # 因此只声明「目录布局同源」，不再声称数据可区分。
-                "dumate_home_is_workbuddy": True,
+                "dumate_db": str(resolve_dumate_db()),
+                "local-only": True,
+                "source_notice": "本应用只录入本地会话数据",
             }
         )
         print(
             f"[INFO] 百度搭子数据源：{len(traces)} 条 trace / "
             f"{len(db_data['sessions'])} 个会话"
-            f"（数据目录 {DUMATE_HOME}）",
+            f"（本地会话数据，只读 {resolve_dumate_db()}）",
             file=sys.stderr,
         )
     elif args.source == "generic":
@@ -728,8 +728,10 @@ def main():
         return req
 
     estimated_request_count = _cluster_requests(traces, gap_min=15)
-    # 缓存占比：缓存命中 token 占输入 token 的比例（越高说明越多重复上下文被廉价复用）
-    cache_rate = (total_cached / total_input * 100) if total_input else 0
+    # 缓存占比：dumate(OpenCode) 的 input 不含 cache.read（total = input+output+cache.read），
+    # 分母必须用 total，否则会出现 >100%；其余源沿用 cached/input 的历史口径。
+    _cache_denom = total_tokens if args.source == "dumate" else total_input
+    cache_rate = (total_cached / _cache_denom * 100) if _cache_denom else 0
 
     # —— 计价口径的三个透明度计数（报告据此出文案，勿在渲染层硬编码比例）——
     # 1) 未知模型：raw_model 与 exec_model 都是字面量 "default"，即采集器根本不知道

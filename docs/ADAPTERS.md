@@ -9,7 +9,7 @@
 | Claude Code | `claude-code` | ✅ 已实现 | `~/.claude/projects/**/*.jsonl` |
 | OpenAI Codex CLI | `codex` | ✅ 已实现（MVP，需真实样例复核） | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 | 千问办公 QwenWork | `qwenwork` | ✅ 已实现（⚠️ token 为本地估算，见 §四） | `~/.qwenworkcn/projects/**/*.jsonl` + `logs/runs/` + `agents.db` |
-| 百度搭子 DuMate | `dumate` | ✅ 已实现（复用 WorkBuddy 布局，见 §六） | `~/.workbuddy/`（可用 `DUMATE_HOME` 覆盖） |
+| 百度搭子 DuMate | `dumate` | ✅ 已实现（OpenCode schema + SQLite 专用 reader，见 §六） | `qianfan_desk_xdg/<hash>/data/opencode/opencode.db`（可用 `DUMATE_DB_PATH` 覆盖） |
 | Trae 等 | — | ⬜ 未实现 | 见文末「新增一个 Agent」 |
 | OpenClaw | — | ⬜ 未实现（规划中） | 见文末「新增一个 Agent」 |
 
@@ -436,110 +436,78 @@ WorkBuddy 这三件事各有**独立数据源**，千问办公全都不是那个
 
 ## 六、百度搭子（DuMate）适配器
 
-### 6.1 背景：当前按 WorkBuddy 布局读取该目录（数据归属未证实）
+### 6.1 数据源（2026-11-25 实证重写）
 
-> ⚠️ **归因红线**：本适配器**不验证数据归属**。`--source dumate` 采集到的内容
-> **可能完全是 WorkBuddy 的**，不可当作「百度搭子用量」对外引用。详见 §6.4。
+> ⚠️ **旧结论已作废**：此前版本把 dumate 默认指向 `~/.workbuddy` 并标注「数据归属未证实」。
+> 实跑证明那条链读到的 100% 是 WorkBuddy 自己的库，与百度搭子无关，已废弃。
 
-百度搭子桌面客户端（qianfan-desktop-app / DuMate）当前的本地数据**按 WorkBuddy
-的布局**落在 `~/.workbuddy`，本适配器因此按 WorkBuddy 那套路径常量读取：
+百度搭子桌面客户端（qianfan-desktop-app / DuMate）的真实用量数据在：
 
-| 数据 | 路径 |
+```
+%APPDATA%/qianfan-desktop-app/qianfan_desk_xdg/<uid-hash>/data/opencode/opencode.db
+```
+
+实测 schema 为 **OpenCode 旧代**（与 WorkBuddy / JSONL 系适配器**完全不同**）：
+
+| 表 / 字段 | 内容 |
 |------|------|
-| Traces（token / 模型 / 时长） | `<home>/traces/<pid>/trace_*.json` |
-| 会话 / 自动化 / 信用 | `<home>/workbuddy.db` |
-| 技能使用记录 | `<home>/usage-log.json` |
-| 会话转录定位 | `<home>/projects/` + `sessions/` |
-| 产出文件 / 记忆日志 | `$DUMATE_OUTPUTS_DIR` 或 `<home 同级>/WorkBuddy/<会话目录>` |
+| `session`（77 行实测） | 会话 id / title / directory / time_created / model_settings |
+| `message`（1771 行实测） | `data` JSON 内 `tokens{total,input,output,reasoning,cache:{read,write}}` + `modelID` / `providerID` / `requestID`，是上游回传的 **L2 真值** |
+| `part`（6952 行实测） | 不读（白名单外） |
+| `control_account` 等敏感表 | 从不访问（只从 `sqlite_master` 读表名用于探测） |
 
-其中 `home` = `DUMATE_HOME`（默认 `~/.workbuddy`）。
+**关键差异**：dumate 既不是 WorkBuddy 布局，也不是 JSONL——它是 **OpenCode schema 的 SQLite 库**，
+token 藏在 `message.data` JSON 里，由本适配器**专用 reader** 解析，不复用 `generic` 的
+schema profile，也不复用 `ca_sources` 的 WorkBuddy 路径常量。
 
-**不要**把上表理解成「这些数据的归属已确认属于百度搭子」。目前这条链路上
-**没有任何字段能区分数据来源**，所以本节的准确说法是「**当前按 WorkBuddy
-布局读取该目录；数据归属未证实**」。
+**本地会话边界**：本应用只录入本地会话数据——全链路只读本地 `opencode.db`（`mode=ro`），
+不联网、不上传；报告显式标注「本应用只录入本地会话数据」。
 
-### 6.2 那适配器做什么
+### 6.2 适配器职责
 
-实现文件 `adapters/dumate.py`，三个职责：
+实现文件 `adapters/dumate.py`，四个职责：
 
-1. **显式声明口径**：`--source dumate` 让报告标题 / 来源清单显示
-   「百度搭子使用情况报告」，标明本次采集走的是这个入口，而不是借用
-   WorkBuddy 的名义充当「另一份数据源」——它**不证明数据来自百度搭子**；
-2. **路径隔离**：支持 `DUMATE_HOME` 覆盖数据目录（默认 `~/.workbuddy`），
-   并可用 `DUMATE_OUTPUTS_DIR` 单独覆盖产出 / 记忆目录。若该客户端未来更换
-   布局 / 迁移目录 / 多账号并存，只需在适配器内部重映射，不改采集器与报告端；
-3. **可测试隔离**：测试通过 `DUMATE_HOME` 把 fixture 指向 `tmp_path`
-   （`tests/test_dumate_adapter.py`），绝不读取用户真实目录。
+1. **路径发现**：`resolve_dumate_db()` 自动发现 `qianfan_desk_xdg/<hash>/data/opencode/opencode.db`
+   （多账号取 mtime 最新者），`DUMATE_DB_PATH` 显式覆盖优先，`DUMATE_HOME` 为兼容旧 API 的次级覆盖；
+2. **专用 reader**：`_load_sessions` / `_load_traces` 只读 `session` / `message` 两张白名单表，
+   从 `message.data` JSON 抽 assistant 消息的 L2 token / modelID / requestID；
+   按 `message.id` 去重（真实数据里同一个 `requestID` 会复用于多条 usage 消息，按 requestID 去重会误删）；
+3. **隐私边界**：`mode=ro` + timeout，锁冲突显式告警降级；符号链接路径跳过；敏感表零访问；
+   测试通过 `DUMATE_DB_PATH` 把 fixture 指向 `tmp_path`，绝不读取用户真实目录；
+4. **计费口径**：`SUPPORTS_COST = False` —— 底层模型标识（glm-5 等）是否有可核对刊例价未确认，
+   不做任何金额推断；CLI 强制 `cost_mode=tokens_only`，报告零 `¥`，只显示模型 / Token / 调用维度。
 
-技术要点：
+下游聚合 / 报表 / 任务分类沿用统一链路：`collect_task_types()` 无条件直采（不预分类，
+否则会话整列塌成「其他」），与 WorkBuddy 源同一条路径。
 
-- `collect_dumate` 复用 `ca_sources` 的采集链路（`collect_db_data` /
-  `collect_traces` ×2 含跨窗口补全会话 / `collect_skill_usage` /
-  `collect_session_outputs`），通过 `_patched_paths` 上下文**临时替换**
-  `ca_sources` 模块级路径常量、用完恢复，改动面最小，不触碰 workbuddy 默认分支；
-- `SUPPORTS_COST = True`：token 为上游回传真值（读的是 WorkBuddy 的 traces，
-  非本地估算），成本可走静态价表估算（L2），`--import-official` 对账同样可用。
-  该声明只关于**计价能力**，与数据归属无关；
-- schema 与 WorkBuddy 一致，下游聚合 / 报表 / 任务分类零改动。
-
-> 本适配器读作「WorkBuddy 布局目录」的**通用入口**，归属由使用者自行确认。
-> 它**不是**「已验证支持百度搭子」的能力承诺。
+**缓存占比口径（dumate 专属）**：OpenCode 的 `tokens.total = input + output + cache.read`，
+`input` **不含**缓存命中，所以缓存占比必须用 `cache.read / total` 作分母（不是 `cached / input`，
+那会算出 >100% 的荒谬值）。该口径在 `collect_usage_data.py` / `ca_analytics.py` /
+`analyze_tokens.py` / `generate_report.py::_cache_rate_of()` 四处一致实现，仅对 dumate 生效；
+其他 Agent 沿用历史的 `cached / input`，零漂移。
 
 ### 6.3 使用
 
 ```bash
-# 走 dumate 入口采集（报告标题显示「百度搭子使用情况报告」；
-# ⚠️ 数据归属未证实，见 §6.4）
-python scripts/collect_usage_data.py --source dumate --period week -o data.json
+# 走 dumate 专用 reader 采集（报告标注「本应用只录入本地会话数据」）
+python scripts/collect_usage_data.py --source dumate --start 2026-11-01 --end 2026-11-30 -o data.json
 
-# DUMATE_HOME 覆盖数据目录（多账号 / 迁移场景）
-DUMATE_HOME=/path/to/custom-home python scripts/collect_usage_data.py --source dumate --period week -o data.json
+# DUMATE_DB_PATH 显式指定 opencode.db（多账号 / 迁移场景）
+DUMATE_DB_PATH=/path/to/opencode.db python scripts/collect_usage_data.py --source dumate -o data.json
 
-# DUMATE_OUTPUTS_DIR 单独覆盖产出 / 记忆目录（与 DUMATE_HOME 解耦）
-DUMATE_OUTPUTS_DIR=/path/to/outputs python scripts/collect_usage_data.py --source dumate --period week -o data.json
-
-# 生成报告
+# 生成报告（零金额 + 本地会话标注 + OpenCode schema 声明）
 python scripts/generate_report.py data.json --output report.html --format html
 ```
 
-### 6.4 ⚠️ 已知边界：数据归属未证实
+### 6.4 已知边界
 
-这一条是**发版红线**，优先于本节其余内容。
-
-**我们无法证明 `--source dumate` 采到的是百度搭子的数据。** 已做的排查：
-
-| 排查项 | 结果 |
-|--------|------|
-| `~/.workbuddy/workbuddy.db` 中 217 个会话，cwd / title 匹配 `%qianfan%`/`%dumate%`/`%DuMate%` | **0 行** |
-| 同上，`id LIKE 'ses_%'` | **0 行** |
-| `~/.workbuddy/traces` 全量 1165 个 trace | 无 `ses_` 形态 sessionId；`agentName` 仅 `cli / terminalTitleGenerator / contextSummary / enhance-prompt` 四种；`metadata` 全空 |
-| 百度搭子自有数据 | 在 `~/.qianfan/workspace/sessions/<uid>/<date>/<chat>/.dumate/ses_*/flows/*.yml`，是**非本技能 trace schema** 的 yml 流转格式，**无映射** |
-| 客户端本体 | `%LOCALAPPDATA%\Programs\DuMate\DuMate.exe`，**没有** AppData / Roaming 数据目录 |
-
-结论：`--source dumate` 跑出的 16 个会话 / 161 条 trace **100% 是 WorkBuddy 的**。
-问题不是「共用目录导致归因模糊」，而是**空数据贴了来源标签**——旧版本文档里写的
-「与 WorkBuddy 完全一致（实测，2026-10-02）」属于过度断言：当时只观察过
-「路径常量指向这里」，并未验证归属，因此该表述已按本节口径改写。
-
-**由此产生的行为约束（写报告 / 对外分享时必须遵守）：**
-
-1. 不得把 dumate 的用量、token、成本写成「百度搭子用量 / 百度搭子花费」这种
-   结论式表述；报告里的「百度搭子使用情况报告」只是**入口标识**，不是归属声明；
-2. 该适配器的正确定位是「**支持任何写入 WorkBuddy 布局目录的第三方客户端**
-   的通用入口」，归属由使用者自行确认；
-3. 若确需百度搭子自有数据，需先为 `.dumate/ses_*/flows/*.yml` 建立 trace schema
-   映射（见 §7.1），并保留 `~/.qianfan` 的读取路径——那是**另一件事**，本适配器没做；
-
-**其他边界：**
-
-- 产出 / 记忆日志的会话目录按 WorkBuddy 约定在 `DUMATE_OUTPUTS_DIR`
-  （默认 home 的同级 `WorkBuddy`）。它**不从 `Path.home()` 取**，否则
-  `DUMATE_HOME` 指到临时目录时 outputs / memory_logs 仍会读回用户真实目录
-  （audit hook 实测抓到 17 次真实 HOME 访问）；
-- `workbuddy.db` 以**只读**方式打开（`mode=ro`）——WAL 模式下可写连接会额外
-  创建 `-wal` / `-shm`，且客户端持锁时会 `SQLITE_BUSY`；
-- 若该客户端未来改用独立目录，需同步更新 `adapters/dumate.py` 的
-  `_child_paths()` / `_resolve_outputs_dir()` 与 `_PATH_ATTRS`。
+- **模型口径**：仅显示实际出现的模型标识（实测主要为 `glm-5`），未确认是否覆盖全部底层模型；
+  不做金额估算，如需金额请先提供可核对的百度搭子模型单价口径；
+- **数据范围**：只读取本地 `opencode.db`，不含云端用量、不含客户端未落盘的会话；
+- **会话补全**：窗口外创建但有窗口内调用的会话会被纳入（实测 94 条 trace / 11 月）；
+- **只读保护**：数据库以 `mode=ro` 打开，客户端持锁时不写 `-wal` / `-shm`，锁冲突显式告警；
+- **与 generic 的边界**：dumate 是**独立专用 reader**，不随 generic 的 schema profile 演进；
+  两者都强制 tokens-only、零金额，但 reader / 路径发现 / 报告标注各自独立。
 
 ---
 

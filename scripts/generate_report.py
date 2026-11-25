@@ -646,10 +646,10 @@ def build_model_section(fmt, data):
         )
         lines.append("")
         if hidden:
-            _generic_src = str(meta.get("source") or "") == "generic"
+            _zero_src = str(meta.get("source") or "") in ("generic", "dumate")
             _no_cost_note = (
-                "（通用数据源不提供可核对的计费口径）"
-                if _generic_src
+                "（该数据源不提供可核对的计费口径）"
+                if _zero_src
                 else "（免得满屏 `¥0.00` 被读成「免费」）"
             )
             lines.append(
@@ -843,8 +843,8 @@ def build_model_section(fmt, data):
     )
     if hidden:
         _no_cost_html = (
-            "（通用数据源不提供可核对的计费口径）"
-            if str(meta.get("source") or "") == "generic"
+            "（该数据源不提供可核对的计费口径）"
+            if str(meta.get("source") or "") in ("generic", "dumate")
             else "（免得满屏 <code>¥0.00</code> 被读成「免费」）"
         )
         lines.append(
@@ -1511,7 +1511,9 @@ def generate_markdown_report(data):
 
     total_input = summary.get("total_input_tokens", 0)
     total_cached = summary.get("total_cached_tokens", 0)
-    cache_rate = (total_cached / total_input * 100) if total_input else 0
+    cache_rate = _cache_rate_of(
+        total_cached, total_input, summary.get("total_tokens", 0), _source_key(data)
+    )
 
     lines = []
     _key = meta.get("period", "week")
@@ -1567,8 +1569,13 @@ def generate_markdown_report(data):
     lines.append(
         f"| {_eff_token_label(data)} | {format_number(summary.get('total_effective_tokens', 0))}（原始 {format_number(summary.get('total_tokens', 0))}）|"
     )
+    _intro_cache_note = (
+        "缓存命中 token 占原始总 token 的比例（OpenCode 口径）"
+        if _source_key(data) == "dumate"
+        else "缓存命中 token 占输入 token 的比例"
+    )
     lines.append(
-        f"| 缓存占比 | {cache_rate:.1f}%（缓存命中 token 占输入 token 的比例）|"
+        f"| 缓存占比 | {cache_rate:.1f}%（{_intro_cache_note}）|"
     )
     if _cost_hidden(data):
         lines.append(
@@ -1777,10 +1784,9 @@ def generate_markdown_report(data):
         for s in display_stats:
             eff = s.get("effective_tokens", 0)
             pct = (eff / total_eff * 100) if total_eff else 0
-            c_ratio = (
-                (s["cached_tokens"] / s["input_tokens"] * 100)
-                if s.get("input_tokens")
-                else 0
+            c_ratio = _cache_rate_of(
+                s.get("cached_tokens", 0), s.get("input_tokens", 0),
+                s.get("total_tokens", 0), _source_key(data)
             )
             lines.append(
                 f"| {s['task_type']} | {s['session_count']} | {format_number(eff)} "
@@ -1843,10 +1849,9 @@ def generate_markdown_report(data):
                     "|------|----------|----------|---------|-----------|---------|---------|"
                 )
             for i, tk in enumerate(top_tasks, 1):
-                c_ratio = (
-                    (tk.get("cached_tokens", 0) / tk["input_tokens"] * 100)
-                    if tk.get("input_tokens")
-                    else 0
+                c_ratio = _cache_rate_of(
+                    tk.get("cached_tokens", 0), tk.get("input_tokens", 0),
+                    tk.get("total_tokens", 0), _source_key(data)
                 )
                 lines.append(
                     f"| {i} | {tk.get('title', '-')} | {tk.get('task_type', '-')} "
@@ -2283,7 +2288,9 @@ def _compute_cache_and_untitled(data, threshold_pct=60.0):
     summary = data.get("summary", {})
     total_cached = summary.get("total_cached_tokens", 0)
     total_input = summary.get("total_input_tokens", 0)
-    global_cache_rate = (total_cached / total_input * 100) if total_input else 0
+    global_cache_rate = _cache_rate_of(
+        total_cached, total_input, summary.get("total_tokens", 0), _source_key(data)
+    )
 
     traces = data.get("traces") or []
     sessions = data.get("sessions") or []
@@ -2292,13 +2299,14 @@ def _compute_cache_and_untitled(data, threshold_pct=60.0):
     if not rows:
         return None
 
-    sess_cache = defaultdict(lambda: {"cached": 0, "input": 0})
+    sess_cache = defaultdict(lambda: {"cached": 0, "input": 0, "total": 0})
     for t in traces:
         sid = t.get("session_id")
         if not sid:
             continue
         sess_cache[sid]["cached"] += t.get("cached_tokens", 0) or 0
         sess_cache[sid]["input"] += t.get("input_tokens", 0) or 0
+        sess_cache[sid]["total"] += t.get("total_tokens", 0)
 
     sid_to_meta = {}
     for s in sessions:
@@ -2323,7 +2331,9 @@ def _compute_cache_and_untitled(data, threshold_pct=60.0):
     for sid, st in sess_cache.items():
         if st["input"] <= 0:
             continue
-        cr = st["cached"] / st["input"] * 100
+        cr = _cache_rate_of(
+            st["cached"], st["input"], st["total"], _source_key(data)
+        )
         if cr < threshold_pct:
             meta = sid_to_meta.get(sid, {})
             cost = meta.get("cost", 0.0)
@@ -2768,21 +2778,28 @@ _SOURCE_LABELS = {
         ],
     ),
     "dumate": (
-        # 数据源名为 dumate，但 ~/.workbuddy 数据布局里没有任何字段能区分它到底
-        # 来自百度搭子还是 WorkBuddy ——归属未证实（实测 217 会话里
-        # qianfan/dumate 命中 0 行）。故标题用中性措辞、不暗示确认的百度搭子归属，
-        # 并在数据来源行与清单里强制标注「归属未证实、勿据此当作百度搭子用量」，
-        # 避免把某产品的用量误标成另一产品（SDI-4）。
-        "Dumate 数据源使用情况报告（数据归属未证实）",
-        "通用 WorkBuddy 布局数据源（数据位于 ~/.workbuddy）：会话历史、Traces、"
-        "workbuddy.db、技能使用记录、自动化配置。⚠️ 归属未证实——记录中无任何字段"
-        "能区分数据来自百度搭子还是 WorkBuddy，内容可能完全是 WorkBuddy 的，"
-        "请勿将其作为百度搭子用量引用或对外发布。",
-        ["通用 WorkBuddy 布局数据（会话历史）", "Traces", "workbuddy.db",
-         "技能使用记录", "自动化配置",
-         "⚠️ 数据归属未证实，勿当作百度搭子用量引用"],
+        # 2026-11-25 实证：百度搭子真实用量在 qianfan-desktop-app 的
+        # qianfan_desk_xdg/<hash>/data/opencode/opencode.db（上游 L2 token 真值）。
+        # 不再读 ~/.workbuddy；报告显式标注「本应用只录入本地会话数据」。
+        "百度搭子使用情况报告（仅本地会话数据）",
+        "百度搭子本地会话数据库（opencode.db，OpenCode schema + SQLite，非 JSONL，与其他 Agent 不同；只读）："
+        "会话与逐次调用的 L2 token 真值。"
+        "本应用只录入本地会话数据，不上传、不联网。",
+        ["百度搭子本地会话数据库 opencode.db（OpenCode schema + SQLite，非 JSONL）",
+         "本应用只录入本地会话数据"],
     ),
 }
+
+
+def _cache_rate_of(cached, input_tokens, total_tokens, source):
+    """缓存占比（%）。
+
+    dumate 来自 OpenCode schema：tokens.total = input + output + cache.read，
+    input 本身不含缓存命中，故分母用 total，否则缓存占比会 >100%。
+    其余 Agent 的历史口径不变（分母用 input），保证零漂移。
+    """
+    denom = total_tokens if source == "dumate" else input_tokens
+    return (cached / denom * 100) if denom else 0
 
 
 def _source_key(data):
@@ -2834,7 +2851,13 @@ def _eff_token_label(data):
 
 
 def _cache_rate_note(data):
-    """缓存占比的解释：tokens_only 下不提「按 1/10 价计费」这种计费细节。"""
+    """缓存占比的解释：tokens_only 下不提「按 1/10 价计费」这种计费细节。
+
+    dumate 的 OpenCode schema 里 input 不含缓存命中（total=input+output+cache.read），
+    分母用 total；文案需同步，避免读者拿 input 反算得出 >100% 的错觉。
+    """
+    if _source_key(data) == "dumate":
+        return "缓存命中 token 占原始总 token 的比例（OpenCode 口径）"
     if _cost_hidden(data):
         return "缓存命中 token 占输入 token 的比例"
     return "缓存命中按约 1/10 价计费，不计入实际消耗全价"
@@ -3073,7 +3096,21 @@ def _source_caveat_lines(fmt, data):
     与 WorkBuddy / Claude Code / Codex 的「token 真值 + 成本估算」是两种口径。
     不写清楚就会被当成账单引用。
     """
-    if _source_key(data) != "qwenwork":
+    src = _source_key(data)
+    if src == "dumate":
+        text = ("本应用只录入本地会话数据：报告基于百度搭子客户端在本机生成的 "
+                "<code>opencode.db</code>（OpenCode schema + SQLite，非其他 Agent 的 JSONL）"
+                "只读解析，不联网、不上传。token 为上游回传真值（L2），"
+                "金额维度不提供（模型刊例价未确认）。")
+        plain = (text.replace("<code>", "`").replace("</code>", "`"))
+        if fmt == "html":
+            return [
+                '        <div class="disclaimer-box">',
+                f"            <p>ℹ️ <b>本应用只录入本地会话数据</b> —— {text}</p>",
+                "        </div>",
+            ]
+        return [f"> ℹ️ **本应用只录入本地会话数据** —— {plain}", ""]
+    if src != "qwenwork":
         return []
     text = (
         "千问办公服务端<b>不回传 token 用量</b>（实测 <code>model.response.completed</code> "
@@ -3157,7 +3194,9 @@ def _cost_hidden_banner(fmt, data):
     # 通用数据源：本就没有可对账的刊例价，补价 stub 对他无意义（A3 零命中）；
     # 改为展示 token 分层口径与中文 L4 偏差提示（A11/A13）。仅限 generic 源，
     # 其余源沿用历史文案，保证五源零漂移。
-    is_generic = str(meta.get("source") or "") == "generic"
+    _src = str(meta.get("source") or "")
+    is_generic = _src == "generic"
+    is_dumate = _src == "dumate"
     layers = meta.get("tokens_source_layer_summary") or {}
     notice = meta.get("tokens_notice") or ""
     layer_rows = []
@@ -3168,11 +3207,16 @@ def _cost_hidden_banner(fmt, data):
                 f"{layer}：{row.get('traces', 0)} 条 / {row.get('tokens', 0)} token"
             )
     layer_line = "；".join(layer_rows)
-    if is_generic:
-        # A1：generic 报告全篇零金额符号——连「不提供金额」的解释也不出现 ¥
-        body = ("通用数据源未覆盖该 Agent 的计费口径，本报告不提供金额维度；"
-                "Token / 调用次数 / 耗时 / 任务维度不受影响。")
-        howto = "如需金额，请先为该 Agent 提供可核对的单价口径与专用适配器。"
+    if is_generic or is_dumate:
+        # generic / dumate 报告全篇零金额符号——连「不提供金额」的解释也不出现 ¥
+        if is_dumate:
+            body = ("百度搭子仅录入本地会话数据，底层模型标识的计费口径未确认，"
+                    "本报告不提供金额维度；Token / 调用次数 / 耗时 / 任务维度不受影响。")
+            howto = "如需金额，请先提供可核对的百度搭子模型单价口径。"
+        else:
+            body = ("通用数据源未覆盖该 Agent 的计费口径，本报告不提供金额维度；"
+                    "Token / 调用次数 / 耗时 / 任务维度不受影响。")
+            howto = "如需金额，请先为该 Agent 提供可核对的单价口径与专用适配器。"
     if fmt == "html":
         lines = [
             '        <div class="disclaimer-box">',
@@ -3881,7 +3925,9 @@ def generate_html_report(data):
 
     total_input = summary.get("total_input_tokens", 0)
     total_cached = summary.get("total_cached_tokens", 0)
-    cache_rate = (total_cached / total_input * 100) if total_input else 0
+    cache_rate = _cache_rate_of(
+        total_cached, total_input, summary.get("total_tokens", 0), _source_key(data)
+    )
 
     # CSS 作为普通字符串，花括号即字面量，无需转义
     css = """
@@ -4188,10 +4234,9 @@ def generate_html_report(data):
         for s in display_stats:
             eff = s.get("effective_tokens", 0)
             pct = (eff / total_eff * 100) if total_eff else 0
-            c_ratio = (
-                (s["cached_tokens"] / s["input_tokens"] * 100)
-                if s.get("input_tokens")
-                else 0
+            c_ratio = _cache_rate_of(
+                s.get("cached_tokens", 0), s.get("input_tokens", 0),
+                s.get("total_tokens", 0), _source_key(data)
             )
             lines.append(
                 f"            <tr><td>{_esc(s['task_type'])}</td><td>{s['session_count']}</td>"
@@ -4237,10 +4282,9 @@ def generate_html_report(data):
                     "            <tr><th>排名</th><th>任务名称</th><th>任务类型</th><th>实际消耗</th><th>原始总Token</th><th>缓存占比</th><th>实际成本</th></tr>"
                 )
             for i, tk in enumerate(top_tasks, 1):
-                c_ratio = (
-                    (tk.get("cached_tokens", 0) / tk["input_tokens"] * 100)
-                    if tk.get("input_tokens")
-                    else 0
+                c_ratio = _cache_rate_of(
+                    tk.get("cached_tokens", 0), tk.get("input_tokens", 0),
+                    tk.get("total_tokens", 0), _source_key(data)
                 )
                 lines.append(
                     f"            <tr><td>{i}</td><td>{_esc(tk.get('title', '-'))}</td>"
@@ -4509,7 +4553,9 @@ def generate_json_report(data):
     task_dist = summary.get("task_type_distribution", {})
     total_input = summary.get("total_input_tokens", 0)
     total_cached = summary.get("total_cached_tokens", 0)
-    cache_rate = (total_cached / total_input * 100) if total_input else 0
+    cache_rate = _cache_rate_of(
+        total_cached, total_input, summary.get("total_tokens", 0), _source_key(data)
+    )
 
     model_stats = data.get("model_stats", [])
     exec_stats = data.get("model_exec_stats", [])
