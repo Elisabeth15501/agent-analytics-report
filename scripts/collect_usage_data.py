@@ -177,6 +177,8 @@ from ca_billing import (
     apply_pricing_lookup,
 )
 from ca_cli import build_task_classifier_with_consent
+# 批次5 re-export：采集层已搬入 ca_collect，门面保留旧名字供 main/测试访问
+from ca_collect import collect_from_source, collect_workbuddy_bundle
 from ca_analytics import (
     estimate_request_count,
     build_result_skeleton,
@@ -389,227 +391,23 @@ def main():
     # 时才构建会外传文本的 LLM 分类器，否则自动回退本地启发式（TP4 合规）。
     task_classifier = build_task_classifier_with_consent(args)
 
-    # 该数据源是否在语义上支持计费维度（默认支持；qwenwork 源会置 False）
-    cost_supported = True
-    # 数据源自己声明的 meta 补充（single_channel / background_runs / 采集来源标注等），
-    # 由适配器算好、这里整体并入 result["meta"]，避免每加一个源就改一次 meta 字面量
-    source_meta = {}
-
-    # 采集各数据源：先取会话（sessions.model 含带通道前缀的原始模型标识符，
-    # 是「接口通道」的真相源），据其构建 session_id→raw_model 映射，再采集 trace 并关联通道。
-    if args.source == "claude-code":
-        # ── Claude Code 数据源（P2-1 适配器 MVP）──
-        # 无需 WorkBuddy 环境，直接读 ~/.claude/projects/ 下的会话 JSONL；
-        # 适配器产出与 WorkBuddy 同源的 trace / sessions，任务类型已预分类。
-        from adapters.claude_code import collect_claude_code
-
-        traces, db_data = collect_claude_code(start_date, end_date)
-        sid_to_rawmodel = {
-            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
-        }
-        skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
-        outputs, memory_logs = ([], {})
-        # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源）；
-        # 若启用 LLM 分类器则基于 _dialogue_text 重分类，否则直接收口预分类结果。
-        if task_classifier is not None:
-            task_types = collect_task_types(
-                db_data["sessions"], classifier=task_classifier
-            )
-        else:
-            task_types = {
-                s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]
-            }
-        print(
-            f"[INFO] Claude Code 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
-            file=sys.stderr,
-        )
-    elif args.source == "codex":
-        # ── OpenAI Codex CLI 数据源 ──
-        # 无需 WorkBuddy 环境，直接读 ~/.codex/sessions/ 下的 rollout JSONL（按日期分目录）；
-        # 适配器产出与 WorkBuddy 同源的 trace / sessions，任务类型已预分类。
-        from adapters.codex import collect_codex
-
-        traces, db_data = collect_codex(start_date, end_date)
-        sid_to_rawmodel = {
-            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
-        }
-        skill_usage = {"skills": {}, "active_days": sorted({t["date"] for t in traces})}
-        outputs, memory_logs = ([], {})
-        # 适配器已基于对话文本预分类 task_type（复用 classify_task，与 WorkBuddy 同源）；
-        # 若启用 LLM 分类器则基于 _dialogue_text 重分类，否则直接收口预分类结果。
-        if task_classifier is not None:
-            task_types = collect_task_types(
-                db_data["sessions"], classifier=task_classifier
-            )
-        else:
-            task_types = {
-                s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]
-            }
-        print(
-            f"[INFO] Codex CLI 数据源：{len(traces)} 条 trace / {len(db_data['sessions'])} 个会话",
-            file=sys.stderr,
-        )
-    elif args.source == "qwenwork":
-        # ── 千问办公（QwenWork）数据源 ──
-        # 无需 WorkBuddy 环境：读 ~/.qwenworkcn/projects 转录 + logs/runs 调用日志 +
-        # agents.db 会话元信息。千问办公上游不回传 token（实测 1167 条
-        # model.response.completed 的四个 token 字段全为 0），故 token 为字符估算、
-        # 档位无公开刊例价 → 成本不计价；调用次数 / 耗时 / 标题 / 档位为真实值。
-        from adapters.qwenwork import collect_qwenwork, SUPPORTS_COST
-
-        # 能力声明（不是「这次恰好没单价」）：千问办公在语义上不支持计费维度，
-        # 报告端据此压制「缺失单价 + 补价 stub」整块。见 generate_report._show_unconfigured_block
-        cost_supported = SUPPORTS_COST
-        traces, db_data = collect_qwenwork(start_date, end_date)
-        sid_to_rawmodel = {
-            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
-        }
-        skill_usage = db_data.get("skill_usage") or {
-            "skills": {},
-            "active_days": sorted({t["date"] for t in traces}),
-        }
-        outputs = db_data.get("outputs") or []
-        # memory_logs 保持空：千问办公的记忆写进 awareness/*.md（由 file-history 快照承载），
-        # 没有 WorkBuddy 那种「按日期归集的会话记忆日志目录」可映射，硬凑会造假结构。
-        memory_logs = {}
-        source_meta.update(db_data.get("_meta") or {})
-        if task_classifier is not None:
-            task_types = collect_task_types(
-                db_data["sessions"], classifier=task_classifier
-            )
-        else:
-            task_types = {
-                s["id"]: s.get("task_type", "其他") for s in db_data["sessions"]
-            }
-        _est = sum(1 for t in traces if t.get("_tokens_estimated"))
-        print(
-            f"[INFO] 千问办公数据源：{len(traces)} 条 trace / "
-            f"{len(db_data['sessions'])} 个会话"
-            f"（{_est}/{len(traces)} 条 token 为字符估算，档位无刊例价故未计价）",
-            file=sys.stderr,
-        )
-    elif args.source == "dumate":
-        # ── 百度搭子（DuMate）数据源（2026-11-25 专用 reader）──
-        # 真实数据在 %APPDATA%/qianfan-desktop-app/qianfan_desk_xdg/<hash>/
-        # data/opencode/opencode.db；不再读 ~/.workbuddy（那是 WorkBuddy 自己的库）。
-        # 适配器自带专用 reader，不复用 generic 的 profile 机制。
-        # 能力声明：SUPPORTS_COST=False，报告只显示模型/Token/调用维度，零金额。
-        from adapters.dumate import (
-            collect_dumate, resolve_dumate_db, SUPPORTS_COST,
-        )
-
-        cost_supported = SUPPORTS_COST
-        traces, db_data = collect_dumate(start_date, end_date)
-        sid_to_rawmodel = {
-            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
-        }
-        skill_usage = db_data.get("skill_usage") or {
-            "skills": {},
-            "active_days": sorted({t["date"] for t in traces}),
-        }
-        outputs = db_data.get("outputs") or []
-        memory_logs = db_data.get("memory_logs") or {}
-        # 任务类型：与 WorkBuddy 源同一条路径（collect_task_types，默认启发式加权），
-        # 有 LLM 分类器时当作 classifier 传入，没有就不传。
-        # ⚠️ 不要再走「收口适配器预分类结果」的老路：dumate 适配器不做任何预分类，
-        # 会话 dict 里也没有 task_type 键，直接收口会把全部会话塌成「其他」。
-        task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
-        source_meta.update(
-            {
-                "dumate_db": str(resolve_dumate_db()),
-                "local-only": True,
-                "source_notice": "本应用只录入本地会话数据",
-            }
-        )
-        print(
-            f"[INFO] 百度搭子数据源：{len(traces)} 条 trace / "
-            f"{len(db_data['sessions'])} 个会话"
-            f"（本地会话数据，只读 {resolve_dumate_db()}）",
-            file=sys.stderr,
-        )
-    elif args.source == "generic":
-        # ── 通用数据源（阶段 1 / P0）──
-        # 只读显式根目录，JSONL/SQLite 双 reader；金额恒为 0，
-        # token 逐条带 tokens_source 分层标记，报告端走 tokens_only 口径。
-        from adapters.generic import collect_generic, SUPPORTS_COST
-
-        # 能力显式声明：不靠「本期单价全 0」隐式推断（红线 1）
-        cost_supported = SUPPORTS_COST
-        traces, db_data = collect_generic(start_date, end_date)
-        sid_to_rawmodel = {
-            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
-        }
-        skill_usage = db_data.get("skill_usage") or {
-            "skills": {}, "active_days": sorted({t["date"] for t in traces})
-        }
-        outputs = db_data.get("outputs") or []
-        # 红线 6：通用源不构造 memory_logs，避免把用户目录内容带进报告
-        memory_logs = {}
-        source_meta.update(db_data.get("_meta") or {})
-        # 适配器不做预分类；与 dumate 同理必须无条件直采，
-        # 否则没有 task_type 键的会话会整列塌成「其他」。
-        task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
-
-    else:
-        # ── WorkBuddy 默认数据源 ──
-        db_data = collect_db_data(start_date, end_date)
-        sid_to_rawmodel = {
-            s["id"]: (s.get("model") or "default") for s in db_data["sessions"]
-        }
-        traces = collect_traces(start_date, end_date, sid_to_rawmodel)
-
-        # 补全会话：窗口内有 trace 但创建于窗口外的会话，确保 token 统计能关联到任务类型
-        try:
-            trace_sids = {t.get("session_id") for t in traces if t.get("session_id")}
-            existing_ids = {s["id"] for s in db_data["sessions"]}
-            missing = trace_sids - existing_ids
-            if missing:
-                # 只读打开：采集器只读 sessions 表，不需要写权限——可写连接会因 WAL
-                # 模式生成/持有 -wal -shm 文件，客户端持锁时读数会抛 SQLITE_BUSY。
-                cdb = sqlite3.connect(
-                    f"file:{DB_PATH.as_posix()}?mode=ro", uri=True
-                )
-                try:
-                    cdb.row_factory = sqlite3.Row
-                    ph = ",".join("?" * len(missing))
-                    for r in cdb.execute(
-                        f"SELECT * FROM sessions WHERE id IN ({ph}) AND deleted_at IS NULL",
-                        list(missing),
-                    ).fetchall():
-                        db_data["sessions"].append(
-                            {
-                                "id": r["id"],
-                                "cwd": r["cwd"],
-                                "title": r["title"] or "",
-                                "custom_title": r["custom_title"] or "",
-                                "status": r["status"],
-                                "created_at": r["created_at"],
-                                "created_date": ts_to_date(r["created_at"]),
-                                "updated_at": r["updated_at"],
-                                "mode": r["mode"],
-                                "model": r["model"],
-                                "is_background_automation": bool(
-                                    r["is_background_automation"]
-                                ),
-                            }
-                        )
-                finally:
-                    cdb.close()
-        except (sqlite3.Error, OSError) as e:
-            print(f"[WARN] supplementary sessions query: {e}", file=sys.stderr)
-
-        # 修复：补全会话后，把跨窗口长会话并入 sid_to_rawmodel 并重采 trace——
-        # 否则这些会话的 sid 在映射里缺失，raw_model 会退化成 trace 执行模型名，
-        # 导致通道误判（如 hy3 网关会话里的 deepseek-v4-pro 被错归、或反之）。
-        for s in db_data["sessions"]:
-            sid_to_rawmodel.setdefault(s["id"], s.get("model") or "default")
-        traces = collect_traces(start_date, end_date, sid_to_rawmodel)
-
-        skill_usage = collect_skill_usage(start_date, end_date)
-        outputs, memory_logs = collect_session_outputs(start_date, end_date)
-
-        # 任务类型分类：默认加权启发式；--task-classifier llm 时走可选 LLM 增强
-        task_types = collect_task_types(db_data["sessions"], classifier=task_classifier)
+    # ── 阶段 5（批次 5）：采集层已整体搬入 ca_collect ──
+    # 6 路分发 + WorkBuddy 三步时序由 collect_from_source 承载；门面 re-export 保持
+    # 旧符号可见。Bundle 解包回原名局部变量，后续统计/输出代码零改动。
+    bundle = collect_from_source(args, start_date, end_date, task_classifier)
+    traces = bundle.traces
+    db_data = {
+        "sessions": bundle.sessions,
+        "automation_runs": bundle.automation_runs,
+        "session_credits": bundle.session_credits,
+    }
+    sid_to_rawmodel = bundle.sid_to_rawmodel
+    skill_usage = bundle.skill_usage
+    outputs = bundle.outputs
+    memory_logs = bundle.memory_logs
+    task_types = bundle.task_types
+    cost_supported = bundle.cost_supported
+    source_meta = bundle.source_meta
 
     # 汇总
     if args.days is not None:
