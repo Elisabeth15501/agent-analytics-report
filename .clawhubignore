@@ -25,9 +25,9 @@
 #        | grep -vE '^(pytest\.ini|requirements-tests\.txt|docs_render\.py|LICENSE\.md|docs/OPTIMIZATION_PLAN\.md)$'
 #   3) 2026-10-08 实测：两条路径均得 38，diff 逐行完全一致。
 #   4) 口径差（必须逐条对齐后才可比，否则会误判规则模型有偏差）：
-#      - git ls-files 会列出「已被跟踪但被 .gitignore 命中」的历史文件，
-#        本仓 docs/OPTIMIZATION_PLAN.md 即是（.gitignore 末段排除 OPTIMIZATION_PLAN.md，
-#        但它已入 git 索引），CLI 走文件系统遍历故不收它 —— 复算时须手动再排掉。
+#      - 历史上 docs/OPTIMIZATION_PLAN.md 曾被 git 跟踪（.gitignore 对已跟踪文件
+#        不生效），2026-11-26 已 git rm --cached 移出索引；因 CLI 走文件系统遍历、
+#        本地仍留有该文件，故在下方「仅开发者可见文档」块显式排除，双保险。
 #      - git 只看「已跟踪 + 未忽略」，CLI 遍历真实文件系统；
 #        故复算前应确认无未跟踪的临时产物（.gitignore 已覆盖 .pt_* / allure-results/ 等）。
 #
@@ -68,6 +68,13 @@ scripts/fetch_pricing.py
 gen_report.py
 verify_privacy_parity.py
 scripts/gen_example_report.py
+
+# ---- 追加：仅开发者可见文档（非发布物）----
+# docs/OPTIMIZATION_PLAN.md 是内部优化方案（含 TRACE 内部评测分数、commit hash、
+# 技术债清单），面向维护者而非终端用户。.gitignore 已声明排除，但它曾先于规则
+# 被提交入库，2026-11-26 已 git rm --cached 移出索引；此处显式排除以覆盖
+# ClawHub 的文件系统遍历口径（本地磁盘仍存在该文件）。
+docs/OPTIMIZATION_PLAN.md
 
 # ---- 追加：ClawHub 安全扫描快照（v1.9.6 P0 防复发）----
 # verify_194.json 曾在 v1.9.5 被文件系统遍历误带进包，携带旧告警原文 → skillspector

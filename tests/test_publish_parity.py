@@ -173,8 +173,20 @@ def test_gitignore_gates():
             "测试报告.md",
             "TESTING.md",
             "TECH_DEBT.md",
+            "docs/OPTIMIZATION_PLAN.md",
         ]
         for p in must_ignore:
             assert _is_gitignored(p), f"{p} 未被 .gitignore 忽略，存在误发布风险"
+
+        # 已追踪文件不受 .gitignore 约束（历史残留根因）：开发者内部文档
+        # 必须同时不在 git 索引里，否则 git archive（SkillHub 发布源）仍会带出。
+        tracked = subprocess.run(
+            ["git", "-C", str(SKILL_DIR), "ls-files", "--error-unmatch",
+             "docs/OPTIMIZATION_PLAN.md"],
+            capture_output=True, text=True,
+        )
+        assert tracked.returncode != 0, (
+            "docs/OPTIMIZATION_PLAN.md 仍在 git 索引中，.gitignore 对它不生效，"
+            "会随 git archive 进入发布包；请先 git rm --cached" )
     except RuntimeError as e:
         pytest.skip(f"git 不可用，跳过 .gitignore 闸门校验：{e}")
