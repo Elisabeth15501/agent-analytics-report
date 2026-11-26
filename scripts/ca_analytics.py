@@ -122,8 +122,9 @@ def build_result_skeleton(args, window, bundle):
         },
         "task_types": bundle.task_types,
     }
-    # token 口径标记：qwenwork 连 token 都是字符估算，显式落 meta 位
-    if args.source == "qwenwork":
+    # token 口径标记：qwenwork 连 token 都是字符估算；generic 为双 reader 保守兜底，
+    # 两者都显式落 meta 位（与门面 main 内联段一致，批次6 切流前对齐）。
+    if args.source in ("qwenwork", "generic"):
         result["meta"]["tokens_source"] = "estimated"
     return result
 
@@ -150,8 +151,13 @@ def compute_totals(bundle):
     )
 
 
-def compute_transparency_counts(bundle, totals):
-    """⑪：未知模型 / 档位 / 失败调用计数 + 缓存率（对应原 744、746–758 行）。"""
+def compute_transparency_counts(bundle, totals, source):
+    """⑪：未知模型 / 档位 / 失败调用计数 + 缓存率（对应原 744、746–758 行）。
+
+    source 必须显式传入（与门面 args.source 同源）：dumate(OpenCode) 的 input 不含
+    cache.read，分母用 totals；其余源沿用 cached/input。不可从 source_meta 猜——
+    dumate 的 source_meta 只有 dumate_db/local-only/source_notice，没有 source 键。
+    """
     traces = bundle.traces
     # 1) 未知模型：raw_model 与 exec_model 都是字面量 "default"，采集器不知道真实模型
     unknown_model_traces = sum(1 for t in traces if t.get("is_unknown_model"))
@@ -163,9 +169,8 @@ def compute_transparency_counts(bundle, totals):
     # 3) 失败调用：单独成列而非剔除——同样消耗 token / 可能计费
     error_traces = sum(1 for t in traces if t.get("is_error"))
     # 缓存占比：dumate(OpenCode) 的 input 不含 cache.read，分母用 total；
-    # 其余源沿用 cached/input（与 collect_usage_data main 内联段一致）。
-    _is_dumate = str((bundle.source_meta or {}).get("source") or "") == "dumate"
-    _cache_denom = totals.total_tokens if _is_dumate else totals.total_input
+    # 其余源沿用 cached/input（与门面 main 内联段口径严格一致）。
+    _cache_denom = totals.total_tokens if source == "dumate" else totals.total_input
     cache_rate = (totals.total_cached / _cache_denom * 100) if _cache_denom else 0
     return TransparencyCounts(
         unknown_model_traces=unknown_model_traces,
