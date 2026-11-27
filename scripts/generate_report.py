@@ -3339,7 +3339,7 @@ def _render_anomaly_block(fmt, title, block, kind):
         else:
             lines.append(
                 f"**📊 {title}**：日级有效 Token 阈值 p50 = {thr.get('p50', 0):,.0f}、"
-                f"p95 = {thr.get('p95', 0):,.0f}；会话级 p95（调用次数）= {thr.get('session_p95', 0):,.0f}。"
+                f"p95 = {thr.get('p95', 0):,.0f}；会话级有效 Token p95 = {thr.get('session_p95', 0):,.0f}。"
             )
         lines.append("")
         daily = block.get("daily", [])
@@ -3385,7 +3385,7 @@ def _render_anomaly_block(fmt, title, block, kind):
     else:
         L.append(
             f"        <p><b>📊 {title}</b>：日级有效 Token 阈值 p50 = {thr.get('p50', 0):,.0f}、"
-            f"p95 = {thr.get('p95', 0):,.0f}；会话级 p95（调用次数）= {thr.get('session_p95', 0):,.0f}。</p>"
+            f"p95 = {thr.get('p95', 0):,.0f}；会话级有效 Token p95 = {thr.get('session_p95', 0):,.0f}。</p>"
         )
     daily = block.get("daily", [])
     if daily:

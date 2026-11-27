@@ -488,7 +488,11 @@ def _detect_daily_anomalies(series, is_cost):
     return daily, {"p50": p50, "p95": p95}
 
 def _detect_session_anomalies(session_stats, metric):
-    """会话级异常。metric='cost' 用 effective_cost；metric='tokens' 用 calls（调用次数）。
+    """会话级异常。metric='cost' 用 effective_cost；metric='tokens' 用 effective_tokens。
+
+    P0-1：分位数 / 筛选 / 展示三者同口径（均为 effective_tokens）。此前分位数与筛选
+    误用 calls（调用次数）、展示却用 effective_tokens，会把「调用多但 token 少」的会话
+    判为 token 异常、漏掉「调用少但 token 大」的会话。calls 仅作展示字段保留。
 
     返回 (session_anom_list[:10], session_p95)。session_anom 每项含 session_id/title/value/
     models，tokens 口径另含 calls。
@@ -500,11 +504,11 @@ def _detect_session_anomalies(session_stats, metric):
         anom = [{"session_id": r["session_id"], "title": r["title"], "value": r["effective_cost"],
                  "models": r["models"]} for r in srows if sp95 > 0 and r["effective_cost"] > sp95]
     else:
-        vals = sorted(r.get("calls", 0) for r in srows) if srows else []
+        vals = sorted(r.get("effective_tokens", 0) for r in srows) if srows else []
         sp95 = _percentile(vals, 95)
         anom = [{"session_id": r["session_id"], "title": r["title"], "value": r.get("effective_tokens", 0),
                  "calls": r.get("calls", 0), "models": r["models"]}
-                for r in srows if sp95 > 0 and r.get("calls", 0) > sp95]
+                for r in srows if sp95 > 0 and r.get("effective_tokens", 0) > sp95]
     anom.sort(key=lambda x: x["value"], reverse=True)
     return anom[:10], round(sp95, 2 if metric == "cost" else 1)
 

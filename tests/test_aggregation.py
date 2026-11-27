@@ -118,6 +118,34 @@ def test_detect_session_anomalies_cost(collector_module):
 
 
 @allure.feature("聚合与异常检测（Aggregation & Anomaly）")
+@allure.story("会话级异常检测")
+@allure.title("P0-1 token 会话异常：分位数/筛选/展示三者同口径（effective_tokens）")
+@allure.severity(allure.severity_level.CRITICAL)
+def test_session_anomaly_tokens_same_metric(collector_module):
+    """固定 fixture 锁住新旧口径差异：
+    - heavy_token: 调用 1 次但 token 巨大（新口径应判异常，旧 calls 口径漏报）
+    - many_calls: 调用 100 次但 token 很小（旧 calls 口径误报，新口径不报）
+    """
+    rows = [
+        {"session_id": "mid1", "title": "mid1", "effective_tokens": 1000, "calls": 10, "models": []},
+        {"session_id": "mid2", "title": "mid2", "effective_tokens": 1100, "calls": 11, "models": []},
+        {"session_id": "mid3", "title": "mid3", "effective_tokens": 900, "calls": 9, "models": []},
+        {"session_id": "heavy_token", "title": "heavy_token", "effective_tokens": 900000, "calls": 1, "models": []},
+        {"session_id": "many_calls", "title": "many_calls", "effective_tokens": 50, "calls": 100, "models": []},
+    ]
+    anom, sp95 = collector_module._detect_session_anomalies({"rows": rows}, metric="tokens")
+    ids = [a["session_id"] for a in anom]
+    # 分位数按 effective_tokens：900000 远超 p95，应被标出；展示 value 同为 effective_tokens
+    heavy = next((a for a in anom if a["session_id"] == "heavy_token"), None)
+    assert heavy is not None, f"调用少但 token 巨大的会话应判异常，实得 {ids}"
+    assert heavy["value"] == 900000 and heavy["calls"] == 1
+    # 调用多但 token 少的会话不应被误报（旧 calls 口径会把 100 判为超 p95）
+    assert "many_calls" not in ids, f"调用多但 token 少的会话不应误报，实得 {ids}"
+    # session_p95 单位与展示口径一致（token 量级，非 calls 量级）
+    assert sp95 > 1000, f"session_p95 应为 token 量级，实得 {sp95}"
+
+
+@allure.feature("聚合与异常检测（Aggregation & Anomaly）")
 @allure.story("双口径异常检测")
 @allure.title("detect_cost_anomalies 全免费（成本全 0）→ cost_all_zero 且 cost=None")
 @allure.severity(allure.severity_level.CRITICAL)

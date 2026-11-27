@@ -211,6 +211,24 @@ def test_cache_rate_source_isolation(facade):
 
 
 @allure.feature("批次6 main 流水线")
+@allure.title("N7b 旧两参调用兼容（source 默认 ''，口径同旧）")
+def test_transparency_counts_legacy_two_arg(facade):
+    """门面 re-export 的旧调用 cud.compute_transparency_counts(bundle, totals) 不得 TypeError。"""
+    from ca_types import CollectionBundle, Totals
+    totals = Totals(
+        total_tokens=100, total_input=40, total_output=20, total_cached=80,
+        total_effective=100, total_credits=0, total_cost=0,
+        total_input_cost=0, total_output_cost=0, total_effective_cost=0,
+        active_days=[],
+    )
+    bundle = CollectionBundle(
+        [], [], [], [], {}, {"skills": {}}, [], {}, {}, False, {})
+    legacy = facade.compute_transparency_counts(bundle, totals)
+    wb = facade.compute_transparency_counts(bundle, totals, "workbuddy")
+    assert legacy.cache_rate == pytest.approx(wb.cache_rate) == pytest.approx(200.0)
+
+
+@allure.feature("批次6 main 流水线")
 @allure.title("N8 build_result_skeleton 对 generic 也标 tokens_source")
 def test_skeleton_generic_token_source(facade):
     from ca_types import CollectionBundle

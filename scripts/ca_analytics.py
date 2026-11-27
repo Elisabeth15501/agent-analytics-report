@@ -151,12 +151,13 @@ def compute_totals(bundle):
     )
 
 
-def compute_transparency_counts(bundle, totals, source):
+def compute_transparency_counts(bundle, totals, source=""):
     """⑪：未知模型 / 档位 / 失败调用计数 + 缓存率（对应原 744、746–758 行）。
 
-    source 必须显式传入（与门面 args.source 同源）：dumate(OpenCode) 的 input 不含
-    cache.read，分母用 totals；其余源沿用 cached/input。不可从 source_meta 猜——
-    dumate 的 source_meta 只有 dumate_db/local-only/source_notice，没有 source 键。
+    source 默认 ""（兼容门面 re-export 的旧两参调用，按 input 分母 = 旧口径）；
+    显式传 "dumate" 时分母用 totals（OpenCode input 不含 cache.read）。与门面
+    args.source 同源。不可从 source_meta 猜——dumate 的 source_meta 只有
+    dumate_db/local-only/source_notice，没有 source 键。
     """
     traces = bundle.traces
     # 1) 未知模型：raw_model 与 exec_model 都是字面量 "default"，采集器不知道真实模型
