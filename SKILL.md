@@ -5,9 +5,9 @@ version: 1.9.15
 metadata: metadata.json
 requires: ["python3"]
 displayName: Agent 用量分析报告
-summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发（指 Agent 用量 / 成本 / Token 类报告）：生成（Agent）周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 四种数据源，以及按 WorkBuddy 布局读取目录的通用入口 dumate（--source 切换，归属未证实）。
+summary: 生成 Agent 用量与成本分析报告（日/周/月/年）：Token 消耗、任务类型、技能与自动化运行一目了然，异常自动预警。支持一句话触发（指 Agent 用量 / 成本 / Token 类报告）：生成（Agent）周报 / 月报 / 年报 / 日报。支持 WorkBuddy / Claude Code / Codex CLI / 千问办公 / 百度搭子（仅本地会话）/ generic 通用入口共六种数据源，--source 切换。
 description: |
-  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。数据源用 --source 切换：workbuddy（默认，读 ~/.workbuddy/）/ claude-code（读 ~/.claude/projects/ 的 JSONL 会话日志）/ codex（读 ~/.codex/sessions/ 的 rollout JSONL）/ qwenwork（读千问办公 ~/.qwenworkcn/ 的转录 + 调用日志 + agents.db，**在千问办公里跑就用它**）/ dumate（按 WorkBuddy 布局读取数据目录的通用入口，支持 DUMATE_HOME 覆盖；**数据归属未证实，报告内容可能完全是 WorkBuddy 的，勿当作百度搭子用量引用**）；更多 Agent 可扩展（详见 docs/ADAPTERS.md）。
+  Agent 用量分析报告生成器（支持日/周/月/年）。从本地数据源（traces、workbuddy.db、usage-log.json、会话目录）采集 Agent 使用数据，一键生成可读、可分享的多格式报告。数据源用 --source 切换：workbuddy（默认，读 ~/.workbuddy/）/ claude-code（读 ~/.claude/projects/ 的 JSONL 会话日志）/ codex（读 ~/.codex/sessions/ 的 rollout JSONL）/ qwenwork（读千问办公 ~/.qwenworkcn/ 的转录 + 调用日志 + agents.db，**在千问办公里跑就用它**）/ dumate（百度搭子专用 OpenCode SQLite reader，读 qianfan_desk_xdg/<hash>/data/opencode/opencode.db，支持 DUMATE_DB_PATH 覆盖；**本应用只录入本地会话数据**，SUPPORTS_COST=False 零金额 tokens-only）/ generic（通用入口，读显式根目录 JSONL/SQLite，零金额 tokens-only，auto 兜底）；更多 Agent 可扩展（详见 docs/ADAPTERS.md）。
 
   触发方式：当用户说「生成（Agent）周报 / 月报 / 年报 / 日报」「帮我出一份本周使用报告」「统计下这个月的 token 消耗」等、**且语境指向 Agent 用量 / 成本 / Token 时**触发，无需手动指定参数；若用户要的是通用周报 / 月报 / 财务报表，应先澄清数据源再采集。也可用 --period / --days / --start / --end 自定义周期与日期范围。
 
@@ -24,7 +24,7 @@ description: |
   限制说明：数据来自本机，需启用 trace 记录；成本按模型公开单价估算，以实际账单为准；免费/限免期内成本口径参考意义有限，报告会自动标注并引导查看 Token 口径。
 when_to_use: |
   当用户明确要求「生成 / 出一份 Agent 用量 / 成本 / Token / 周报 / 月报 / 年报 / 日报 / 使用情况报告」时触发；或要求「统计这段时间用了多少 token / 花了多少钱 / 哪些技能被反复调用 / 自动化跑得怎么样」时触发。
-  不适用：用户要的是「实时操控 / 修改 Agent 配置 / 直接调用某个模型 API」而非「基于本地已有数据出分析报告」；或要的是「通用数据分析 / 非 Agent 用量类报表」；或用户数据不在本机已支持的五种数据源之一且无导出文件（此时应建议 --data-dir / --from-json 或自写适配器，而不是硬采）。
+  不适用：用户要的是「实时操控 / 修改 Agent 配置 / 直接调用某个模型 API」而非「基于本地已有数据出分析报告」；或要的是「通用数据分析 / 非 Agent 用量类报表」；或用户数据不在本机已支持的六种数据源之一且无导出文件（此时应建议 --data-dir / --from-json 或自写适配器，而不是硬采）。
 tags:
   - workbuddy
   - usage-report
@@ -45,10 +45,10 @@ tags:
 
 1. **只读采集 + 离线优先**：采集阶段只读取本机数据（`~/.workbuddy` 等），默认零网络、不上传。仅当用户**显式传入** `--pricing-api` / `--task-llm-endpoint` 时才访问**用户自己的**端点；`--lookup-pricing online` 只本地拼接搜索链接、**不发请求**。绝不接受从 trace / 会话内容派生的 URL（防 SSRF）。
 2. **写文件必须用户逐条确认**：只有 `scripts/pricing.local.json`（补自定义模型单价）与 `scripts/task_rules.json`（调分类权重）会被写；且**必须先回显待写入清单、等用户确认后才落盘**。`pricing.local.json` 不进发布包、升级不覆盖；`task_rules.json` 是发布资产、升级会覆盖（改前备份）—— **该文件为纯 pattern 列表、不含可执行代码**，改动后任务分类结果会在报告标注 `_task_confidence`。
-3. **归属告警（dumate）**：`--source dumate` 按 WorkBuddy 布局读目录，**记录里没有任何字段能区分它来自百度搭子还是 WorkBuddy**（实测 `workbuddy.db` 217 会话匹配 qianfan/dumate 命中 0 行）。报告标题用中性措辞「**Dumate 数据源使用情况报告（数据归属未证实）**」，**不暗示确认的百度搭子归属**；报告数据来源行与清单强制带「归属未证实、勿当作百度搭子用量引用」告警，内容可能完全是 WorkBuddy 的。
+3. **本地会话边界（dumate）**：`--source dumate` 是**专用 OpenCode SQLite reader**，只读客户端本机的 `opencode.db`（`mode=ro`、session/message 白名单表），不联网、不上传。报告标题「**百度搭子使用情况报告（仅本地会话数据）**」，数据来源行与清单强制带「本应用只录入本地会话数据」标注；`SUPPORTS_COST=False`，报告零金额（tokens-only）。缓存占比用 OpenCode 口径 `cache.read / total`。
 4. **估算 ≠ 账单（qwenwork 等）**：服务端不回传 token 的源（千问办公），token 为**字符估算**、金额一律 `tokens_only`，**不可用于对账或账单核对**，真实消耗以官方账单为准。
 5. **成本口径分级标注**：默认 L2 估算（静态单价 × token），报告顶部横幅必须标注「不含服务端时段减免，请勿据此做预算或账单对账」；传入 `--import-official <xlsx>` 才升级为 L1 真值。
-6. **报告标题统一**：标题固定为 `Workbuddy使用情况报告`，周期由报告头部「报告类型」行以日历日期标识（日报/周报/月报/年报/自定义），不随周期带后缀。
+6. **报告标题按源区分**：标题由数据源决定——Workbuddy / Claude Code / Codex CLI / 千问办公 / 百度搭子（仅本地会话数据）各有专属标题（见 `generate_report.py:2750+` 的 `_SOURCE_LABELS`），generic 用 `generic 使用情况报告`；周期由报告头部「报告类型」行以日历日期标识（日报/周报/月报/年报/自定义），不随周期带后缀。
 
 ## 一·附 权限与作用域声明（最小权限）
 
@@ -56,10 +56,10 @@ tags:
 
 | 能力 | 作用域 | 触发条件 | 默认 |
 |------|--------|----------|------|
-| **文件读（只读）** | 本机用户数据目录：`~/.workbuddy/`、`~/.claude/projects/<cwd哈希>/*.jsonl`（仅一级工程目录）、`~/.codex/sessions/`、`~/.qwenworkcn/`、`DUMATE` 覆盖目录 | 采集阶段 | 始终；**不递归扫 `~/.workbuddy`**；claude-code/codex **仅枚举一级工程/日期目录**；**越窗会话元数据整体跳过**（见适配器日期窗口过滤） |
+| **文件读（只读）** | 本机用户数据目录：`~/.workbuddy/`、`~/.claude/projects/<cwd哈希>/*.jsonl`（仅一级工程目录）、`~/.codex/sessions/`、`~/.qwenworkcn/`、`DUMATE_DB_PATH` 指向的 opencode.db、`GENERIC_HOME` 显式根 | 采集阶段 | 始终；**不递归扫 `~/.workbuddy`**；claude-code/codex **仅枚举一级工程/日期目录**；**越窗会话元数据整体跳过**（见适配器日期窗口过滤） |
 | **文件写** | 仅 `--output` 指定路径（报告）；`~/.workbuddy/pricing.local.json` / `task_rules.json`（确认后） | 写配置须先回显清单 + 用户确认 | 主流程默认零写盘（仅 `--output` 指定路径时写报告） |
 | **网络** | 仅用户自己的端点：`--pricing-api` / `--task-llm-endpoint` | **显式传入**才联网；`--lookup-pricing online` 只拼链接、绝不发请求 | **零网络**；无内置默认端点；URL 绝不从 trace/会话派生（防 SSRF） |
-| **环境变量** | `CLAUDE_PROJECTS_DIR` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` | 仅用于指向数据源根 | 不读任何密钥 |
+| **环境变量** | `CLAUDE_PROJECTS_DIR` / `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `DUMATE_DB_PATH` / `GENERIC_HOME` / `OPENCLAW_HOME` | 仅用于指向数据源根 | 不读任何密钥 |
 
 - **默认能力（始终成立）**：本机只读采集 + 完全离线；默认不写任何文件（除非你显式传 `--output` 指定路径）、不发任何网络请求、不上传任何数据。
 - **可选网络（仅显式启用）**：仅当用户传入 `--pricing-api <URL>` 或 `--task-llm-endpoint <URL>`（均指向**用户自己的**端点）时才联网；`--lookup-pricing online` 只本地拼接搜索链接、**绝不发请求**。无内置默认端点，URL 绝不从 trace / 会话内容派生（防 SSRF）。
@@ -78,7 +78,7 @@ tags:
    - 兜底：用户没说就按周（最近 7 天）；无法解析时回问用户而非猜。
 2. **确定数据源**
    - 输入：用户在哪个 Agent 里跑。
-   - 行为：`--source` 默认 `workbuddy`；在千问办公内跑必须 `--source qwenwork`；想显示「百度搭子」标题用 `--source dumate`（见硬约束 3）。
+   - 行为：`--source` 默认 `workbuddy`；在千问办公内跑必须 `--source qwenwork`；读百度搭子本机 opencode.db 用 `--source dumate`（见硬约束 3）；无专用源时可显式 `--source generic` 或用默认 `auto` 按固定优先级探测 `workbuddy>claude-code>codex>qwenwork>dumate>generic`（全不命中回退 generic）。
    - 兜底：默认源采到 0 条数据时，提示可能选错源并列出可用源。
 3. **采集数据**
    - 命令（默认，输出到终端/stdout，零写盘）：`python scripts/collect_usage_data.py --source <src> --period week`
@@ -99,7 +99,8 @@ tags:
 | `claude-code` | `~/.claude/projects/**/*.jsonl` | 无技能/自动化维度；`CLAUDE_PROJECTS_DIR` 可覆盖 |
 | `codex` | `~/.codex/sessions/.../rollout-*.jsonl` | `CODEX_HOME` 可覆盖 |
 | `qwenwork` | `~/.qwenworkcn/`（转录 + runs 日志 + agents.db + outputs） | **千问办公里跑用它**；token 估算、金额 tokens_only |
-| `dumate` | `~/.workbuddy/`（按 WorkBuddy 布局） | 归属未证实，见硬约束 3；`DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` 可覆盖 |
+| `dumate` | `qianfan_desk_xdg/<hash>/data/opencode/opencode.db`（OpenCode SQLite） | 仅本地会话数据，零金额 tokens-only，见硬约束 3；`DUMATE_DB_PATH` 可覆盖 |
+| `generic` | 显式根目录（JSONL / SQLite 多 schema profile） | 零金额、tokens-only；auto 全不命中时的兜底源 |
 
 ### 计价模式（`--cost-mode`）
 - `auto`（默认）：一个单价都没命中时自动切 `tokens_only`。
@@ -107,7 +108,7 @@ tags:
 - `priced`：无论如何都按现状出金额。
 
 ### 时间窗口
-4 种预设（day/week/month/year）+ `--days N` + `--start/--end` 绝对范围；标题统一 `Workbuddy使用情况报告`，周期见报告头「报告类型」。
+4 种预设（day/week/month/year）+ `--days N` + `--start/--end` 绝对范围；标题按数据源区分（见硬约束 6），周期见报告头「报告类型」。
 
 ### 自定义模型（不碰发布版）
 只写本地 `pricing.local.json`（不进发布包、升级不丢）：`custom_local` 段（名带 `custom-local:` 前缀）或 `models` 段（裸名）。**普通用量报告严格只读、离线，不会触发本注入流程**；仅当你**明确发起「自定义模型注入」流程**（说一句"把我的自定义模型加进报告"）时，Agent 才会在你确认单价后写入。流程与确认闸门见 `references/add-custom-models.md` 与 `references/on-download-inject.md`。

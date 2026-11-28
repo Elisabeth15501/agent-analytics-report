@@ -15,8 +15,13 @@
 | Claude Code | `claude-code` | ✅ | `~/.claude/projects/**/*.jsonl` |
 | OpenAI Codex CLI | `codex` | ✅ | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` |
 | 千问办公 QwenWork | `qwenwork` | ✅（⚠️ token 为本地估算，**不可对账**） | `~/.qwenworkcn/projects/**/*.jsonl` + `logs/runs/` + `agents.db` |
-| 百度搭子 DuMate | `dumate` | ⚠️ 通用入口（数据归属未证实） | `~/.workbuddy/`（按 WorkBuddy 布局读取），支持 `DUMATE_HOME` / `DUMATE_OUTPUTS_DIR` 覆盖 |
+| 百度搭子 DuMate | `dumate` | ✅ 专用 reader（仅本地会话，零金额） | `qianfan_desk_xdg/<hash>/data/opencode/opencode.db`（OpenCode schema + SQLite），`DUMATE_DB_PATH` 覆盖 |
+| 通用入口 | `generic` | ✅（零金额、tokens-only，auto 兜底） | 显式根目录（JSONL / SQLite 多 schema profile），`GENERIC_HOME` 等环境变量指定 |
 | Trae 等 | — | ⬜ 未实现 | — |
+
+**自动探测**（`--source auto`）：固定优先级 `workbuddy > claude-code > codex > qwenwork > dumate > generic`，
+各源只判标志存在性、不打开库不读内容；全不命中才回退 `generic`（零金额、tokens-only）。
+显式 `--source` 完全绕过探测。
 
 **对账源**（叠加在 WorkBuddy 之上，把成本从估算升级为真值）：
 
@@ -33,17 +38,16 @@
   金额、花费速览、省钱杠杆等章节整章缺席，补价后自动恢复）。
   ⚠️ **千问办公服务端不回传 token，报告中的 token 为字符估算；估算值不可用于对账或账单核对**，真实消耗请以千问办公官方账单为准。详见
   [ADAPTERS.md](docs/ADAPTERS.md) §四、§4.6。
-- **百度搭子 DuMate**：`--source dumate` 是**读取 WorkBuddy 布局目录的通用
-  入口**——任何把数据写进 `~/.workbuddy/` 布局的第三方客户端都能用它采集
-  （token、成本、技能调用、自动化运行、会话、产出文件、记忆日志，维度同
-  WorkBuddy）；报告标题显示「百度搭子使用情况报告」，并支持 `DUMATE_HOME`
-  （覆盖数据目录）、`DUMATE_OUTPUTS_DIR`（单独覆盖产出 / 记忆目录）两个环境变量
-  （多账号 / 未来布局变更的隔离点）。
-  ⚠️**数据归属未证实，请勿当作「百度搭子用量」引用**：实测
-  `workbuddy.db` 217 个会话里百度搭子相关命中 0 行、1165 个 trace 无任何归属
-  字段（跑出的 16 会话 / 161 trace 100% 是 WorkBuddy 的），该客户端自有数据在
-  `~/.qianfan/` 下且为 yml 流转格式、不在本技能 trace schema 内。
-  详见 [ADAPTERS.md](docs/ADAPTERS.md) §6.1 / **§6.4（归因红线）**。
+- **百度搭子 DuMate**：`--source dumate` 是**专用 OpenCode SQLite reader**，读取
+  客户端在本机生成的 `qianfan_desk_xdg/<hash>/data/opencode/opencode.db`
+  （OpenCode schema 的 session / message 表，非 JSONL、非 WorkBuddy 布局）；
+  支持 `DUMATE_DB_PATH` 显式覆盖（多账号 / 迁移场景）。全链路 `mode=ro` 只读，
+  仅访问 session / message 白名单表，不联网、不上传。
+  ⚠️**本应用只录入本地会话数据**：报告标题为「百度搭子使用情况报告（仅本地会话数据）」，
+  并强制带「本应用只录入本地会话数据」标注；`SUPPORTS_COST=False`，报告为
+  tokens-only，**零金额**（底层模型标识无可核对刊例价，不做金额推断）。
+  缓存占比用 OpenCode 口径 `cache.read / total`（非其他源的 cached/input）。
+  详见 [ADAPTERS.md](docs/ADAPTERS.md) §六。
 - **官方用量导出**：本地 trace 的成本是**估算**（静态价表无法表达服务端时段减免，且漏记图像模型 / minimax-m3 约 8.7%）。
   导入官方导出后成本取「积分」字段，升为 **L1 真值**，报告新增 §3.5 双源对账。详见
   [ADAPTERS.md](docs/ADAPTERS.md) §二 / §五。
